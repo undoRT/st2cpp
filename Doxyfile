@@ -1,0 +1,16 @@
+
+PROJECT_NAME           = "st2cpp"
+PROJECT_BRIEF          = "Structured Text (IEC 61131-3) to C++17 Compiler"
+PROJECT_LOGO           = 
+OUTPUT_DIRECTORY       = docs
+INPUT                  = include/ src/ st2cpp_includes/ README.md
+RECURSIVE              = YES
+FILE_PATTERNS          = *.h *.hpp *.cpp *.md
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+GENERATE_TREEVIEW      = YES
+HAVE_DOT               = YES
+UML_LOOK               = YES
+CASE_SENSE_NAMES       = NO
+WARN_NO_PARAMDOC       = NO

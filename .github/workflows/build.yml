@@ -1,0 +1,244 @@
+name: Build and Release
+
+on:
+  push:
+
+  pull_request:
+
+  workflow_dispatch:
+
+jobs:
+
+  #
+  # =========================
+  # Linux builds (portable)
+  # =========================
+  #
+  build-linux:
+    name: Build ${{ matrix.name }}
+
+    runs-on: ${{ matrix.runner }}
+
+    container:
+      image: debian:11
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        include:
+          - name: linux-x64
+            runner: ubuntu-latest
+            archive_name: st2cpp-linux-x64.tar.gz
+            package_dir: st2cpp-linux-x64
+
+          - name: linux-arm64
+            runner: ubuntu-24.04-arm
+            archive_name: st2cpp-linux-arm64.tar.gz
+            package_dir: st2cpp-linux-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          apt update
+
+          apt install -y \
+            build-essential \
+            cmake \
+            g++
+
+      - name: Configure CMake
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTS=OFF \
+            -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc"
+
+      - name: Build
+        run: |
+          cmake --build build \
+            --target st2cpp \
+            -j$(nproc)
+
+      - name: Package
+        run: |
+          PACKAGE_DIR="${{ matrix.package_dir }}"
+
+          mkdir -p "$PACKAGE_DIR"
+
+          cp build/st2cpp "$PACKAGE_DIR/st2cpp"
+
+          cp README.md "$PACKAGE_DIR/"
+          cp LICENSE "$PACKAGE_DIR/"
+          cp COPYING.ST2CPP_TYPES "$PACKAGE_DIR/"
+
+          cp -r st2cpp_includes "$PACKAGE_DIR/"
+
+          if [ -d tests ]; then
+            cp -r tests "$PACKAGE_DIR/"
+          fi
+
+          tar czf "${{ matrix.archive_name }}" "$PACKAGE_DIR"
+
+      - name: Upload artifact
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+
+        with:
+          name: ${{ matrix.archive_name }}
+          path: ${{ matrix.archive_name }}
+          if-no-files-found: error
+
+  #
+  # =========================
+  # Windows + macOS builds
+  # =========================
+  #
+  build-native:
+    name: Build ${{ matrix.name }}
+
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        include:
+
+          - name: win-x64
+            runner: windows-latest
+            artifact_name: build/Release/st2cpp.exe
+            asset_name: st2cpp.exe
+            archive_name: st2cpp-win-x64.zip
+            package_dir: st2cpp-win-x64
+
+          - name: macos-arm64
+            runner: macos-latest
+            artifact_name: build/st2cpp
+            asset_name: st2cpp
+            archive_name: st2cpp-macos-arm64.tar.gz
+            package_dir: st2cpp-macos-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      
+      - name: Configure CMake
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF
+
+      
+      - name: Build
+        run: cmake --build build --config Release --target st2cpp -j
+
+      #
+      # macOS packaging
+      #
+      - name: Package macOS
+        if: runner.os == 'macOS'
+        run: |
+          PACKAGE_DIR="${{ matrix.package_dir }}"
+
+          mkdir -p "$PACKAGE_DIR"
+
+          cp "${{ matrix.artifact_name }}" \
+             "$PACKAGE_DIR/${{ matrix.asset_name }}"
+
+          cp README.md "$PACKAGE_DIR/"
+          cp LICENSE "$PACKAGE_DIR/"
+          cp COPYING.ST2CPP_TYPES "$PACKAGE_DIR/"
+
+          cp -r st2cpp_includes "$PACKAGE_DIR/"
+
+          if [ -d tests ]; then
+            cp -r tests "$PACKAGE_DIR/"
+          fi
+
+          tar czf "${{ matrix.archive_name }}" "$PACKAGE_DIR"
+
+      #
+      # Windows packaging
+      #
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $PACKAGE_DIR = "${{ matrix.package_dir }}"
+
+          New-Item `
+            -ItemType Directory `
+            -Force `
+            -Path $PACKAGE_DIR
+
+          Copy-Item `
+            "${{ matrix.artifact_name }}" `
+            "$PACKAGE_DIR/${{ matrix.asset_name }}"
+
+          Copy-Item "README.md" $PACKAGE_DIR
+          Copy-Item "LICENSE" $PACKAGE_DIR
+          Copy-Item "COPYING.ST2CPP_TYPES" $PACKAGE_DIR
+
+          Copy-Item `
+            "st2cpp_includes" `
+            $PACKAGE_DIR `
+            -Recurse
+
+          if (Test-Path "tests") {
+            Copy-Item "tests" $PACKAGE_DIR -Recurse
+          }
+
+          Compress-Archive `
+            -Path $PACKAGE_DIR `
+            -DestinationPath "${{ matrix.archive_name }}"
+
+      - name: Upload artifact
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+
+        with:
+          name: ${{ matrix.archive_name }}
+          path: ${{ matrix.archive_name }}
+          if-no-files-found: error
+
+  #
+  # =========================
+  # GitHub Release
+  # =========================
+  #
+  release:
+    needs:
+      - build-linux
+      - build-native
+
+    runs-on: ubuntu-latest
+
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+
+        with:
+          path: artifacts
+
+      - name: Debug
+        run: |
+          find artifacts -type f
+
+      - name: Create Release
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --title "st2cpp ${{ github.ref_name }}" \
+            --notes "st2cpp ${{ github.ref_name }}" \
+            artifacts/st2cpp-linux-x64.tar.gz/st2cpp-linux-x64.tar.gz \
+            artifacts/st2cpp-linux-arm64.tar.gz/st2cpp-linux-arm64.tar.gz \
+            artifacts/st2cpp-win-x64.zip/st2cpp-win-x64.zip \
+            artifacts/st2cpp-macos-arm64.tar.gz/st2cpp-macos-arm64.tar.gz
+
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
