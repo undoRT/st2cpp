@@ -91,22 +91,20 @@ CodegenResult CodeGenerator::generate(const TranslationUnit& tu,
       }
    }
 
+   for (const auto& sec : tu.globals) {
+      for (const auto& d : sec.decls) {
+         std::string varName = normalizeIdent(d.name);
+         std::string varType = mapType(d.type);
+         m_varTypes[varName] = varType;
+      }
+   }
+
    // Separate structs
    std::vector<StructType> simpleStructs;  // Without FB members
    std::vector<StructType> complexStructs; // With FB members
 
    for (const auto& st : tu.structs) {
-      bool hasFB = false;
-      for (const auto& member : st.members) {
-         if (member.type.base == BaseType::NAMED) {
-            std::string typeName = normalizeType(member.type.name);
-            if (m_isFB.find(typeName) != m_isFB.end()) {
-               hasFB = true;
-               break;
-            }
-         }
-      }
-      if (hasFB) {
+      if (structContainsFB(normalizeType(st.name), tu)) {
          complexStructs.push_back(st);
       } else {
          simpleStructs.push_back(st);
@@ -1103,29 +1101,58 @@ std::string CodeGenerator::mapBaseType(BaseType b) const
 
 /**
  * @brief Generate STArray template type for array dimensions
- *
- * Creates an STArray<T, Low, High> template instantiation for
- * a 1-dimensional array. The array bounds are extracted from
- * the AST literal expressions.
- *
+ * 
+ * Creates nested STArray templates for multidimensional arrays.
+ * 
  * @param baseType The base element type (already normalized)
  * @param tr Type reference containing array dimensions
- * @return C++ type string like "STArray<Int16, 0, 10>"
+ * @return C++ type string like "STArray<Int16, 0, 10>" or 
+ *         "STArray<STArray<Int16, 0, 4>, 1, 3>"
  */
 std::string CodeGenerator::getArrayType(const std::string& baseType, const TypeRef& tr) const
 {
-   const auto& dim = tr.arrayDims[0]; // Only 1D arrays supported currently
-
-   // Extract low and high bounds from AST literals
-   std::string low, high;
-   if (auto* lit = std::get_if<LiteralExpr>(&dim.low->node)) {
-      low = lit->value;
-   }
-   if (auto* lit = std::get_if<LiteralExpr>(&dim.high->node)) {
-      high = lit->value;
+   if (tr.arrayDims.empty()) {
+      return baseType;
    }
 
-   return "STArray<" + baseType + ", " + low + ", " + high + ">";
+   // Start from the innermost dimension and build outward
+   std::string innerType = baseType;
+
+   // Process dimensions from last to first (innermost to outermost)
+   for (auto it = tr.arrayDims.rbegin(); it != tr.arrayDims.rend(); ++it) {
+      const auto& dim = *it;
+
+      // Extract low and high bounds from AST literals
+      std::string low, high;
+
+      // Handle low bound
+      if (auto* lit = std::get_if<LiteralExpr>(&dim.low->node)) {
+         low = lit->value;
+      } else if (auto* unary = std::get_if<UnaryExpr>(&dim.low->node)) {
+         // Handle negative numbers: -2
+         if (unary->op == "-") {
+            if (auto* lit = std::get_if<LiteralExpr>(&unary->operand->node)) {
+               low = "-" + lit->value;
+            }
+         }
+      }
+
+      // Handle high bound
+      if (auto* lit = std::get_if<LiteralExpr>(&dim.high->node)) {
+         high = lit->value;
+      } else if (auto* unary = std::get_if<UnaryExpr>(&dim.high->node)) {
+         if (unary->op == "-") {
+            if (auto* lit = std::get_if<LiteralExpr>(&unary->operand->node)) {
+               high = "-" + lit->value;
+            }
+         }
+      }
+
+      // Wrap the current inner type with another STArray
+      innerType = "STArray<" + innerType + ", " + low + ", " + high + ">";
+   }
+
+   return innerType;
 }
 
 /**
@@ -1173,6 +1200,19 @@ std::string CodeGenerator::getBaseTypeName(const TypeRef& tr) const
       return tr.name;
    }
    return mapBaseType(tr.base);
+}
+
+/**
+ * @param calleeName
+ */
+std::string CodeGenerator::getBaseFBName(const std::string& calleeName) const
+{
+   // If it contains "[" it is an arratay access: extract the name before the parenthesis
+   size_t bracketPos = calleeName.find('[');
+   if (bracketPos != std::string::npos) {
+      return calleeName.substr(0, bracketPos);
+   }
+   return calleeName;
 }
 
 /**
@@ -1364,6 +1404,33 @@ std::string CodeGenerator::getUniqueTempName(const std::string& baseName)
 // ============================================================================
 
 /**
+ * @brief Extract the element type from an STArray template string
+ * 
+ * Parses a string like "STArray<MATHPROCESSOR, 1, 2>" and returns "MATHPROCESSOR".
+ * Used to resolve the underlying FB type when calling methods on array elements.
+ * 
+ * @param arrayType The STArray type string (e.g., "STArray<MATHPROCESSOR, 1, 2>")
+ * @return The extracted element type, or the original string if not an STArray
+ */
+static std::string extractArrayElementType(const std::string& arrayType)
+{
+   const std::string prefix = "STArray<";
+   if (arrayType.rfind(prefix, 0) != 0) {
+      return arrayType;
+   }
+   size_t start = prefix.length();
+   size_t comma = arrayType.find(',', start);
+   if (comma == std::string::npos) {
+      return arrayType;
+   }
+   std::string elem = arrayType.substr(start, comma - start);
+   // Trim spaces
+   elem.erase(0, elem.find_first_not_of(" \t"));
+   elem.erase(elem.find_last_not_of(" \t") + 1);
+   return elem;
+}
+
+/**
  * @brief Generate C++ code for a single statement
  *
  * Handles all statement types including assignments, function/FB calls,
@@ -1398,14 +1465,24 @@ void CodeGenerator::genStmt(const Stmt& stmt)
                if (varIt != m_varTypes.end()) {
                   calleeType = varIt->second;
                } else {
-                  calleeType = calleeName;
+                  // Check if it's an array access (e.g., PROCESSORS[1])
+                  std::string baseName = getBaseFBName(calleeName);
+                  auto baseIt = m_varTypes.find(baseName);
+                  if (baseIt != m_varTypes.end()) {
+                     calleeType = baseIt->second;
+                  } else {
+                     calleeType = calleeName;
+                  }
                }
 
-               // Look up function signature
-               std::string calleeKey = normalizeIdent(calleeType);
+               // If calleeType is an STArray, extract the element type (the FB type)
+               std::string elementType = extractArrayElementType(calleeType);
+
+               // Look up function signature using the element type
+               std::string calleeKey = normalizeIdent(elementType);
                auto sigIt = m_signatures.find(calleeKey);
-               if (sigIt == m_signatures.end() && !calleeType.empty()) {
-                  std::string upperName = calleeType;
+               if (sigIt == m_signatures.end() && !elementType.empty()) {
+                  std::string upperName = elementType;
                   upperName[0] = std::toupper(upperName[0]);
                   sigIt = m_signatures.find(upperName);
                }
@@ -1417,6 +1494,9 @@ void CodeGenerator::genStmt(const Stmt& stmt)
 
                // CASE 1: Direct Function Block call (e.g., myFB(10, false))
                if (isFunctionBlock && !call->args.empty() && !isMethodCall) {
+                  // Get the base FB name (without array indices)
+                  std::string baseFBName = getBaseFBName(calleeName);
+
                   // Handle positional arguments (inputs) -> setters
                   if (!call->args.empty() && !call->args[0].named) {
                      size_t idx = 0;
@@ -1429,6 +1509,7 @@ void CodeGenerator::genStmt(const Stmt& stmt)
                               throw std::runtime_error(oss.str());
                            }
                            std::string value = genExpr(*call->args[idx].value);
+                           // Use calleeName (includes array index) for the actual call
                            m_src << ind() << calleeName << ".set_" << normalizeIdent(param.name) << "(" << value << ");\n";
                            idx++;
                         }
@@ -1724,39 +1805,87 @@ void CodeGenerator::genRepeat(const RepeatStmt& s)
 }
 
 /**
- * @brief Generate C++ switch statement
- *
- * Converts a CASE statement into a C++ switch.
- * Range cases are not directly supported in C++ switch,
- * so they are emitted as comments with a TODO marker.
+ * @brief Generate C++ code for CASE statement
+ * 
+ * Converts a CASE statement into if-else if chain to support ranges.
+ * C++ switch doesn't support ranges, so we use if-else instead.
+ * 
+ * Example ST:
+ *   CASE value OF
+ *       1, 3, 5:     result := 1;
+ *       10..20:      result := 2;
+ *       30..40, 50:  result := 3;
+ *       ELSE         result := 0;
+ *   END_CASE
+ * 
+ * Generated C++:
+ *   if (value == 1 || value == 3 || value == 5) {
+ *       result = 1;
+ *   } else if (value >= 10 && value <= 20) {
+ *       result = 2;
+ *   } else if ((value >= 30 && value <= 40) || value == 50) {
+ *       result = 3;
+ *   } else {
+ *       result = 0;
+ *   }
  *
  * @param s CaseStmt AST node to generate
  */
 void CodeGenerator::genCase(const CaseStmt& s)
 {
-   m_src << ind() << "switch (" << genExpr(*s.selector) << ") {\n";
+   bool firstBranch = true;
+
    for (const auto& branch : s.branches) {
       if (branch.values.empty()) {
-         m_src << ind() << "default:\n";
+         // ELSE branch
+         if (firstBranch) {
+            // No conditions before ELSE - generate dummy if(false)
+            m_src << ind() << "if (false) {\n";
+         } else {
+            m_src << ind() << "} else {\n";
+         }
+         firstBranch = false;
       } else {
+         // Build condition expression for this branch
+         std::string condition;
+         bool firstValue = true;
+
          for (const auto& cv : branch.values) {
+            if (!firstValue) {
+               condition += " || ";
+            }
+            firstValue = false;
+
             if (cv.high) {
-               // Range case - not directly supported in C++
-               m_src << ind() << "// range " << genExpr(*cv.low) << ".." << genExpr(*cv.high) << "\n";
-               m_src << ind() << "default: // TODO: range case\n";
+               // Range case: low..high
+               condition += "(" + genExpr(*s.selector) + " >= " + genExpr(*cv.low) + " && " + genExpr(*s.selector)
+                            + " <= " + genExpr(*cv.high) + ")";
             } else {
-               m_src << ind() << "case " << genExpr(*cv.low) << ":\n";
+               // Single value case
+               condition += genExpr(*s.selector) + " == " + genExpr(*cv.low);
             }
          }
+
+         if (firstBranch) {
+            m_src << ind() << "if (" << condition << ") {\n";
+            firstBranch = false;
+         } else {
+            m_src << ind() << "} else if (" << condition << ") {\n";
+         }
       }
+
+      // Generate branch body
       push();
-      for (const auto& st : branch.body) {
-         genStmt(*st);
+      for (const auto& stmt : branch.body) {
+         genStmt(*stmt);
       }
-      m_src << ind() << "break;\n";
       pop();
    }
-   m_src << ind() << "}\n";
+
+   // Close the last if/else chain
+   if (!firstBranch) {
+      m_src << ind() << "}\n";
+   }
 }
 
 // ============================================================================
@@ -1941,16 +2070,23 @@ std::string CodeGenerator::genExpr(const Expr& expr)
          } else if constexpr (std::is_same_v<T, CastExpr>) {
             return "static_cast<" + mapType(e.targetType) + ">(" + genExpr(*e.operand) + ")";
          } else if constexpr (std::is_same_v<T, ArrayInitExpr>) {
-            std::string result = "{{";
+            std::string result = "{";
             bool first = true;
             for (const auto& elem : e.elements) {
                if (!first) {
                   result += ", ";
                }
                first = false;
-               result += genExpr(*elem);
+
+               // Check if the element is itself an ArrayInitExpr (nested)
+               if (auto* nestedArray = std::get_if<ArrayInitExpr>(&elem->node)) {
+                  // Recursively generate nested initializer
+                  result += genExpr(*elem);
+               } else {
+                  result += genExpr(*elem);
+               }
             }
-            result += "}}"; // Double braces for std::array initialization
+            result += "}";
             return result;
          }
          return "";
@@ -2110,6 +2246,15 @@ std::vector<GeneratedFile> CodeGenerator::generateModular(const TranslationUnit&
       }
    }
 
+   // Step 4.5: Register global variable types (so they can be resolved later)
+   for (const auto& sec : tu.globals) {
+      for (const auto& d : sec.decls) {
+         std::string varName = normalizeIdent(d.name);
+         std::string varType = mapType(d.type);
+         m_varTypes[varName] = varType;
+      }
+   }
+
    // Step 5: Build dependency graph
    auto dependencies = buildFBDependencies(tu);
 
@@ -2177,6 +2322,47 @@ std::vector<GeneratedFile> CodeGenerator::generateModular(const TranslationUnit&
 }
 
 /**
+ * @brief Check if a struct type contains any FB (directly or indirectly)
+ * @param structName Name of the struct to check
+ * @param tu Translation unit for lookup
+ * @return true if the struct contains any FB (directly or nested)
+ */
+bool CodeGenerator::structContainsFB(const std::string& structName, const TranslationUnit& tu) const
+{
+   // Find the struct definition
+   const StructType* targetStruct = nullptr;
+   for (const auto& st : tu.structs) {
+      if (normalizeType(st.name) == structName) {
+         targetStruct = &st;
+         break;
+      }
+   }
+
+   if (!targetStruct) {
+      return false;
+   }
+
+   // Check each member
+   for (const auto& member : targetStruct->members) {
+      if (member.type.base == BaseType::NAMED) {
+         std::string memberType = normalizeType(member.type.name);
+
+         // Direct FB
+         if (m_isFB.find(memberType) != m_isFB.end()) {
+            return true;
+         }
+
+         // Recursive check: is this member a struct that contains FB?
+         if (structContainsFB(memberType, tu)) {
+            return true;
+         }
+      }
+   }
+
+   return false;
+}
+
+/**
  * @brief Generate SimpleGVLs header file (ENUM + simple STRUCT + simple globals)
  * 
  * This file contains:
@@ -2223,26 +2409,20 @@ std::string CodeGenerator::generateSimpleGVLsHeader(const TranslationUnit& tu)
       out << "// END ENUM " << upperName << "\n\n";
    }
 
-   // Build struct dependencies and order them
-   auto structDeps = buildStructDependencies(tu);
+   // Build a cache for structContainsFB to avoid repeated recursion
+   std::unordered_map<std::string, bool> structContainsFBCache;
+   for (const auto& st : tu.structs) {
+      std::string structName = normalizeType(st.name);
+      structContainsFBCache[structName] = structContainsFB(structName, tu);
+   }
 
    // Separate structs with and without FB members
    std::vector<StructType> simpleStructs;  // Without FB
    std::vector<StructType> complexStructs; // With FB
 
    for (const auto& st : tu.structs) {
-      bool hasFB = false;
-      for (const auto& member : st.members) {
-         if (member.type.base == BaseType::NAMED) {
-            std::string typeName = normalizeType(member.type.name);
-            if (m_isFB.find(typeName) != m_isFB.end()) {
-               hasFB = true;
-               break;
-            }
-         }
-      }
-
-      if (hasFB) {
+      std::string structName = normalizeType(st.name);
+      if (structContainsFBCache[structName]) {
          complexStructs.push_back(st);
       } else {
          simpleStructs.push_back(st);
@@ -2280,7 +2460,7 @@ std::string CodeGenerator::generateSimpleGVLsHeader(const TranslationUnit& tu)
             if (!isFBType) {
                std::string ctype = mapType(d.type);
                std::string upperName = normalizeIdent(d.name);
-
+               m_varTypes[upperName] = ctype;
                if (!d.type.arrayDims.empty()) {
                   std::string arrayDecl = ctype + " " + upperName;
                   if (d.initialValue) {
@@ -2333,21 +2513,17 @@ std::string CodeGenerator::generateGVLsHeader(const TranslationUnit& tu)
       out << "namespace " << m_namespace << " {\n\n";
    }
 
+   // Build cache for structContainsFB
+   std::unordered_map<std::string, bool> structContainsFBCache;
+   for (const auto& st : tu.structs) {
+      std::string structName = normalizeType(st.name);
+      structContainsFBCache[structName] = structContainsFB(structName, tu);
+   }
+
    // Generate STRUCTs that contain FB members
    for (const auto& st : tu.structs) {
-      bool hasFB = false;
-      for (const auto& member : st.members) {
-         if (member.type.base == BaseType::NAMED) {
-            std::string typeName = normalizeType(member.type.name);
-            if (m_isFB.find(typeName) != m_isFB.end()) {
-               hasFB = true;
-               break;
-            }
-         }
-      }
-
-      // Structs with FB go in GVLs.hpp
-      if (hasFB) {
+      std::string structName = normalizeType(st.name);
+      if (structContainsFBCache[structName]) { // ← QUI LA CORREZIONE
          std::string upperName = normalizeType(st.name);
          out << "// STRUCT " << upperName << " (contains Function Blocks)\n";
          out << "struct " << upperName << " {\n";
@@ -2368,15 +2544,24 @@ std::string CodeGenerator::generateGVLsHeader(const TranslationUnit& tu)
          for (const auto& d : sec.decls) {
             // Check if this global involves a FB type
             bool isComplex = false;
-            if (d.type.base == BaseType::NAMED) {
-               std::string typeName = normalizeType(d.type.name);
+
+            // Create a copy of the type to analyze
+            TypeRef analyzedType = d.type;
+
+            // Strip array dimensions to get to the base element type
+            while (!analyzedType.arrayDims.empty()) {
+               analyzedType.arrayDims.pop_back();
+            }
+
+            // Now check if the base type is a FB
+            if (analyzedType.base == BaseType::NAMED) {
+               std::string typeName = normalizeType(analyzedType.name);
                if (m_isFB.find(typeName) != m_isFB.end()) {
                   isComplex = true;
                }
             }
-
-            // Also check array of FB
-            if (!isComplex && !d.type.arrayDims.empty() && d.type.base == BaseType::NAMED) {
+            // Also check direct FB type (non-array)
+            else if (d.type.base == BaseType::NAMED && !isComplex) {
                std::string typeName = normalizeType(d.type.name);
                if (m_isFB.find(typeName) != m_isFB.end()) {
                   isComplex = true;
@@ -2387,6 +2572,7 @@ std::string CodeGenerator::generateGVLsHeader(const TranslationUnit& tu)
             if (isComplex) {
                std::string ctype = mapType(d.type);
                std::string upperName = normalizeIdent(d.name);
+               m_varTypes[upperName] = ctype;
                out << "extern " << ctype << " " << upperName << ";\n";
             }
          }
@@ -2446,6 +2632,7 @@ std::string CodeGenerator::generateGVLsSource(const TranslationUnit& tu)
             if (isComplex) {
                std::string ctype = mapType(d.type);
                std::string upperName = normalizeIdent(d.name);
+               m_varTypes[upperName] = ctype;
                if (d.initialValue) {
                   out << ctype << " " << upperName << " = " << genExpr(*d.initialValue) << ";\n";
                } else {
@@ -2869,6 +3056,9 @@ std::string CodeGenerator::generateProgramHeader(const POU& pou)
    // Member variables
    for (const auto& sec : pou.varSections) {
       for (const auto& d : sec.decls) {
+         std::string varName = normalizeIdent(d.name);
+         std::string varType = mapType(d.type);
+         m_varTypes[varName] = varType;
          out << "    " << memberDecl(d) << ";\n";
       }
    }
@@ -3227,7 +3417,7 @@ std::string CodeGenerator::generateHeaderComment() const
    out << " * This file was generated by st2cpp, the Structured Text to C++ compiler.\n";
    out << " * Any manual changes will be overwritten the next time the source is processed.\n";
    out << " *\n";
-   out << " * @copyright Copyright (c) 2026 undoRT\n";
+   out << " * @copyright Copyright (c) 2026 Salvatore Bamundo\n";
    out << " * @license SPDX-License-Identifier: GPL-3.0-or-later\n";
    out << " *\n";
    out << " * st2cpp - Structured Text to C++ Compiler\n";

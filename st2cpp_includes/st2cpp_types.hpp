@@ -18,6 +18,7 @@
 #include <array>
 #include <algorithm>
 #include <initializer_list>
+#include <stdexcept>
 
 namespace st2cpp {
 
@@ -102,25 +103,19 @@ using VAR_INOUT = VarInOut<T>;
 // ============================================================================
 
 /**
-* @brief Array template compatible with IEC 61131-3 array semantics
-* @tparam T Type of array elements
-* @tparam Low Lower bound index (inclusive)
-* @tparam High Upper bound index (inclusive)
-*
-* This array type supports:
-* - Arbitrary lower bounds (not just 0)
-* - Runtime bounds checking (optional)
-* - STArray initialization syntax
-* - Direct element access via operator[]
-* - Size() method returning number of elements
-* - Low() and High() methods returning bounds
-*
-* Example:
-* STArray<Int, 1, 10> arr; // Array with indices 1..10
-* arr[1] = 42; // Valid
-* arr[10] = 100; // Valid
-* // arr[0] would be out of bounds
-*/
+ * @brief Array template compatible with IEC 61131-3 array semantics
+ * @tparam T Type of array elements (can be another STArray for multi-dim)
+ * @tparam Low Lower bound index (inclusive)
+ * @tparam High Upper bound index (inclusive)
+ *
+ * Supports multidimensional arrays through nesting:
+ *   STArray<STArray<Int, 0, 4>, 1, 3>  // 3x5 array (indices [1..3][0..4])
+ *
+ * Example usage:
+ *   STArray<Int, 1, 10> arr1d;                   // 1D array
+ *   STArray<STArray<Int, 0, 4>, 1, 3> arr2d;     // 2D array
+ *   arr2d[2][3] = 42;                            // Access element
+ */
 template<typename T, int Low, int High>
 class STArray
 {
@@ -140,6 +135,7 @@ public:
    // Constructors
    STArray() = default;
 
+   // Initializer list constructor (for 1D arrays)
    STArray(std::initializer_list<T> init)
    {
       size_t i = 0;
@@ -150,24 +146,20 @@ public:
       }
    }
 
-   // Element access with bounds checking (optional, enable with -DNDEBUG to disable)
+   // Element access with bounds checking
    reference operator[](int index)
    {
-#ifndef NDEBUG
       if (index < Low || index > High) {
          throw std::out_of_range("STArray index out of bounds");
       }
-#endif
       return data[index - Low];
    }
 
    const_reference operator[](int index) const
    {
-#ifndef NDEBUG
       if (index < Low || index > High) {
          throw std::out_of_range("STArray index out of bounds");
       }
-#endif
       return data[index - Low];
    }
 

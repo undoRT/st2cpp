@@ -852,7 +852,7 @@ TypeRef Parser::parseBaseTypeRef()
 }
 
 /**
- * @brief Parse an array initializer: [ expr, expr, ... ]
+ * @brief Parse an array initializer: [ expr, expr, ... ] or [[...], [...]]
  * @return Expression AST node (ArrayInitExpr)
  */
 std::shared_ptr<Expr> Parser::parseArrayInitializer()
@@ -864,7 +864,13 @@ std::shared_ptr<Expr> Parser::parseArrayInitializer()
 
    if (!check(TokenType::RBRACKET)) {
       do {
-         elements.push_back(parseExpr());
+         // Check if this is a nested array initializer (for multi-dim arrays)
+         if (check(TokenType::LBRACKET)) {
+            // Recursively parse nested array initializer
+            elements.push_back(parseArrayInitializer());
+         } else {
+            elements.push_back(parseExpr());
+         }
       } while (match(TokenType::COMMA));
    }
 

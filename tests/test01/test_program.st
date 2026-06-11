@@ -51,6 +51,13 @@ TYPE MathEmbedded :
     END_STRUCT;
 END_TYPE
 
+
+TYPE struWithFB :
+    STRUCT
+        tryStruct : MathEmbedded;
+    END_STRUCT
+END_TYPE
+
 (* ============================================================================
 *  GLOBAL VARIABLES
 * -============================================================================
@@ -149,6 +156,7 @@ FUNCTION_BLOCK MathProcessor
         END_VAR
         VAR
             Temp : INT;
+            Resukt : INT;
         END_VAR
 
         IF NOT Enable THEN
@@ -174,6 +182,29 @@ FUNCTION_BLOCK MathProcessor
         ProcessedValue := InternalValue;
         IsValid := TRUE;
         Process := InternalValue;
+        
+        CASE value OF
+            1, 3, 5:
+                result := 1;
+            10..20:
+                result := 2;
+            30..40, 50:
+                result := 3;
+            ELSE
+                result := 0;
+        END_CASE
+
+        CASE value OF
+            1, 3, 5:
+                result := 1;
+            10:
+                result := 2;
+            30, 40, 50:
+                result := 3;
+            ELSE
+                result := 0;
+        END_CASE
+
     END_METHOD
 
     METHOD GetStatistics : INT
@@ -341,4 +372,5 @@ PROGRAM MainTest
         Processor.Process(Value := ResultValue);
         ResultValue := ResultValue + Processor.Result;
     END_WHILE;
+
 END_PROGRAM

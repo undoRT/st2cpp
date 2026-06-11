@@ -441,11 +441,20 @@ Few coding standards:
 
 ## Known Limitations (Beta)
 
-- 1D arrays only (multi-dimensional in progress)
 - Limited error recovery in parser (first error stops compilation)
 - No support for `ARRAY[*]` (variable-length arrays)
 - No complete semantic analysis (type checking in progress)
 - No support for `CONSTANT` arrays with non-literal bounds
+- VAR_CONFIG not yet implemented
+- Asynchronous function blocks not supported
+
+## Tested With
+
+- Simple FBs with VAR_INPUT/VAR_OUTPUT
+- Nested structs containing FBs
+- Functions with IN_OUT parameters
+- ENUM types with explicit values
+- Array with different dimensions and array of function blocks
 
 ## License
 

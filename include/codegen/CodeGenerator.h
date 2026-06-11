@@ -212,6 +212,7 @@ private:
    std::string getArrayType(const std::string& base, const TypeRef& tr) const;
    std::string mapType(const TypeRef& tr) const;
    std::string getBaseTypeName(const TypeRef& tr) const;
+   std::string getBaseFBName(const std::string& calleeName) const;
    bool isVoidType(const TypeRef& tr) const;
 
    // ============================================================================
@@ -254,6 +255,7 @@ private:
    std::unordered_map<std::string, std::unordered_set<std::string>> buildFBDependencies(const TranslationUnit& tu);
    std::vector<std::string> topologicalSort(const std::unordered_map<std::string, std::unordered_set<std::string>>& dependencies);
    std::vector<GeneratedFile> generateModular(const TranslationUnit& tu, const std::string& outputDir);
+   bool structContainsFB(const std::string& structName, const TranslationUnit& tu) const;
    std::string generateSimpleGVLsHeader(const TranslationUnit& tu);
    std::string generateGVLsHeader(const TranslationUnit& tu);
    std::string generateGVLsSource(const TranslationUnit& tu);
