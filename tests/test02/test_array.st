@@ -4,19 +4,19 @@
 
 TYPE Color :
     (
-        Red,
-        Green := 5,
-        Blue,
-        Yellow := 10
+    Red,
+    Green := 5,
+    Blue,
+    Yellow := 10
     );
 END_TYPE
 
 TYPE Status :
     (
-        Idle := 0,
-        Running := 1,
-        Stopped := 2,
-        Error := 3
+    Idle := 0,
+    Running := 1,
+    Stopped := 2,
+    Error := 3
     );
 END_TYPE
 
@@ -68,20 +68,20 @@ FUNCTION_BLOCK MathProcessor
         a : INT;
         b : INT;
     END_VAR
-    
+
     VAR_OUTPUT
         sum : INT;
         product : INT;
     END_VAR
-    
+
     VAR
         temp : INT;
     END_VAR
-    
+
     VAR_TEMP
         local_calc : INT;
     END_VAR
-    
+
     METHOD Add : INT
         VAR_INPUT
             x : INT;
@@ -89,7 +89,7 @@ FUNCTION_BLOCK MathProcessor
         END_VAR
         Add := x + y;
     END_METHOD
-    
+
     METHOD Multiply : INT
         VAR_INPUT
             x : INT;
@@ -108,21 +108,21 @@ VAR_GLOBAL
     simple_array : ARRAY[0..5] OF INT := [10, 20, 30, 40, 50, 60];
     color_array : ARRAY[1..3] OF Color := [Color.Red, Color.Green, Color.Blue];
     empty_array : ARRAY[-2..2] OF REAL;
-    
+
     // 2D arrays
     matrix_2x3 : ARRAY[0..1, 0..2] OF INT := [[1, 2, 3], [4, 5, 6]];
     identity_3x3 : ARRAY[1..3, 1..3] OF INT := [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
-    
+
     // 3D arrays
     cube_2x2x2 : ARRAY[0..1, 0..1, 0..1] OF INT;
     tensor : ARRAY[1..2, 2..3, 0..1] OF REAL := [[[1.1, 2.2], [3.3, 4.4]], [[5.5, 6.6], [7.7, 8.8]]];
-    
+
     // Arrays of structs
     points : ARRAY[0..2] OF Point3D;
-    
+
     // Arrays of function blocks
     processors : ARRAY[1..2] OF MathProcessor;
-    
+
     // Complex nested arrays
     nested_array : ARRAY[0..1, 0..2] OF ARRAY[0..1] OF INT;  // Array of arrays
 END_VAR
@@ -139,7 +139,7 @@ FUNCTION SumArray : INT
         i : INT;
         result : INT;
     END_VAR
-    
+
     result := 0;
     FOR i := 0 TO 4 DO
         result := result + arr[i];
@@ -158,7 +158,7 @@ FUNCTION MatrixMultiply : INT
         k : INT;
         result : INT;
     END_VAR
-    
+
     result := 0;
     FOR k := 1 TO 2 DO
         result := result + A[row][k] * B[k][col];
@@ -173,8 +173,8 @@ END_FUNCTION
 PROGRAM Main
     VAR
         counter : INT;
-        status : Status;
-        color : Color;
+        statusVar : Status;
+        colorVar : Color;
         point : Point3D;
         result : INT;
         i, j, k : INT;
@@ -183,31 +183,31 @@ PROGRAM Main
         proc : MathProcessor;
         mstruct : MultiArrayStruct;
     END_VAR
-    
+
     // Test 1D arrays
     counter := simple_array[0] + simple_array[5];
     simple_array[2] := 100;
     empty_array[0] := 3.14;
-    
+
     // Test enum arrays
-    color := color_array[2];
-    IF color = Color.Green THEN
-        status := Status.Running;
+    colorVar := color_array[2];
+    IF colorVar = Color.Green THEN
+        statusVar := Status.Running;
     END_IF
-    
+
     // Test 2D arrays
     matrix_2x3[0][1] := 99;
     result := matrix_2x3[1][2];
-    
+
     mat[1][1] := 10;
     mat[2][2] := 20;
     mat[3][3] := 30;
-    
+
     // Test 3D arrays
     cube[0][0][0] := 1;
     cube[0][0][1] := 2;
     cube[1][1][1] := 8;
-    
+
     // Nested loops for 3D array initialization
     FOR i := 0 TO 1 DO
         FOR j := 0 TO 1 DO
@@ -216,40 +216,40 @@ PROGRAM Main
             END_FOR
         END_FOR
     END_FOR
-    
+
     // Test array initialization inside struct
     mstruct.arr1d[0] := 100;
     mstruct.arr2d[2][1] := 42;
     mstruct.arr3d[0][2][1] := 3.14159;
-    
+
     // Test arrays of structs
     points[0].x := 10;
     points[1].y := 20;
     points[2].z := 30;
-    
+
     // Test arrays of function blocks
-    processors[1](a:=7, b:=4, sum => result);
+    processors[1](a := 7, b := 4, sum => result);
 
 
-    processors[2](a:=7, b:=4, product => result);
-    
+    processors[2](a := 7, b := 4, product => result);
+
     // Test nested array access
     nested_array[0][1] := 42;
-    
+
     // Complex array expressions
     simple_array[simple_array[0]] := 999;
     mat[counter][2] := simple_array[3];
-    
+
     // Test multidimensional array in expression
     IF matrix_2x3[1][1] > 50 THEN
-        status := Status.Error;
+        statusVar := Status.Error;
     ELSE
-        status := Status.Stopped;
+        statusVar := Status.Stopped;
     END_IF
-    
+
     // Test using MathProcessor methods
-    proc( a:= mat[1][1], b := mat[2][2], sum => result);
-    
+    proc( a := mat[1][1], b := mat[2][2], sum => result);
+
     // Test array bounds (will be checked in debug mode)
     // This would cause error in debug: simple_array[10] := 999;
 END_PROGRAM

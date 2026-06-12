@@ -177,6 +177,7 @@ static TranslationUnit processSingleFile(const std::string& filePath, bool dumpT
    }
 
    Parser parser(std::move(tokens));
+   Parser::clearParsedInterfaces();
    return parser.parseTranslationUnit();
 }
 

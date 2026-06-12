@@ -84,6 +84,11 @@ CodegenResult CodeGenerator::generate(const TranslationUnit& tu,
       genEnum(en); // Enums first (always independent)
    }
 
+   // Generate interface
+   for (const auto& iface : tu.interfaces) {
+      genInterface(iface);
+   }
+
    // Collect FBs first to identify them
    for (const auto& pou : tu.pous) {
       if (pou.kind == POUKind::FUNCTION_BLOCK) {
@@ -372,7 +377,23 @@ void CodeGenerator::genFunctionBlock(const POU& pou)
 
    // ========== HEADER GENERATION ==========
    m_hdr << "// FUNCTION BLOCK " << upperName << "\n";
-   m_hdr << "struct " << upperName << " {\n";
+   m_hdr << "struct " << upperName;
+
+   // Base struct (EXTENDS)
+   if (!pou.extends.empty()) {
+      m_hdr << " : public " << normalizeType(pou.extends);
+   }
+
+   // Interfacce (IMPLEMENTS)
+   for (size_t i = 0; i < pou.implements.size(); ++i) {
+      if (i == 0 && pou.extends.empty()) {
+         m_hdr << " : public " << normalizeType(pou.implements[i]);
+      } else {
+         m_hdr << ", public " << normalizeType(pou.implements[i]);
+      }
+   }
+
+   m_hdr << " {\n";
    m_hdr << "public:\n";
    push();
 
@@ -474,6 +495,12 @@ void CodeGenerator::genFunctionBlock(const POU& pou)
    }
    pop();
    m_src << "}\n";
+
+   if (!pou.extends.empty()) {
+      m_currentBaseClass = normalizeType(pou.extends);
+   } else {
+      m_currentBaseClass.clear();
+   }
 
    // Generate method definitions
    for (const auto& method : pou.methods) {
@@ -686,6 +713,25 @@ void CodeGenerator::genStruct(const StructType& st)
 }
 
 /**
+ * @brief Generate interface
+ * 
+ * @param iface struct interface to generate
+ */
+void CodeGenerator::genInterface(const Interface& iface)
+{
+   std::string name = normalizeType(iface.name);
+   m_hdr << "// INTERFACE " << name << "\n";
+   m_hdr << "struct " << name << " {\n";
+   push();
+   for (const auto& method : iface.methods) {
+      genMethodDeclaration(method);
+   }
+   m_hdr << ind() << "virtual ~" << name << "() = default;\n";
+   pop();
+   m_hdr << "};\n\n";
+}
+
+/**
  * @brief Generate structs in dependency order (topological sort)
  * @param structs List of structs to generate
  */
@@ -889,7 +935,8 @@ void CodeGenerator::genMethodDeclaration(const Method& method)
       returnType = mapType(method.returnType);
    }
 
-   m_hdr << ind() << returnType << " " << upperMethodName << "(";
+   m_hdr << ind() << "virtual " << returnType << " " << upperMethodName << "(";
+
    bool first = true;
 
    for (const auto& param : method.parameters) {
@@ -907,7 +954,24 @@ void CodeGenerator::genMethodDeclaration(const Method& method)
       }
    }
 
-   m_hdr << ");\n";
+   m_hdr << ")";
+
+   // If present, override
+   if (method.isOverride) {
+      m_hdr << " override";
+   }
+
+   // If present, final
+   if (method.isFinal) {
+      m_hdr << " final";
+   }
+
+   // If present, abstract
+   if (method.isAbstract) {
+      m_hdr << " = 0";
+   }
+
+   m_hdr << ";\n";
 }
 
 /**
@@ -2088,7 +2152,20 @@ std::string CodeGenerator::genExpr(const Expr& expr)
             }
             result += "}";
             return result;
+         } else if constexpr (std::is_same_v<T, SuperCallExpr>) {
+            std::string r = m_currentBaseClass + "::" + normalizeIdent(e.methodName) + "(";
+            bool first = true;
+            for (const auto& arg : e.args) {
+               if (!first) {
+                  r += ", ";
+               }
+               first = false;
+               r += genExpr(*arg.value);
+            }
+            r += ")";
+            return r;
          }
+
          return "";
       },
       expr.node);
@@ -2287,6 +2364,18 @@ std::vector<GeneratedFile> CodeGenerator::generateModular(const TranslationUnit&
          fbDeps = it->second;
       }
 
+      if (!pou.extends.empty()) {
+         std::string baseName = normalizeType(pou.extends);
+         // Verifica che la base sia un FB (non un'interfaccia)
+         if (m_isFB.find(baseName) != m_isFB.end()) {
+            fbDeps.insert(baseName);
+         }
+      }
+
+      for (const auto& iface : pou.implements) {
+         std::string ifaceName = normalizeType(iface);
+      }
+
       files.push_back({fbName, generateFBHeader(pou, fbDeps), GenFileType::HEADER, "FunctionBlocks"});
       files.push_back({fbName, generateFBSource(pou), GenFileType::SOURCE, "FunctionBlocks"});
    }
@@ -2407,6 +2496,37 @@ std::string CodeGenerator::generateSimpleGVLsHeader(const TranslationUnit& tu)
       }
       out << "};\n";
       out << "// END ENUM " << upperName << "\n\n";
+   }
+
+   // Generate INTERFACEs (they have no dependencies)
+   const std::vector<Interface>& interfaces = tu.interfaces.empty() ? Parser::getParsedInterfaces() : tu.interfaces;
+   for (const auto& iface : interfaces) {
+      std::string name = normalizeType(iface.name);
+      out << "// INTERFACE " << name << "\n";
+      out << "struct " << name << " {\n";
+      for (const auto& method : iface.methods) {
+         std::string retType = "void";
+         if (!isVoidType(method.returnType)) {
+            retType = mapType(method.returnType);
+         }
+         out << "    virtual " << retType << " " << normalizeIdent(method.name) << "(";
+         bool first = true;
+         for (const auto& param : method.parameters) {
+            if (!first) {
+               out << ", ";
+            }
+            first = false;
+            std::string type = mapType(param.type);
+            if (param.kind == VarKind::OUTPUT || param.kind == VarKind::IN_OUT) {
+               out << type << "& " << normalizeIdent(param.name);
+            } else {
+               out << type << " " << normalizeIdent(param.name);
+            }
+         }
+         out << ") = 0;\n";
+      }
+      out << "    virtual ~" << name << "() = default;\n";
+      out << "};\n\n";
    }
 
    // Build a cache for structContainsFB to avoid repeated recursion
@@ -2712,7 +2832,31 @@ std::string CodeGenerator::generateFBHeader(const POU& pou, const std::unordered
 
    // Generate FB struct (reuse header part from genFunctionBlock)
    out << "// FUNCTION BLOCK " << fbName << "\n";
-   out << "struct " << fbName << " {\n";
+
+   if (!pou.extends.empty()) {
+      out << "// Extends: " << normalizeType(pou.extends) << "\n";
+   }
+   for (const auto& iface : pou.implements) {
+      out << "// Implements: " << normalizeType(iface) << "\n";
+   }
+
+   out << "struct " << fbName;
+
+   // Base struct (EXTENDS)
+   if (!pou.extends.empty()) {
+      out << " : public " << normalizeType(pou.extends);
+   }
+
+   // Interfacce (IMPLEMENTS)
+   for (size_t i = 0; i < pou.implements.size(); ++i) {
+      if (i == 0 && pou.extends.empty()) {
+         out << " : public " << normalizeType(pou.implements[i]);
+      } else {
+         out << ", public " << normalizeType(pou.implements[i]);
+      }
+   }
+
+   out << " {\n";
    out << "public:\n";
 
    // Variables
@@ -2783,7 +2927,7 @@ std::string CodeGenerator::generateFBHeader(const POU& pou, const std::unordered
          retType = mapType(method.returnType);
       }
 
-      out << "    " << retType << " " << methodName << "(";
+      out << "    virtual " << retType << " " << methodName << "(";
       bool first = true;
       for (const auto& param : method.parameters) {
          if (!first) {
@@ -2797,7 +2941,17 @@ std::string CodeGenerator::generateFBHeader(const POU& pou, const std::unordered
             out << type << " " << normalizeIdent(param.name);
          }
       }
-      out << ");\n";
+      out << ")";
+      if (method.isOverride) {
+         out << " override";
+      }
+      if (method.isFinal) {
+         out << " final";
+      }
+      if (method.isAbstract) {
+         out << " = 0";
+      }
+      out << ";\n";
    }
    out << "    virtual ~" << fbName << "() = default;\n";
    out << "};\n\n";
@@ -2952,6 +3106,13 @@ std::string CodeGenerator::generateFBSource(const POU& pou)
    out << opBody;
    out << "}\n\n";
 
+   // Base Function blocks for calls with SUPER^
+   if (!pou.extends.empty()) {
+      m_currentBaseClass = normalizeType(pou.extends);
+   } else {
+      m_currentBaseClass.clear();
+   }
+
    // Methods
    for (const auto& method : pou.methods) {
       std::string methodName = normalizeIdent(method.name);
@@ -2992,6 +3153,9 @@ std::string CodeGenerator::generateFBSource(const POU& pou)
       }
       out << "}\n\n";
    }
+
+   // Reset classe base
+   m_currentBaseClass.clear();
 
    if (!m_namespace.empty()) {
       out << "} // namespace " << m_namespace << "\n";

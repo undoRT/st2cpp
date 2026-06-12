@@ -455,6 +455,7 @@ Few coding standards:
 - Functions with IN_OUT parameters
 - ENUM types with explicit values
 - Array with different dimensions and array of function blocks
+- Function blocks inheritated, with method access via SUPER^
 
 ## License
 

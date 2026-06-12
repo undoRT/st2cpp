@@ -14,6 +14,7 @@
  */
 #pragma once
 #include "ast/AST.h"
+#include "parser/Parser.h"
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -131,7 +132,9 @@ private:
    std::string m_hdrName;
    std::string m_currentFunctionName; // Useful for return variable of functions
    int m_indent = 0;
-   bool m_caseSensitive; // true if identifiers should preserve original case, false to convert to uppercase (default for PLCs)
+   bool m_caseSensitive;        // true if identifiers should preserve original case, false to convert to uppercase (default for PLCs)
+   std::string m_currentFBBase; // Base function block named by SUPER^
+   std::string m_currentBaseClass;
 
    std::unordered_map<std::string, FunctionSignature> m_signatures;
    std::unordered_map<std::string, FunctionSignature> m_methodSignatures;
@@ -181,6 +184,7 @@ private:
    // ============================================================================
 
    void genStruct(const StructType& st);
+   void genInterface(const Interface& iface);
    void generateStructsInOrder(const std::vector<StructType>& structs, std::ostringstream* out = nullptr);
    BuildStructDepType buildStructDependenciesForStructs(const std::vector<StructType>& structs);
    void genEnum(const EnumType& et);
