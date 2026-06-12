@@ -1,0 +1,92 @@
+name: Docs — Generate & Deploy
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      # Only re-run when source or docs config actually changes
+      - 'include/**'
+      - 'src/**'
+      - 'st2cpp_includes/**'
+      - 'README.md'
+      - 'Doxyfile'
+      - '.github/workflows/docs.yml'
+
+  workflow_dispatch:   # Allow manual trigger from Actions tab
+
+jobs:
+  doxygen:
+    name: Build & Deploy Doxygen
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. Checkout st2cpp source
+      - name: Checkout st2cpp
+        uses: actions/checkout@v4
+
+      # 2. Install Doxygen + Graphviz (for call graphs)
+      - name: Install Doxygen and Graphviz
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            doxygen \
+            graphviz
+
+      # 3. Generate HTML documentation
+      - name: Generate Doxygen HTML
+        run: doxygen Doxyfile
+        # Output goes to docs/html/ as configured in Doxyfile (OUTPUT_DIRECTORY = docs)
+
+      # 4. Verify output exists
+      - name: Verify output
+        run: |
+          if [ ! -f docs/html/index.html ]; then
+            echo "::error::Doxygen did not produce docs/html/index.html"
+            exit 1
+          fi
+          echo "Doxygen output:"
+          ls docs/html/ | head -20
+
+      #  5. Checkout undort.github.io into a subdirectory
+      #     Uses a PAT stored as DOCS_DEPLOY_TOKEN secret in the st2cpp repo.
+      #     The token needs: Contents (read + write) on undoRT/undort.github.io
+      - name: Checkout undort.github.io
+        uses: actions/checkout@v4
+        with:
+          repository: undoRT/undort.github.io
+          token: ${{ secrets.DOCS_DEPLOY_TOKEN }}
+          path: gh-pages
+
+      # 6. Copy generated HTML → st2cpp/api/ in the pages repo
+      - name: Copy docs into st2cpp/api/
+        run: |
+          # Remove old API docs, keep everything else in st2cpp/
+          rm -rf gh-pages/st2cpp/api
+          mkdir -p gh-pages/st2cpp/api
+
+          # Copy the generated HTML
+          cp -r docs/html/. gh-pages/st2cpp/api/
+
+          echo "Copied files:"
+          ls gh-pages/st2cpp/api/ | head -20
+
+      # 7. Commit and push
+      - name: Commit and push to undort.github.io
+        run: |
+          cd gh-pages
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add st2cpp/api/
+
+          # Only commit if there are actual changes
+          if git diff --cached --quiet; then
+            echo "No changes to API docs — skipping commit."
+          else
+            COMMIT_SHA="${{ github.sha }}"
+            git commit -m "docs(st2cpp): update API reference from ${COMMIT_SHA:0:7}"
+            git push
+            echo "Docs deployed to undort.com/st2cpp/api/"
+          fi

@@ -152,6 +152,9 @@ struct Method
    std::vector<VarDecl> localVars; // VAR and VAR_TEMP
    std::vector<std::shared_ptr<Stmt>> body;
    uint32_t line = 0;
+   bool isOverride = false;
+   bool isFinal = false;
+   bool isAbstract = false;
 };
 
 /**
@@ -230,6 +233,7 @@ struct IndexExpr
    std::shared_ptr<Expr> array;
    std::vector<std::shared_ptr<Expr>> indices;
 };
+
 struct DerefExpr
 {
    std::shared_ptr<Expr> pointer;
@@ -250,19 +254,36 @@ struct CallExpr
    };
    std::vector<Arg> args;
 };
+
+struct SuperCallExpr
+{
+   std::string methodName;
+   std::vector<CallExpr::Arg> args;
+};
+
+struct Interface
+{
+   std::string name;
+   std::vector<Method> methods;
+   uint32_t line;
+};
+
 struct AdrExpr
 {
    std::shared_ptr<Expr> operand;
 };
+
 struct SizeofExpr
 {
    TypeRef type;
 };
+
 struct CastExpr
 {
    TypeRef targetType;
    std::shared_ptr<Expr> operand;
 };
+
 struct ArrayInitExpr
 {
    std::vector<std::shared_ptr<Expr>> elements;
@@ -277,6 +298,7 @@ using ExprVariant = std::variant<LiteralExpr,
                                  IndexExpr,
                                  DerefExpr,
                                  CallExpr,
+                                 SuperCallExpr,
                                  AdrExpr,
                                  SizeofExpr,
                                  CastExpr,
@@ -383,6 +405,10 @@ struct POU
    std::vector<std::shared_ptr<Stmt>> body;
    std::vector<Method> methods;
    uint32_t line = 0;
+   std::string extends;
+   std::vector<std::string> implements;
+   bool isAbstract = false;
+   bool isFinal = false;
 };
 
 // Translation unit
@@ -392,4 +418,5 @@ struct TranslationUnit
    std::vector<StructType> structs;
    std::vector<EnumType> enums;
    std::vector<VarSection> globals;
+   std::vector<Interface> interfaces;
 };

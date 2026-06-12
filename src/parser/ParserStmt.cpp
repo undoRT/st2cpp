@@ -416,6 +416,22 @@ std::shared_ptr<Expr> Parser::parsePrimary()
       return e;
    }
 
+   // SUPER^
+   if (match(TokenType::KW_SUPER)) {
+      expect(TokenType::OP_DEREF, "Expected '^' after SUPER");
+      expect(TokenType::DOT, "Expected '.' after SUPER^");
+      std::string methodName = expect(TokenType::IDENTIFIER, "Expected method name").text;
+      expect(TokenType::LPAREN, "Expected '('");
+      std::vector<CallExpr::Arg> args;
+      if (!check(TokenType::RPAREN)) {
+         do {
+            args.push_back(parseCallArg());
+         } while (match(TokenType::COMMA));
+      }
+      expect(TokenType::RPAREN, "Expected ')'");
+      return std::make_shared<Expr>(SuperCallExpr{methodName, std::move(args)}, ln);
+   }
+
    // Identifier - consume it and let parsePostfix handle postfix operators
    if (check(TokenType::IDENTIFIER) || isTypeKeyword(peek().type)) {
       std::string name = peek().text;

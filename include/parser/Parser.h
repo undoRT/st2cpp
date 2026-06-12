@@ -49,6 +49,8 @@ public:
    explicit Parser(std::vector<Token> tokens);
 
    TranslationUnit parseTranslationUnit();
+   static const std::vector<Interface>& getParsedInterfaces() { return s_parsedInterfaces; }
+   static void clearParsedInterfaces() { s_parsedInterfaces.clear(); }
 
 private:
    // ========================================================================
@@ -57,6 +59,7 @@ private:
 
    std::vector<Token> m_tokens; ///< Token stream to parse
    size_t m_pos = 0;            ///< Current parsing position
+   static std::vector<Interface> s_parsedInterfaces;
 
    // ========================================================================
    //  Token Navigation Helpers
@@ -79,6 +82,7 @@ private:
    StructType parseStructType();
    EnumType parseEnumType();
    Method parseMethod();
+   Interface parseInterface();
    VarSection parseMethodVarSection(VarKind kind);
 
    // ========================================================================

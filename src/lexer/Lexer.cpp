@@ -45,6 +45,15 @@ const std::unordered_map<std::string, TokenType> Lexer::s_keywords = {
    {"PROPERTY", TokenType::KW_PROPERTY},
    {"END_PROPERTY", TokenType::KW_END_PROPERTY},
 
+   {"INTERFACE", TokenType::KW_INTERFACE},
+   {"END_INTERFACE", TokenType::KW_END_INTERFACE},
+   {"EXTENDS", TokenType::KW_EXTENDS},
+   {"IMPLEMENTS", TokenType::KW_IMPLEMENTS},
+   {"ABSTRACT", TokenType::KW_ABSTRACT},
+   {"FINAL", TokenType::KW_FINAL},
+   {"OVERRIDE", TokenType::KW_OVERRIDE},
+   {"SUPER", TokenType::KW_SUPER},
+
    {"IF", TokenType::KW_IF},
    {"THEN", TokenType::KW_THEN},
    {"ELSIF", TokenType::KW_ELSIF},

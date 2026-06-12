@@ -15,6 +15,8 @@
 #include <algorithm>
 #include <sstream>
 
+std::vector<Interface> Parser::s_parsedInterfaces;
+
 // ============================================================================
 //  Constructor
 // ============================================================================
@@ -131,9 +133,15 @@ TranslationUnit Parser::parseTranslationUnit()
 {
    TranslationUnit tu;
    while (!atEnd()) {
-      // Check for GVL with attributes first
-      if (check(TokenType::KW_ATTRIBUTE) || check(TokenType::KW_VAR_GLOBAL)) {
+      // Interface check
+      if (check(TokenType::KW_INTERFACE)) {
+         tu.interfaces.push_back(parseInterface());
+         continue;
+      }
+      // Check for GVL with attributes then
+      else if (check(TokenType::KW_ATTRIBUTE) || check(TokenType::KW_VAR_GLOBAL)) {
          tu.globals.push_back(parseGlobalVarSection());
+         continue;
       } else if (check(TokenType::KW_TYPE)) {
          advance(); // consume TYPE
 
@@ -195,7 +203,29 @@ POU Parser::parsePOU()
       throw error("Expected FUNCTION_BLOCK, FUNCTION, or PROGRAM");
    }
 
+   // ABSTRACT FUNCTION_BLOCK
+   if (match(TokenType::KW_ABSTRACT)) {
+      pou.isAbstract = true;
+   }
+
+   // FINAL after FUNCTION_BLOCK
+   if (match(TokenType::KW_FINAL)) {
+      pou.isFinal = true;
+   }
+
    pou.name = expect(TokenType::IDENTIFIER, "Expected POU name").text;
+
+   // Parse EXTENDS
+   if (match(TokenType::KW_EXTENDS)) {
+      pou.extends = expect(TokenType::IDENTIFIER, "Expected base POU name").text;
+   }
+
+   // Parse IMPLEMENTS (Interface)
+   if (match(TokenType::KW_IMPLEMENTS)) {
+      do {
+         pou.implements.push_back(expect(TokenType::IDENTIFIER, "Expected interface name").text);
+      } while (match(TokenType::COMMA));
+   }
 
    // Return type for FUNCTION: FUNCTION Name : TYPE
    if (pou.kind == POUKind::FUNCTION && match(TokenType::COLON)) {
@@ -359,6 +389,22 @@ Method Parser::parseMethod()
    method.line = peek().line;
 
    expect(TokenType::KW_METHOD, "Expected METHOD");
+
+   // ABSTRACT METHOD
+   if (match(TokenType::KW_ABSTRACT)) {
+      method.isAbstract = true;
+   }
+
+   // FINAL METHOD
+   if (match(TokenType::KW_FINAL)) {
+      method.isFinal = true;
+   }
+
+   // OVERRIDE
+   if (match(TokenType::KW_OVERRIDE)) {
+      method.isOverride = true;
+   }
+
    method.name = expect(TokenType::IDENTIFIER, "Expected method name").text;
 
    // Optional return type
@@ -427,6 +473,37 @@ Method Parser::parseMethod()
    match(TokenType::SEMICOLON);
 
    return method;
+}
+
+/**
+ * @brief Parse interface type for function blocks
+ * 
+ * @return Interface struct found
+ */
+Interface Parser::parseInterface()
+{
+   Interface iface;
+   iface.line = peek().line;
+
+   expect(TokenType::KW_INTERFACE, "Expected INTERFACE");
+   iface.name = expect(TokenType::IDENTIFIER, "Expected interface name").text;
+
+   // Parse methods (without implementations)
+   while (!check(TokenType::KW_END_INTERFACE) && !atEnd()) {
+      if (check(TokenType::KW_METHOD)) {
+         Method method = parseMethod();
+         // For interfaces, methods are abstract by default
+         method.isAbstract = true;
+         iface.methods.push_back(method);
+      } else {
+         throw error("Expected METHOD in INTERFACE");
+      }
+   }
+
+   expect(TokenType::KW_END_INTERFACE, "Expected END_INTERFACE");
+   match(TokenType::SEMICOLON);
+   s_parsedInterfaces.push_back(iface);
+   return iface;
 }
 
 /**

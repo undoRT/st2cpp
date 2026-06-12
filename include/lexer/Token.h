@@ -95,6 +95,15 @@ enum class TokenType {
    KW_POINTER,
    KW_REF_TO,
 
+   KW_INTERFACE,
+   KW_END_INTERFACE,
+   KW_EXTENDS,
+   KW_IMPLEMENTS,
+   KW_ABSTRACT,
+   KW_FINAL,
+   KW_OVERRIDE,
+   KW_SUPER,
+
    KW_ADR,
    KW_SIZEOF,
    KW_NOT,
