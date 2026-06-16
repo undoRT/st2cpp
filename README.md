@@ -5,11 +5,11 @@
 [![Build](https://github.com/undoRT/st2cpp/actions/workflows/build.yml/badge.svg)](https://github.com/undoRT/st2cpp/actions/workflows/build.yml)
 [![Documentation](https://img.shields.io/badge/docs-doxygen-blue.svg)](docs/html/index.html)
 
-Part of the [**undoRT**](https://undort.com) open-source automation platform.
+Part of the [**undoRT**](www.undort.com) open-source automation platform.
 
 **st2cpp** translates IEC 61131-3 Structured Text into clean, native C++17. No VM, no runtime overhead — just standard C++ you can compile, debug, and integrate anywhere.
 
-**[Full documentation undort.com/st2cpp](https://undort.com/st2cpp)**
+**[Full documentation undort.com/st2cpp](www.undort.com/st2cpp)**
 
 ---
 
@@ -75,7 +75,7 @@ FUNCTION_BLOCK Counter
 END_FUNCTION_BLOCK
 ```
 
-**Generated** (`counter.hpp` / `counter.cpp`) — a plain C++ struct with `operator()()`, getters, and setters. See [full output example](https://undort.com/st2cpp/usage#example)
+**Generated** (`counter.hpp` / `counter.cpp`) — a plain C++ struct with `operator()()`, getters, and setters. See [full output example](www.undort.com/st2cpp/#example)
 
 ---
 
@@ -105,7 +105,7 @@ END_FUNCTION_BLOCK
 - **FB inheritance**: `EXTENDS` with `SUPER^` method access
 - **Project mode**: Topological dependency sort, circular-dependency-safe header layout
 
-Full language coverage details: [st2cpp language](https://undort.com/st2cpp/language)
+Full language coverage details: [st2cpp language](www.undort.com/st2cpp/#supported)
 
 ---
 
