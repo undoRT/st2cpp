@@ -3,7 +3,7 @@
 [![C++17](https://img.shields.io/badge/C%2B%2B-17-blue.svg)](https://isocpp.org/)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 [![Build](https://github.com/undoRT/st2cpp/actions/workflows/build.yml/badge.svg)](https://github.com/undoRT/st2cpp/actions/workflows/build.yml)
-[![Documentation](https://img.shields.io/badge/docs-doxygen-blue.svg)](docs/html/index.html)
+[![Documentation](https://img.shields.io/badge/docs-doxygen-blue.svg)](https://www.undort.com/st2cpp/api/)
 
 Part of the [**undoRT**](https://www.undort.com/) open-source automation platform.
 
