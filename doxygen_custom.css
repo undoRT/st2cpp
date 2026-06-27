@@ -1,0 +1,679 @@
+/**
+ * doxygen_custom.css
+ * Custom styles for undoRT project documentation
+ * Applicabile a: undoCore, undoPLC, undoBUS, st2cpp, e tutti i progetti undoRT
+ * 
+ * Caratteristiche:
+ * - Tema scuro coerente con il brand undoRT
+ * - Logo ridimensionato automaticamente
+ * - Tipografia migliorata
+ * - Migliore leggibilità del codice
+ * - Responsive per mobile
+ * - Colori del brand (cyan #00b4d8, lavanda #b0a8cc)
+ */
+
+/* ============================================================================
+   IMPORT DOXYGEN DEFAULT STYLES
+   ============================================================================ */
+/* Assicurati che questo file venga caricato DOPO il default di Doxygen */
+@import url("doxygen.css") screen;
+
+/* ============================================================================
+   ROOT VARIABLES (Brand Colors)
+   ============================================================================ */
+:root {
+    --undo-cyan:       #00b4d8;
+    --undo-cyan-dim:   rgba(0, 180, 216, 0.15);
+    --undo-lavender:   #b0a8cc;
+    --undo-bg-main:    #030712;
+    --undo-bg-card:    #0b1329;
+    --undo-border:     #1c2541;
+    --undo-text:       #f3f4f6;
+    --undo-text-muted: #9ca3af;
+    --undo-green:      #34d399;
+    --undo-yellow:     #fbbf24;
+    --undo-red:        #f87171;
+}
+
+/* ============================================================================
+   HEADER / NAVIGATION
+   ============================================================================ */
+
+/* --- Project Logo --- */
+#projectlogo img {
+    max-width: 120px !important;
+    max-height: 50px !important;
+    width: auto !important;
+    height: auto !important;
+    object-fit: contain;
+}
+
+/* --- Header background --- */
+#top {
+    background: var(--undo-bg-main) !important;
+    border-bottom: 1px solid var(--undo-border) !important;
+}
+
+#titlearea {
+    background: var(--undo-bg-main) !important;
+    border-bottom: 1px solid var(--undo-border) !important;
+}
+
+/* --- Project name --- */
+#projectname {
+    color: var(--undo-cyan) !important;
+    font-weight: 700 !important;
+    font-size: 1.6rem !important;
+    letter-spacing: -0.5px;
+}
+
+#projectname a {
+    color: var(--undo-cyan) !important;
+    text-decoration: none;
+}
+
+#projectname a:hover {
+    color: #ffffff !important;
+}
+
+/* --- Project brief --- */
+#projectbrief {
+    color: var(--undo-text-muted) !important;
+    font-weight: 400 !important;
+    font-size: 0.9rem !important;
+}
+
+/* --- Project number (version) --- */
+#projectnumber {
+    color: var(--undo-cyan) !important;
+    font-weight: 600 !important;
+    background: var(--undo-cyan-dim);
+    padding: 2px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(0, 180, 216, 0.2);
+    font-size: 0.75rem !important;
+}
+
+/* ============================================================================
+   NAVIGATION TABS
+   ============================================================================ */
+
+.sm-dox {
+    background: var(--undo-bg-card) !important;
+    border-bottom: 1px solid var(--undo-border) !important;
+}
+
+.sm-dox a,
+.sm-dox a:focus,
+.sm-dox a:active {
+    color: var(--undo-text-muted) !important;
+    background: transparent !important;
+}
+
+.sm-dox a:hover {
+    color: var(--undo-text) !important;
+    background: var(--undo-cyan-dim) !important;
+}
+
+.sm-dox a.highlighted {
+    color: var(--undo-cyan) !important;
+    background: var(--undo-cyan-dim) !important;
+}
+
+/* --- Current tab --- */
+.sm-dox li.current > a {
+    color: var(--undo-cyan) !important;
+    background: var(--undo-cyan-dim) !important;
+    border-bottom: 2px solid var(--undo-cyan) !important;
+}
+
+/* --- Dropdown menus --- */
+.sm-dox ul {
+    background: var(--undo-bg-card) !important;
+    border: 1px solid var(--undo-border) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4) !important;
+}
+
+.sm-dox ul a {
+    color: var(--undo-text-muted) !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.03) !important;
+}
+
+.sm-dox ul a:hover {
+    background: var(--undo-cyan-dim) !important;
+    color: var(--undo-text) !important;
+}
+
+/* ============================================================================
+   PAGE CONTENT
+   ============================================================================ */
+
+/* --- Body background --- */
+body {
+    background: var(--undo-bg-main) !important;
+    color: var(--undo-text) !important;
+}
+
+/* --- Main content area --- */
+.contents {
+    background: transparent !important;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px 32px;
+}
+
+/* --- Headings --- */
+h1 {
+    color: #ffffff !important;
+    font-weight: 800 !important;
+    font-size: 2.2rem !important;
+    border-bottom: 2px solid var(--undo-border) !important;
+    padding-bottom: 12px !important;
+    margin-bottom: 24px !important;
+}
+
+h2 {
+    color: #ffffff !important;
+    font-weight: 700 !important;
+    font-size: 1.6rem !important;
+    border-bottom: 1px solid var(--undo-border) !important;
+    padding-bottom: 8px !important;
+    margin-top: 40px !important;
+    margin-bottom: 16px !important;
+}
+
+h3 {
+    color: var(--undo-cyan) !important;
+    font-weight: 700 !important;
+    font-size: 1.2rem !important;
+    margin-top: 28px !important;
+    margin-bottom: 12px !important;
+}
+
+h4 {
+    color: var(--undo-lavender) !important;
+    font-weight: 600 !important;
+}
+
+/* --- Paragraphs --- */
+p {
+    color: var(--undo-text-muted) !important;
+    line-height: 1.7 !important;
+}
+
+/* --- Links --- */
+a {
+    color: var(--undo-cyan) !important;
+    text-decoration: none !important;
+    transition: color 0.2s ease !important;
+}
+
+a:hover {
+    color: #ffffff !important;
+    text-decoration: underline !important;
+}
+
+/* ============================================================================
+   CODE BLOCKS
+   ============================================================================ */
+
+/* --- Inline code --- */
+code {
+    background: rgba(0, 180, 216, 0.08) !important;
+    border: 1px solid rgba(0, 180, 216, 0.15) !important;
+    padding: 1px 6px !important;
+    border-radius: 4px !important;
+    font-size: 0.85em !important;
+    color: var(--undo-cyan) !important;
+}
+
+/* --- Code blocks (pre) --- */
+div.fragment,
+pre.fragment {
+    background: #060e1e !important;
+    border: 1px solid var(--undo-border) !important;
+    border-radius: 10px !important;
+    padding: 20px 22px !important;
+    overflow-x: auto !important;
+    margin: 16px 0 24px !important;
+    font-size: 0.855rem !important;
+    line-height: 1.6 !important;
+    box-shadow: inset 0 1px 4px rgba(0, 0, 0, 0.3) !important;
+}
+
+/* --- Syntax highlighting --- */
+span.keyword {
+    color: #c792ea !important;
+}
+
+span.keywordtype {
+    color: #82aaff !important;
+}
+
+span.keywordflow {
+    color: #c792ea !important;
+}
+
+span.comment {
+    color: #676e95 !important;
+    font-style: italic !important;
+}
+
+span.preprocessor {
+    color: #f78c6c !important;
+}
+
+span.stringliteral {
+    color: #c3e88d !important;
+}
+
+span.charliteral {
+    color: #c3e88d !important;
+}
+
+/* ============================================================================
+   TABLES
+   ============================================================================ */
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0 28px !important;
+    font-size: 0.88rem !important;
+    background: transparent !important;
+}
+
+th {
+    background: var(--undo-bg-card) !important;
+    color: var(--undo-text-muted) !important;
+    font-weight: 600 !important;
+    padding: 10px 14px !important;
+    text-align: left !important;
+    border-bottom: 2px solid var(--undo-border) !important;
+}
+
+td {
+    padding: 9px 14px !important;
+    border-bottom: 1px solid rgba(28, 37, 65, 0.6) !important;
+    color: var(--undo-text-muted) !important;
+    vertical-align: top !important;
+}
+
+td:first-child {
+    color: var(--undo-text) !important;
+    font-weight: 500 !important;
+}
+
+tr:last-child td {
+    border-bottom: none !important;
+}
+
+tr:hover td {
+    background: rgba(0, 180, 216, 0.03) !important;
+}
+
+/* --- Table with dark background --- */
+table.doxtable {
+    border-collapse: collapse;
+    border: 1px solid var(--undo-border) !important;
+}
+
+table.doxtable th {
+    background: var(--undo-bg-card) !important;
+    border: 1px solid var(--undo-border) !important;
+}
+
+table.doxtable td {
+    border: 1px solid var(--undo-border) !important;
+}
+
+/* ============================================================================
+   MEMBER DEFINITIONS (Class members, functions, etc.)
+   ============================================================================ */
+
+/* --- Member list (class/struct members) --- */
+.memItemLeft,
+.memItemRight {
+    background: transparent !important;
+    border: none !important;
+}
+
+.memItemLeft {
+    color: var(--undo-cyan) !important;
+    font-weight: 600 !important;
+}
+
+.memItemRight {
+    color: var(--undo-text-muted) !important;
+}
+
+/* --- Member details box --- */
+.memproto,
+.memdoc {
+    background: var(--undo-bg-card) !important;
+    border: 1px solid var(--undo-border) !important;
+    border-radius: 8px !important;
+}
+
+.memproto {
+    background: rgba(0, 180, 216, 0.05) !important;
+    border-bottom: 2px solid var(--undo-cyan) !important;
+    padding: 12px 16px !important;
+}
+
+.memproto .memname {
+    color: var(--undo-cyan) !important;
+    font-weight: 700 !important;
+}
+
+.memproto .memname a {
+    color: var(--undo-cyan) !important;
+}
+
+.memproto .memname a:hover {
+    color: #ffffff !important;
+}
+
+.memproto .paramtype,
+.memproto .paramname {
+    color: var(--undo-text-muted) !important;
+}
+
+/* --- Parameter list --- */
+.paramname {
+    color: var(--undo-yellow) !important;
+    font-weight: 600 !important;
+}
+
+/* ============================================================================
+   GROUP / MODULE PAGES
+   ============================================================================ */
+
+.groupHeader {
+    color: var(--undo-cyan) !important;
+    font-weight: 700 !important;
+    font-size: 1.4rem !important;
+    border-bottom: 1px solid var(--undo-border) !important;
+    padding-bottom: 8px !important;
+    margin-bottom: 16px !important;
+}
+
+.groupText {
+    color: var(--undo-text-muted) !important;
+}
+
+/* ============================================================================
+   DIRECTORIES / FILES
+   ============================================================================ */
+
+.directory .levels span {
+    color: var(--undo-text-muted) !important;
+}
+
+.directory .levels a {
+    color: var(--undo-cyan) !important;
+}
+
+.directory .levels a:hover {
+    color: #ffffff !important;
+}
+
+/* --- File/directory entries --- */
+.directory td.entry a {
+    color: var(--undo-cyan) !important;
+}
+
+.directory td.entry a:hover {
+    color: #ffffff !important;
+}
+
+.directory .desc {
+    color: var(--undo-text-muted) !important;
+}
+
+/* ============================================================================
+   SEARCH
+   ============================================================================ */
+
+#MSearchField {
+    background: var(--undo-bg-card) !important;
+    border: 1px solid var(--undo-border) !important;
+    border-radius: 6px !important;
+    color: var(--undo-text) !important;
+}
+
+#MSearchField:focus {
+    border-color: var(--undo-cyan) !important;
+    outline: none !important;
+}
+
+/* --- Search results --- */
+#MSearchResultsWindow {
+    background: var(--undo-bg-card) !important;
+    border: 1px solid var(--undo-border) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5) !important;
+}
+
+#MSearchResults .SRPage .SREntry {
+    border-bottom: 1px solid var(--undo-border) !important;
+}
+
+#MSearchResults .SRPage .SRSymbol {
+    color: var(--undo-cyan) !important;
+}
+
+#MSearchResults .SRPage .SRSymbol:hover {
+    color: #ffffff !important;
+}
+
+#MSearchResults .SRPage .SRScope {
+    color: var(--undo-text-muted) !important;
+}
+
+/* ============================================================================
+   CALL GRAPHS & INHERITANCE
+   ============================================================================ */
+
+.graph {
+    background: var(--undo-bg-card) !important;
+    border: 1px solid var(--undo-border) !important;
+    border-radius: 8px !important;
+    padding: 8px !important;
+}
+
+.graph img {
+    max-width: 100% !important;
+    height: auto !important;
+}
+
+/* --- Inheritance diagrams --- */
+ul.inheritance {
+    color: var(--undo-text-muted) !important;
+}
+
+ul.inheritance a {
+    color: var(--undo-cyan) !important;
+}
+
+ul.inheritance a:hover {
+    color: #ffffff !important;
+}
+
+/* ============================================================================
+   ICONS / BADGES
+   ============================================================================ */
+
+.icon {
+    background: var(--undo-cyan) !important;
+    color: var(--undo-bg-main) !important;
+    border-radius: 4px !important;
+    padding: 2px 6px !important;
+    font-weight: 700 !important;
+    font-size: 0.7rem !important;
+}
+
+/* ============================================================================
+   FOOTER
+   ============================================================================ */
+
+#nav-path {
+    background: var(--undo-bg-card) !important;
+    border-top: 1px solid var(--undo-border) !important;
+    color: var(--undo-text-muted) !important;
+    padding: 8px 16px !important;
+}
+
+#nav-path a {
+    color: var(--undo-cyan) !important;
+}
+
+#nav-path a:hover {
+    color: #ffffff !important;
+}
+
+/* ============================================================================
+   RESPONSIVE - MOBILE
+   ============================================================================ */
+
+@media screen and (max-width: 768px) {
+    #projectlogo img {
+        max-width: 80px !important;
+        max-height: 35px !important;
+    }
+
+    #projectname {
+        font-size: 1.2rem !important;
+    }
+
+    #projectbrief {
+        font-size: 0.75rem !important;
+        display: block !important;
+    }
+
+    #projectnumber {
+        font-size: 0.65rem !important;
+        padding: 1px 8px !important;
+    }
+
+    .contents {
+        padding: 12px 16px !important;
+    }
+
+    h1 {
+        font-size: 1.6rem !important;
+    }
+
+    h2 {
+        font-size: 1.2rem !important;
+    }
+
+    h3 {
+        font-size: 1rem !important;
+    }
+
+    .memproto,
+    .memdoc {
+        padding: 8px 12px !important;
+    }
+
+    /* --- Better mobile navigation --- */
+    .sm-dox > li > a {
+        padding: 8px 12px !important;
+        font-size: 0.85rem !important;
+    }
+
+    .sm-dox ul {
+        border-radius: 4px !important;
+    }
+
+    /* --- Fix table overflow on mobile --- */
+    table {
+        display: block;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+
+    /* --- Code blocks on mobile --- */
+    div.fragment,
+    pre.fragment {
+        padding: 12px 14px !important;
+        font-size: 0.75rem !important;
+        border-radius: 6px !important;
+    }
+
+    /* --- Sidebar toggle (if using TOC) --- */
+    .toc-toggle {
+        display: block !important;
+    }
+}
+
+/* ============================================================================
+   PRINT
+   ============================================================================ */
+
+@media print {
+    #top {
+        background: #ffffff !important;
+        border-bottom: 1px solid #ccc !important;
+    }
+
+    #projectname {
+        color: #000000 !important;
+    }
+
+    #projectbrief {
+        color: #666666 !important;
+    }
+
+    body {
+        background: #ffffff !important;
+        color: #000000 !important;
+    }
+
+    .memproto {
+        background: #f0f0f0 !important;
+        border-color: #ccc !important;
+    }
+
+    .memdoc {
+        border-color: #ccc !important;
+    }
+
+    .sm-dox {
+        display: none !important;
+    }
+}
+
+/* ============================================================================
+   UTILITY: Version Badge nel titolo (opzionale)
+   ============================================================================ */
+
+/* Per aggiungere un badge di versione accanto al titolo */
+.version-badge {
+    display: inline-block;
+    background: var(--undo-cyan-dim);
+    color: var(--undo-cyan);
+    border: 1px solid rgba(0, 180, 216, 0.2);
+    padding: 2px 12px;
+    border-radius: 12px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    margin-left: 8px;
+    vertical-align: middle;
+}
+
+/* ============================================================================
+   DARK MODE COMPATIBILITY (se il browser supporta prefers-color-scheme)
+   ============================================================================ */
+
+@media (prefers-color-scheme: light) {
+    /* Forziamo il tema scuro anche in light mode */
+    :root {
+        --undo-bg-main: #030712;
+        --undo-bg-card: #0b1329;
+        --undo-text: #f3f4f6;
+        --undo-text-muted: #9ca3af;
+    }
+}

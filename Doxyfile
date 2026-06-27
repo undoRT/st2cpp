@@ -1,7 +1,7 @@
 
 PROJECT_NAME           = "st2cpp"
 PROJECT_BRIEF          = "Structured Text (IEC 61131-3) to C++17 Compiler"
-PROJECT_LOGO           = 
+PROJECT_LOGO           = st2cpp_logo.png
 OUTPUT_DIRECTORY       = docs
 INPUT                  = include/ src/ st2cpp_includes/ README.md
 RECURSIVE              = YES
@@ -10,6 +10,7 @@ EXTRACT_ALL            = YES
 EXTRACT_PRIVATE        = YES
 EXTRACT_STATIC         = YES
 GENERATE_TREEVIEW      = YES
+HTML_EXTRA_STYLESHEET  = doxygen_custom.css
 HAVE_DOT               = YES
 UML_LOOK               = YES
 CASE_SENSE_NAMES       = NO
