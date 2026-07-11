@@ -18,6 +18,126 @@
 #include <queue>
 
 // ============================================================================
+//  ScopeManager implementation
+// ============================================================================
+
+/**
+ * @brief Initialize a scope for the variables
+ */
+void ScopeManager::pushScope()
+{
+   m_scopes.push_back(Scope{});
+}
+
+/**
+ * @brief Remove the last scope initialized
+ */
+void ScopeManager::popScope()
+{
+   if (m_scopes.size() > 1) { // keep the global scope
+      m_scopes.pop_back();
+   }
+}
+
+/**
+ * @brief Add a variable in the current scope
+ * 
+ * @param name Name (std::string) of the variable
+ * @param cppType Type (std::string) of the variable
+ */
+void ScopeManager::addVariable(const std::string& name, const std::string& cppType)
+{
+   if (!m_scopes.empty()) {
+      m_scopes.back().vars[name] = cppType;
+   }
+}
+
+/**
+ * @brief Add an AT address variable in the current scope
+ * 
+ * @param name Name (std::string) of the AT address variable
+ * @param cppType Type (std::string) of the AT address variable
+ */
+void ScopeManager::addATVariable(const std::string& name, const std::string& atAddress)
+{
+   if (!m_scopes.empty()) {
+      m_scopes.back().atAddrs[name] = atAddress;
+   }
+}
+
+/**
+ * @brief Given a variable name, it returns its type
+ * 
+ * @param name Name (std::string) of the variable
+ * @return std::optional<std::string> Type of the name variable
+ */
+std::optional<std::string> ScopeManager::lookupVariable(const std::string& name) const
+{
+   auto itStart = m_scopes.rbegin();
+   auto itEnd = m_scopes.rend();
+   for (auto it = itStart; it != itEnd; ++it) {
+      auto found = it->vars.find(name);
+      if (found != it->vars.end()) {
+         return found->second;
+      }
+   }
+   return std::nullopt;
+}
+
+/**
+ * @brief Given an AT address variable name, it returns its type
+ * 
+ * @param name Name (std::string) of the AT address variable
+ * @return std::optional<std::string> Type of the name variable
+ */
+std::optional<std::string> ScopeManager::lookupATAddress(const std::string& name) const
+{
+   for (auto it = m_scopes.rbegin(); it != m_scopes.rend(); ++it) {
+      auto found = it->atAddrs.find(name);
+      if (found != it->atAddrs.end()) {
+         return found->second;
+      }
+   }
+   return std::nullopt;
+}
+
+/**
+ * @brief Set the base class for the current scope
+ * @param base Name of the base class
+ */
+void ScopeManager::setBaseClass(const std::string& base)
+{
+   if (!m_scopes.empty()) {
+      m_scopes.back().baseClass = base;
+   }
+}
+
+/**
+ * @brief Return the base class of the current scope
+ * 
+ * @return std::string name of the base class
+ */
+std::string ScopeManager::getBaseClass() const
+{
+   return m_scopes.empty() ? "" : m_scopes.back().baseClass;
+}
+
+/**
+ * @brief Help method to auto deduce the __temp_ next counter for the current variable scope
+ * 
+ * @param baseName Name of the variable
+ * @return int the next counter
+ */
+int ScopeManager::getNextTempCounter(const std::string& baseName)
+{
+   if (m_scopes.empty()) {
+      return 0;
+   }
+   auto& counters = m_scopes.back().tempCounters;
+   return ++counters[baseName];
+}
+
+// ============================================================================
 //  Top-level entry
 // ============================================================================
 
@@ -118,6 +238,22 @@ CodegenResult CodeGenerator::generate(const TranslationUnit& tu,
       m_hdr << "inline ProcessImage<" << m_piConfig.inputBytes << ", " << m_piConfig.outputBytes << ", " << m_piConfig.markerBytes << "> "
             << m_piConfig.instanceName << ";\n\n";
    }
+
+   // Initialize the global scope
+   m_scope.pushScope();
+
+   // Register global variables in the global scope
+   for (const auto& sec : tu.globals) {
+      for (const auto& d : sec.decls) {
+         std::string varName = normalizeIdent(d.name);
+         std::string varType = mapType(d.type);
+         m_scope.addVariable(varName, varType);
+         if (!d.atAddress.empty()) {
+            m_scope.addATVariable(varName, d.atAddress);
+         }
+      }
+   }
+
    // Generate all AST components in dependency order
    for (const auto& en : tu.enums) {
       genEnum(en); // Enums first (always independent)
@@ -134,14 +270,6 @@ CodegenResult CodeGenerator::generate(const TranslationUnit& tu,
          m_isFB[normalizeType(pou.name)] = true;
       }
       collectSignature(pou);
-   }
-
-   for (const auto& sec : tu.globals) {
-      for (const auto& d : sec.decls) {
-         std::string varName = normalizeIdent(d.name);
-         std::string varType = mapType(d.type);
-         m_varTypes[varName] = varType;
-      }
    }
 
    // Separate structs
@@ -212,7 +340,26 @@ CodegenResult CodeGenerator::generate(const TranslationUnit& tu,
    // First pass: generate all Function Blocks
    for (const auto& pou : tu.pous) {
       if (pou.kind == POUKind::FUNCTION_BLOCK) {
+         m_scope.pushScope(); // scope for this FB
+         // Register all variables of this FB
+         for (const auto& sec : pou.varSections) {
+            for (const auto& d : sec.decls) {
+               std::string varName = normalizeIdent(d.name);
+               std::string varType = mapType(d.type);
+               m_scope.addVariable(varName, varType);
+               if (!d.atAddress.empty()) {
+                  m_scope.addATVariable(varName, d.atAddress);
+               }
+            }
+         }
+         // Set base class for SUPER^ if present
+         if (!pou.extends.empty()) {
+            m_scope.setBaseClass(normalizeType(pou.extends));
+         }
+
          genPOU(pou);
+
+         m_scope.popScope();
       }
    }
 
@@ -232,16 +379,43 @@ CodegenResult CodeGenerator::generate(const TranslationUnit& tu,
    // Second pass: generate all Functions
    for (const auto& pou : tu.pous) {
       if (pou.kind == POUKind::FUNCTION) {
+         m_scope.pushScope();
+         for (const auto& sec : pou.varSections) {
+            for (const auto& d : sec.decls) {
+               std::string varName = normalizeIdent(d.name);
+               std::string varType = mapType(d.type);
+               m_scope.addVariable(varName, varType);
+               if (!d.atAddress.empty()) {
+                  m_scope.addATVariable(varName, d.atAddress);
+               }
+            }
+         }
          genPOU(pou);
+         m_scope.popScope();
       }
    }
 
    // Third pass: generate all Programs
    for (const auto& pou : tu.pous) {
       if (pou.kind == POUKind::PROGRAM) {
+         m_scope.pushScope();
+         for (const auto& sec : pou.varSections) {
+            for (const auto& d : sec.decls) {
+               std::string varName = normalizeIdent(d.name);
+               std::string varType = mapType(d.type);
+               m_scope.addVariable(varName, varType);
+               if (!d.atAddress.empty()) {
+                  m_scope.addATVariable(varName, d.atAddress);
+               }
+            }
+         }
          genPOU(pou);
+         m_scope.popScope();
       }
    }
+
+   // Close global scope
+   m_scope.popScope();
 
    // Close namespace if it was opened
    if (!m_namespace.empty()) {
@@ -272,17 +446,13 @@ std::vector<GeneratedFile> CodeGenerator::generateModularProject(const Translati
    // Reset state
    m_signatures.clear();
    m_methodSignatures.clear();
-   m_varTypes.clear();
    m_enumTypes.clear();
    m_enumValues.clear();
    m_enumeratorToEnum.clear();
    m_fbMap.clear();
    m_isFB.clear();
-   m_tempCounter.clear();
-   m_tempCounterStack.clear();
-   m_globalAtVariables.clear();
-   m_localVarTypes.clear();
-   m_localAtVariables.clear();
+   // We also clear the scope manager by pushing a fresh global scope
+   // m_scope is a member, we'll push a global scope inside generateModular
 
    return generateModular(tu, outputDir);
 }
@@ -410,13 +580,6 @@ void CodeGenerator::genPOU(const POU& pou)
  */
 void CodeGenerator::genFunctionBlock(const POU& pou)
 {
-   // Register FB local variables for method calls (important for flat mode)
-   for (const auto& sec : pou.varSections) {
-      for (const auto& d : sec.decls) {
-         m_varTypes[normalizeIdent(d.name)] = mapType(d.type);
-      }
-   }
-
    std::string upperName = normalizeType(pou.name);
 
    // ========== HEADER GENERATION ==========
@@ -540,11 +703,8 @@ void CodeGenerator::genFunctionBlock(const POU& pou)
    pop();
    m_src << "}\n";
 
-   if (!pou.extends.empty()) {
-      m_currentBaseClass = normalizeType(pou.extends);
-   } else {
-      m_currentBaseClass.clear();
-   }
+   // Base class for SUPER^ is already set in the scope manager, we don't need to store it separately
+   // But we need to ensure that for method definitions, the base class is available from the scope.
 
    // Generate method definitions
    for (const auto& method : pou.methods) {
@@ -614,7 +774,6 @@ void CodeGenerator::emitFunctionDecl(const POU& pou, std::ostringstream& out)
  */
 void CodeGenerator::genFunction(const POU& pou)
 {
-   pushTempScope();
    std::string upperName = normalizeIdent(pou.name);
    m_currentFunctionName = upperName; // Track for _ret translation
 
@@ -673,7 +832,6 @@ void CodeGenerator::genFunction(const POU& pou)
    pop();
    m_src << "}\n";
    m_src << "// END FUNCTION " << upperName << "\n\n";
-   popTempScope();
 }
 
 // ============================================================================
@@ -779,20 +937,6 @@ bool parseAddressString(const std::string& addrStr, AddressExpr& out)
  */
 void CodeGenerator::genProgram(const POU& pou)
 {
-   // Register variable types for use in genExpr (for enum resolution)
-   for (const auto& sec : pou.varSections) {
-      for (const auto& d : sec.decls) {
-         std::string varName = normalizeIdent(d.name);
-         std::string varType = mapType(d.type);
-         // Register as local variable
-         m_localVarTypes[varName] = varType;
-         m_varTypes[varName] = varType;
-         if (!d.atAddress.empty()) {
-            m_localAtVariables[varName] = d.atAddress;
-         }
-      }
-   }
-
    std::string upperName = normalizeType(pou.name);
    m_hdr << "// PROGRAM " << upperName << "\n";
    m_hdr << "struct " << upperName << " {\n";
@@ -1059,15 +1203,12 @@ void CodeGenerator::genGlobals(const std::vector<VarSection>& globals)
          std::string ctype = mapType(d.type);
          std::string upperName = normalizeIdent(d.name);
 
-         // Register as global variable
-         m_globalVarTypes[upperName] = ctype;
-
          // Global AT address variable - generate getter and setter
          if (!d.atAddress.empty()) {
             AddressExpr addr;
             if (parseAddressString(d.atAddress, addr)) {
-               // Register as AT variable
-               m_globalAtVariables[upperName] = d.atAddress;
+               // Register as AT variable in global scope
+               m_scope.addATVariable(upperName, d.atAddress);
 
                // Getter
                m_hdr << "// AT " << d.atAddress << "\n";
@@ -1178,7 +1319,23 @@ void CodeGenerator::genMethodDeclaration(const Method& method)
  */
 void CodeGenerator::genMethodDefinition(const std::string& fbName, const Method& method)
 {
-   pushTempScope();
+   // Push a scope for this method
+   m_scope.pushScope();
+
+   // Register parameters and local variables in the method scope
+   for (const auto& param : method.parameters) {
+      std::string paramName = normalizeIdent(param.name);
+      m_scope.addVariable(paramName, mapType(param.type));
+      // No AT addresses for parameters
+   }
+   for (const auto& local : method.localVars) {
+      std::string varName = normalizeIdent(local.name);
+      m_scope.addVariable(varName, mapType(local.type));
+      if (!local.atAddress.empty()) {
+         m_scope.addATVariable(varName, local.atAddress);
+      }
+   }
+
    std::string upperMethodName = normalizeIdent(method.name);
    std::string returnType = "void";
 
@@ -1241,7 +1398,9 @@ void CodeGenerator::genMethodDefinition(const std::string& fbName, const Method&
 
    pop();
    m_src << "}\n\n";
-   popTempScope();
+
+   // Pop the method scope
+   m_scope.popScope();
 }
 
 // ============================================================================
@@ -1552,109 +1711,6 @@ std::string CodeGenerator::normalizeIdent(const std::string& str) const
 }
 
 // ============================================================================
-//  Temporary Variable Management
-// ============================================================================
-
-/**
- * @brief Push a new scope for temporary variable counters
- *
- * Called when entering a new function or method scope that may contain
- * calls to functions/methods with OUTPUT parameters.
- *
- * When we generate code like:
- *   void MAIN::run() {
- *       DUMMY(..., __temp_C_1);
- *       DUMMY(..., __temp_C_2);
- *   }
- * Each call to DUMMY needs a unique __temp_C_N. The counter tracks
- * how many temporaries with base name "__temp_C" have been created.
- *
- * Without scope management, counters would accumulate across function
- * boundaries. With push/pop, each function starts with fresh counters.
- *
- * @note FUNCTION BLOCK operator() does NOT need this because:
- *       - It has no OUTPUT parameters (outputs are struct members)
- *       - It cannot be called with named output bindings like functions
- *       - No temporary variables are created for outputs in operator()
- */
-void CodeGenerator::pushTempScope()
-{
-   // Save current counter state to stack
-   m_tempCounterStack.push_back(m_tempCounter);
-   // Start fresh counter map for new scope
-   m_tempCounter.clear();
-}
-
-/**
- * @brief Pop the current scope and restore previous counter state
- *
- * Called when exiting a function or method scope. Restores the counter map
- * from the stack, allowing the parent scope to continue using its own
- * counters without interference from nested scopes.
- *
- * @details
- * Example:
- *   void outer() {           // pushTempScope() - outer counters start fresh
- *       DUMMY(..., __temp_C_1);
- *       inner() {            // pushTempScope() - inner starts fresh
- *           DUMMY(..., __temp_C_1);  // Inner gets its own __temp_C_1
- *       }                    // popTempScope() - inner counters discarded
- *       DUMMY(..., __temp_C_2);      // Outer continues with __temp_C_2
- *   }                        // popTempScope() - outer counters discarded
- *
- * @note FUNCTION BLOCK operator() does NOT need push/pop because it never
- *       creates temporary variables for output parameters.
- */
-void CodeGenerator::popTempScope()
-{
-   if (!m_tempCounterStack.empty()) {
-      // Restore previous counter state from stack
-      m_tempCounter = m_tempCounterStack.back();
-      m_tempCounterStack.pop_back();
-   } else {
-      // Stack is empty - just clear counters (shouldn't happen with proper push/pop)
-      m_tempCounter.clear();
-   }
-}
-
-/**
- * @brief Generate a unique temporary variable name
- *
- * Creates names like "__temp_RESULT2_1", "__temp_RESULT2_2", etc.
- * The counter is incremented each time a temporary with the same base name
- * is requested within the current scope.
- *
- * @param baseName The original variable name (e.g., "RESULT2")
- * @return Unique name like "__temp_RESULT2_1"
- *
- * @details
- * The function:
- * 1. Normalizes the base name (applies case sensitivity rules)
- * 2. Creates a key: "__temp_<normalized>"
- * 3. Looks up or creates a counter for this key
- * 4. Increments the counter
- * 5. Returns: key + "_" + counter
- *
- * Example sequence:
- *   getUniqueTempName("C")  -> "__temp_C_1"
- *   getUniqueTempName("C")  -> "__temp_C_2"
- *   getUniqueTempName("C")  -> "__temp_C_3"
- *   getUniqueTempName("RESULT") -> "__temp_RESULT_1"
- */
-std::string CodeGenerator::getUniqueTempName(const std::string& baseName)
-{
-   // Normalize the base name (apply case sensitivity rules)
-   std::string normalized = "__temp_" + normalizeIdent(baseName);
-
-   // Get or create counter for this base name
-   int& counter = m_tempCounter[normalized];
-
-   // Increment and return unique name
-   ++counter;
-   return normalized + "_" + std::to_string(counter);
-}
-
-// ============================================================================
 //  Statement generation
 // ============================================================================
 
@@ -1709,8 +1765,9 @@ void CodeGenerator::genStmt(const Stmt& stmt)
             if (lhsStr.rfind("getPi_", 0) == 0 && lhsStr.length() > 6 && lhsStr.back() == ')') {
                // It is a getter: getPi_NOMEVAR()
                varName = lhsStr.substr(6, lhsStr.length() - 8); // Remove getPi_ and ()
-               // Check if it is an AT variable
-               if (isATVariable(varName)) {
+               // Check if it is an AT variable using the scope manager
+               auto atOpt = m_scope.lookupATAddress(varName);
+               if (atOpt) {
                   // Use setter instead of assignment
                   m_src << ind() << "setPi_" << varName << "(" << rhsStr << ");\n";
                   return;
@@ -1736,15 +1793,15 @@ void CodeGenerator::genStmt(const Stmt& stmt)
 
                // Determine the type of the callee (for FB instance resolution)
                std::string calleeType;
-               auto varIt = m_varTypes.find(calleeName);
-               if (varIt != m_varTypes.end()) {
-                  calleeType = varIt->second;
+               auto typeOpt = m_scope.lookupVariable(calleeName);
+               if (typeOpt) {
+                  calleeType = *typeOpt;
                } else {
                   // Check if it's an array access (e.g., PROCESSORS[1])
                   std::string baseName = getBaseFBName(calleeName);
-                  auto baseIt = m_varTypes.find(baseName);
-                  if (baseIt != m_varTypes.end()) {
-                     calleeType = baseIt->second;
+                  auto baseOpt = m_scope.lookupVariable(baseName);
+                  if (baseOpt) {
+                     calleeType = *baseOpt;
                   } else {
                      calleeType = calleeName;
                   }
@@ -1847,9 +1904,9 @@ void CodeGenerator::genStmt(const Stmt& stmt)
                   if (dotPos != std::string::npos) {
                      std::string instanceName = calleeName.substr(0, dotPos);
                      std::string methodName = calleeName.substr(dotPos + 1);
-                     auto varIt2 = m_varTypes.find(instanceName);
-                     if (varIt2 != m_varTypes.end()) {
-                        std::string fbType = varIt2->second;
+                     auto varIt2 = m_scope.lookupVariable(instanceName);
+                     if (varIt2) {
+                        std::string fbType = *varIt2;
                         std::string methodKey = fbType + "::" + methodName;
                         auto methodIt = m_methodSignatures.find(methodKey);
                         if (methodIt != m_methodSignatures.end()) {
@@ -1913,7 +1970,8 @@ void CodeGenerator::genStmt(const Stmt& stmt)
                            callArgs += "{}";
                         } else if (param.isOutputVar) {
                            // OUTPUT parameter NOT provided - create a temporary variable with unique name
-                           std::string tempVar = getUniqueTempName(param.name);
+                           int counter = m_scope.getNextTempCounter(param.name);
+                           std::string tempVar = "__temp_" + normalizeIdent(param.name) + "_" + std::to_string(counter);
                            tempVars.push_back(tempVar);
                            std::string type;
                            if (!param.type.arrayDims.empty()) {
@@ -2252,24 +2310,20 @@ std::string CodeGenerator::genExpr(const Expr& expr)
                return enumIt->second + "::" + varName;
             }
 
-            // First, check if it's a local variable (local variables have priority over globals)
-            if (m_localVarTypes.find(varName) != m_localVarTypes.end()) {
-               // It's a local variable - check if it has AT address
-               if (m_localAtVariables.find(varName) != m_localAtVariables.end()) {
-                  // Local variable with AT address - use getter
+            // Look up the variable in the scope manager (local > global)
+            auto typeOpt = m_scope.lookupVariable(varName);
+            if (typeOpt) {
+               // Variable found - check if it has an AT address
+               auto atOpt = m_scope.lookupATAddress(varName);
+               if (atOpt) {
+                  // Variable with AT address - use getter
                   return "getPi_" + varName + "()";
                }
-               // Local variable without AT address - use directly
+               // Normal variable
                return varName;
             }
 
-            // Not a local variable - check if it's an AT global variable
-            if (m_globalAtVariables.find(varName) != m_globalAtVariables.end()) {
-               // Global AT variable - use getter
-               return "getPi_" + varName + "()";
-            }
-
-            // Fallback: use name directly
+            // Fallback: use name directly (could be a function, constant, etc.)
             return varName;
          }
 
@@ -2328,9 +2382,9 @@ std::string CodeGenerator::genExpr(const Expr& expr)
             std::string member = normalizeIdent(e.member);
 
             // Handle enum member access (needs :: instead of .)
-            auto varIt = m_varTypes.find(object);
-            if (varIt != m_varTypes.end() && m_enumTypes.find(varIt->second) != m_enumTypes.end()) {
-               return varIt->second + "::" + member;
+            auto varIt = m_scope.lookupVariable(object);
+            if (varIt && m_enumTypes.find(*varIt) != m_enumTypes.end()) {
+               return *varIt + "::" + member;
             } else if (m_enumTypes.find(object) != m_enumTypes.end()) {
                return object + "::" + member;
             } else {
@@ -2415,7 +2469,11 @@ std::string CodeGenerator::genExpr(const Expr& expr)
             result += "}";
             return result;
          } else if constexpr (std::is_same_v<T, SuperCallExpr>) {
-            std::string r = m_currentBaseClass + "::" + normalizeIdent(e.methodName) + "(";
+            std::string base = m_scope.getBaseClass();
+            if (base.empty()) {
+               throw std::runtime_error("SUPER^ used but no base class in scope");
+            }
+            std::string r = base + "::" + normalizeIdent(e.methodName) + "(";
             bool first = true;
             for (const auto& arg : e.args) {
                if (!first) {
@@ -2537,17 +2595,6 @@ std::string CodeGenerator::generateAddressWrite(const AddressExpr& addr, const s
    default:
       throw std::runtime_error("Invalid address qualifier for write access");
    }
-}
-
-/**
- * @brief Check if a variable name corresponds to an AT address variable
- * @param varName The variable name to check
- * @return true if the variable has an AT address
- */
-bool CodeGenerator::isATVariable(const std::string& varName) const
-{
-   // Check both local and global AT variables
-   return m_localAtVariables.find(varName) != m_localAtVariables.end() || m_globalAtVariables.find(varName) != m_globalAtVariables.end();
 }
 
 // ============================================================================
@@ -2699,23 +2746,19 @@ std::vector<GeneratedFile> CodeGenerator::generateModular(const TranslationUnit&
    }
 
    // Step 4: Register variable types for all POUs (for enum resolution)
-   for (const auto& pou : tu.pous) {
-      for (const auto& sec : pou.varSections) {
-         for (const auto& d : sec.decls) {
-            m_varTypes[normalizeIdent(d.name)] = mapType(d.type);
-         }
-      }
-   }
+   // We'll use the scope manager instead of m_varTypes.
+   // The scope manager will be filled per POU during generation.
 
    // Step 4.5: Register global variable types (so they can be resolved later)
+   // We'll store them in the global scope.
+   m_scope.pushScope(); // global scope
    for (const auto& sec : tu.globals) {
       for (const auto& d : sec.decls) {
          std::string varName = normalizeIdent(d.name);
          std::string varType = mapType(d.type);
-         m_varTypes[varName] = varType;
-         m_globalVarTypes[varName] = varType;
+         m_scope.addVariable(varName, varType);
          if (!d.atAddress.empty()) {
-            m_globalAtVariables[varName] = d.atAddress;
+            m_scope.addATVariable(varName, d.atAddress);
          }
       }
    }
@@ -2817,8 +2860,27 @@ std::vector<GeneratedFile> CodeGenerator::generateModular(const TranslationUnit&
          std::string ifaceName = normalizeType(iface);
       }
 
+      // Push a scope for this FB
+      m_scope.pushScope();
+      // Register variables of the FB
+      for (const auto& sec : pou.varSections) {
+         for (const auto& d : sec.decls) {
+            std::string varName = normalizeIdent(d.name);
+            std::string varType = mapType(d.type);
+            m_scope.addVariable(varName, varType);
+            if (!d.atAddress.empty()) {
+               m_scope.addATVariable(varName, d.atAddress);
+            }
+         }
+      }
+      if (!pou.extends.empty()) {
+         m_scope.setBaseClass(normalizeType(pou.extends));
+      }
+
       files.push_back({fbName, generateFBHeader(pou, fbDeps), GenFileType::HEADER, "FunctionBlocks"});
       files.push_back({fbName, generateFBSource(pou), GenFileType::SOURCE, "FunctionBlocks"});
+
+      m_scope.popScope();
    }
 
    // 3. FunctionBlocks.hpp master (includes SimpleGVLs.hpp + all FB headers)
@@ -2838,8 +2900,21 @@ std::vector<GeneratedFile> CodeGenerator::generateModular(const TranslationUnit&
    for (const auto& pou : tu.pous) {
       if (pou.kind == POUKind::PROGRAM) {
          std::string progName = normalizeType(pou.name);
+         // Push a scope for this program
+         m_scope.pushScope();
+         for (const auto& sec : pou.varSections) {
+            for (const auto& d : sec.decls) {
+               std::string varName = normalizeIdent(d.name);
+               std::string varType = mapType(d.type);
+               m_scope.addVariable(varName, varType);
+               if (!d.atAddress.empty()) {
+                  m_scope.addATVariable(varName, d.atAddress);
+               }
+            }
+         }
          files.push_back({progName, generateProgramHeader(pou), GenFileType::HEADER, "Programs"});
          files.push_back({progName, generateProgramSource(pou), GenFileType::SOURCE, "Programs"});
+         m_scope.popScope();
       }
    }
 
@@ -2847,6 +2922,9 @@ std::vector<GeneratedFile> CodeGenerator::generateModular(const TranslationUnit&
    if (!programNames.empty()) {
       files.push_back({"Programs", generateProgramsMaster(programNames), GenFileType::MASTER, ""});
    }
+
+   // Pop global scope
+   m_scope.popScope();
 
    return files;
 }
@@ -3076,7 +3154,8 @@ std::string CodeGenerator::generateSimpleGVLsHeader(const TranslationUnit& tu)
             if (!isFBType) {
                std::string ctype = mapType(d.type);
                std::string upperName = normalizeIdent(d.name);
-               m_varTypes[upperName] = ctype;
+               // Register in global scope
+               m_scope.addVariable(upperName, ctype);
                if (!d.type.arrayDims.empty()) {
                   std::string arrayDecl = ctype + " " + upperName;
                   if (d.initialValue) {
@@ -3156,7 +3235,7 @@ std::string CodeGenerator::generateGVLsHeader(const TranslationUnit& tu)
    // Generate STRUCTs that contain FB members
    for (const auto& st : tu.structs) {
       std::string structName = normalizeType(st.name);
-      if (structContainsFBCache[structName]) { // ← QUI LA CORREZIONE
+      if (structContainsFBCache[structName]) {
          std::string upperName = normalizeType(st.name);
          out << "// STRUCT " << upperName << " (contains Function Blocks)\n";
          out << "struct " << upperName << " {\n";
@@ -3205,7 +3284,7 @@ std::string CodeGenerator::generateGVLsHeader(const TranslationUnit& tu)
             if (isComplex) {
                std::string ctype = mapType(d.type);
                std::string upperName = normalizeIdent(d.name);
-               m_varTypes[upperName] = ctype;
+               // Register in global scope (already done in generateModular)
                out << "extern " << ctype << " " << upperName << ";\n";
             }
          }
@@ -3265,7 +3344,6 @@ std::string CodeGenerator::generateGVLsSource(const TranslationUnit& tu)
             if (isComplex) {
                std::string ctype = mapType(d.type);
                std::string upperName = normalizeIdent(d.name);
-               m_varTypes[upperName] = ctype;
                if (d.initialValue) {
                   out << ctype << " " << upperName << " = " << genExpr(*d.initialValue) << ";\n";
                } else {
@@ -3339,13 +3417,8 @@ std::string CodeGenerator::generateFBHeader(const POU& pou, const std::unordered
 
    out << "#include \"SimpleGVLs.hpp\"\n";
 
-   for (const auto& sec : pou.varSections) {
-      for (const auto& d : sec.decls) {
-         std::string varName = normalizeIdent(d.name);
-         std::string varType = mapType(d.type);
-         m_varTypes[varName] = varType;
-      }
-   }
+   // Register variables in the scope for this FB (already done by caller, but we need to ensure they are available for genExpr)
+   // The caller already pushed a scope and registered variables.
 
    // Include dependencies (other FBs used as members)
    for (const auto& dep : dependencies) {
@@ -3592,7 +3665,7 @@ std::string CodeGenerator::generateFunctionsSource(const TranslationUnit& tu)
          emitFunctionDecl(pou, out);
          out << " {\n";
 
-         if (hasReturn) { // CAMBIATO: usa hasReturn
+         if (hasReturn) {
             out << "    " << mapType(pou.returnType) << " " << upperName << "_ret{};\n";
          }
 
@@ -3604,10 +3677,11 @@ std::string CodeGenerator::generateFunctionsSource(const TranslationUnit& tu)
             }
          }
 
+         // Use generateFunctionBody to get the body with proper scope handling
          std::string body = generateFunctionBody(pou);
          out << body; // body already contains indented statements
 
-         if (hasReturn) { // CAMBIATO: usa hasReturn
+         if (hasReturn) {
             out << "    return " << upperName << "_ret;\n";
          }
 
@@ -3627,22 +3701,12 @@ std::string CodeGenerator::generateFunctionsSource(const TranslationUnit& tu)
  * @param pou FB POU
  * @return File content as string
  */
-/**
- * @brief Generate single function block source
- * @param pou FB POU
- * @return File content as string
- */
 std::string CodeGenerator::generateFBSource(const POU& pou)
 {
    std::ostringstream out;
    std::string fbName = normalizeType(pou.name);
 
-   // register FB variables (fundamental for methods)
-   for (const auto& sec : pou.varSections) {
-      for (const auto& d : sec.decls) {
-         m_varTypes[normalizeIdent(d.name)] = mapType(d.type);
-      }
-   }
+   // Variables are already registered in the scope by the caller.
 
    out << generateHeaderComment();
    out << "#include \"FunctionBlocks/" << fbName << ".hpp\"\n\n";
@@ -3661,55 +3725,21 @@ std::string CodeGenerator::generateFBSource(const POU& pou)
    out << "}\n\n";
 
    // Base Function blocks for calls with SUPER^
-   if (!pou.extends.empty()) {
-      m_currentBaseClass = normalizeType(pou.extends);
-   } else {
-      m_currentBaseClass.clear();
-   }
+   // The base class is stored in the scope manager, we don't need to store it separately.
 
    // Methods
    for (const auto& method : pou.methods) {
-      std::string methodName = normalizeIdent(method.name);
-      std::string retType = "void";
-
-      bool hasReturn = !isVoidType(method.returnType);
-      if (hasReturn) {
-         retType = mapType(method.returnType);
-      }
-
-      out << retType << " " << fbName << "::" << methodName << "(";
-      bool first = true;
-      for (const auto& param : method.parameters) {
-         if (!first) {
-            out << ", ";
-         }
-         first = false;
-         std::string type = mapType(param.type);
-         if (param.kind == VarKind::OUTPUT || param.kind == VarKind::IN_OUT) {
-            out << type << "& " << normalizeIdent(param.name);
-         } else {
-            out << type << " " << normalizeIdent(param.name);
-         }
-      }
-      out << ") {\n";
-
-      // Return variable
-      if (hasReturn) {
-         out << "    " << retType << " " << methodName << "_ret{};\n";
-      }
-
-      // Method body
-      std::string body = generateMethodBody(method);
-      out << body;
-
-      if (hasReturn) {
-         out << "    return " << methodName << "_ret;\n";
-      }
-      out << "}\n\n";
+      // Each method will push its own scope in genMethodDefinition
+      // We'll call genMethodDefinition which handles scope push/pop
+      // But we need to pass the fbName and the method.
+      // We'll use a separate function to generate the method definition.
+      // Since genMethodDefinition is private, we can call it here.
+      // However, we need to ensure that the scope manager is properly set up.
+      // The caller (generateModular) already pushed a scope for the FB and registered variables.
+      // For method definitions, we need to push a new scope inside genMethodDefinition.
+      // So we can just call genMethodDefinition.
+      genMethodDefinition(fbName, method);
    }
-
-   // Reset classe base
-   m_currentBaseClass.clear();
 
    if (!m_namespace.empty()) {
       out << "} // namespace " << m_namespace << "\n";
@@ -3774,14 +3804,11 @@ std::string CodeGenerator::generateProgramHeader(const POU& pou)
          std::string varName = normalizeIdent(d.name);
          std::string varType = mapType(d.type);
 
-         // Register as local variable
-         m_localVarTypes[varName] = varType;
+         // Register as local variable (scope already pushed by caller)
+         // No need to register here, caller did it.
 
          if (d.atAddress.empty()) {
             out << "    " << memberDecl(d) << ";\n";
-         } else {
-            // Register as local AT variable
-            m_localAtVariables[varName] = d.atAddress;
          }
       }
    }
@@ -3841,20 +3868,7 @@ std::string CodeGenerator::generateProgramSource(const POU& pou)
    // run() method
    out << "void " << progName << "::run() {\n";
 
-   m_localVarTypes.clear();
-   m_localAtVariables.clear();
-   // Register variable types and AT variables for expression generation
-   for (const auto& sec : pou.varSections) {
-      for (const auto& d : sec.decls) {
-         std::string varName = normalizeIdent(d.name);
-         m_localVarTypes[varName] = mapType(d.type);
-         if (!d.atAddress.empty()) {
-            m_localAtVariables[varName] = d.atAddress;
-         }
-      }
-   }
-
-   // Generate body using generateProgramBody
+   // Generate body using generateProgramBody (which uses the scope already set)
    std::string body = generateProgramBody(pou);
    out << body;
    out << "}\n\n";
@@ -3980,14 +3994,10 @@ std::string CodeGenerator::generateFunctionBody(const POU& pou)
    int savedIndent = m_indent;
    m_indent = 1; // Function body starts with one level of indentation
 
-   pushTempScope();
-
    // Generate body using existing genStmt (now writes to m_src)
    for (const auto& stmt : pou.body) {
       genStmt(*stmt);
    }
-
-   popTempScope();
 
    // Restore indent
    m_indent = savedIndent;
@@ -4011,57 +4021,9 @@ std::string CodeGenerator::generateFunctionBody(const POU& pou)
  */
 std::string CodeGenerator::generateMethodBody(const Method& method)
 {
-   std::ostringstream out;
-   std::string methodName = normalizeIdent(method.name);
-
-   // Save return type
-   bool hasReturn = !isVoidType(method.returnType);
-   std::string savedReturnType = m_currentFunctionReturnType;
-   m_currentFunctionReturnType = hasReturn ? mapType(method.returnType) : "";
-
-   // Save current state
-   std::string savedFunctionName = m_currentFunctionName;
-   m_currentFunctionName = methodName;
-
-   // Save original stream and create new one
-   std::ostringstream originalSrc;
-   std::swap(m_src, originalSrc);
-
-   std::ostringstream captureStream;
-   m_src = std::move(captureStream);
-
-   // Reset indent for body generation
-   int savedIndent = m_indent;
-   m_indent = 1; // Method body starts with one level of indentation
-
-   pushTempScope();
-
-   // Generate local variables with proper indentation
-   for (const auto& local : method.localVars) {
-      out << ind() << memberDecl(local) << ";\n";
-   }
-
-   // Generate body statements
-   for (const auto& stmt : method.body) {
-      genStmt(*stmt);
-   }
-
-   popTempScope();
-
-   // Restore indent
-   m_indent = savedIndent;
-
-   // Capture the generated code
-   std::string body = m_src.str();
-
-   // Restore original stream
-   std::swap(m_src, originalSrc);
-
-   m_currentFunctionName = savedFunctionName;
-   m_currentFunctionReturnType = savedReturnType;
-
-   // Combine local vars and body
-   return out.str() + body;
+   // Not used directly; genMethodDefinition handles everything.
+   // This function is kept for potential future use but is not needed.
+   return "";
 }
 
 /**
@@ -4123,18 +4085,8 @@ std::string CodeGenerator::generateProgramBody(const POU& pou)
 {
    std::ostringstream out;
 
-   // Register variable types for expression generation
-   for (const auto& sec : pou.varSections) {
-      for (const auto& d : sec.decls) {
-         std::string varName = normalizeIdent(d.name);
-         std::string varType = mapType(d.type);
-         m_varTypes[varName] = varType;
-         m_localVarTypes[varName] = varType;
-         if (!d.atAddress.empty()) {
-            m_localAtVariables[varName] = d.atAddress;
-         }
-      }
-   }
+   // The scope is already pushed and variables registered by the caller.
+   // We just need to generate the body statements.
 
    // Save the original stream
    std::ostringstream originalSrc;
@@ -4147,8 +4099,6 @@ std::string CodeGenerator::generateProgramBody(const POU& pou)
    // Right indent (level 1 for the method body)
    int savedIndent = m_indent;
    m_indent = 1;
-
-   pushTempScope();
 
    // Generate VAR_TEMP locals
    for (const auto& sec : pou.varSections) {
@@ -4168,8 +4118,6 @@ std::string CodeGenerator::generateProgramBody(const POU& pou)
    for (const auto& stmt : pou.body) {
       genStmt(*stmt);
    }
-
-   popTempScope();
 
    // Restore indent
    m_indent = savedIndent;

@@ -43,6 +43,55 @@ struct ParameterInfo
 };
 
 /**
+ * @brief Manages the symbol scope stack for code generation.
+ *
+ * Each scope holds:
+ * - variable name → C++ type
+ * - variable name → AT address string (if any)
+ * - temporary counters for output parameters
+ * - base class name for SUPER^ calls
+ *
+ * Lookup searches from the innermost scope outward.
+ */
+class ScopeManager
+{
+public:
+   // --- Scope lifecycle ---
+   void pushScope(); ///< Enter a new scope (POU, method, etc.)
+   void popScope();  ///< Leave the current scope
+
+   // --- Variable registration ---
+   void addVariable(const std::string& name, const std::string& cppType);
+   void addATVariable(const std::string& name, const std::string& atAddress);
+
+   // --- Lookup (innermost first) ---
+   std::optional<std::string> lookupVariable(const std::string& name) const;
+   std::optional<std::string> lookupATAddress(const std::string& name) const;
+
+   // --- Base class for SUPER^ ---
+   void setBaseClass(const std::string& base);
+   std::string getBaseClass() const;
+
+   // --- Temporary counters (for output parameters) ---
+   int getNextTempCounter(const std::string& baseName);
+
+private:
+   struct Scope
+   {
+      std::unordered_map<std::string, std::string> vars;
+      std::unordered_map<std::string, std::string> atAddrs;
+      std::unordered_map<std::string, int> tempCounters;
+      std::string baseClass;
+   };
+
+   std::vector<Scope> m_scopes; // index 0 = global scope
+};
+
+// ============================================================================
+//  CodeGenerator
+// ============================================================================
+
+/**
  * @struct FunctionSignature
  * @brief Simplified signature representation for functions and FBs
  *
@@ -149,27 +198,22 @@ private:
    int m_indent = 0;
    bool m_caseSensitive;        // true if identifiers should preserve original case, false to convert to uppercase (default for PLCs)
    std::string m_currentFBBase; // Base function block named by SUPER^
-   std::string m_currentBaseClass;
+
+   // Handler for variables scope
+   ScopeManager m_scope;
 
    std::unordered_map<std::string, FunctionSignature> m_signatures;
    std::unordered_map<std::string, std::unordered_set<std::string>> m_enumValues; // enum name -> set of enumerators
    std::unordered_map<std::string, std::string> m_enumeratorToEnum;               // enumerator -> enum name (O(1) lookup)
    std::unordered_map<std::string, FunctionSignature> m_methodSignatures;
-   std::unordered_map<std::string, std::string> m_varTypes;              // variable name -> type name (for FB instances)
-   std::unordered_map<std::string, bool> m_enumTypes;                    // enum name -> isScoped
-   std::unordered_map<std::string, int> m_tempCounter;                   // Current scope counters
-   std::string m_currentFunctionReturnType;                              // Empty if void, otherwise the return type
-   std::vector<std::unordered_map<std::string, int>> m_tempCounterStack; // Stack for nested scopes
-   ProjectStyle m_projectStyle = ProjectStyle::FLAT;                     // Current mode
-   std::string m_outputDir;                                              // Output directory
-   std::unordered_map<std::string, POU> m_fbMap;                         // FB name -> POU
-   std::unordered_map<std::string, bool> m_isFB;                         // Type name -> is FB
+   std::unordered_map<std::string, bool> m_enumTypes; // enum name -> isScoped
+   std::string m_currentFunctionReturnType;           // Empty if void, otherwise the return type
+   ProjectStyle m_projectStyle = ProjectStyle::FLAT;  // Current mode
+   std::string m_outputDir;                           // Output directory
+   std::unordered_map<std::string, POU> m_fbMap;      // FB name -> POU
+   std::unordered_map<std::string, bool> m_isFB;      // Type name -> is FB
    ProcessImageConfig m_piConfig;
    bool m_hasAddresses{false};
-   std::unordered_map<std::string, std::string> m_localVarTypes;     // local variables of current POU
-   std::unordered_map<std::string, std::string> m_globalVarTypes;    // global variables
-   std::unordered_map<std::string, std::string> m_localAtVariables;  // local AT variables
-   std::unordered_map<std::string, std::string> m_globalAtVariables; // global AT variables
 
    // ============================================================================
    //  Signature collection
