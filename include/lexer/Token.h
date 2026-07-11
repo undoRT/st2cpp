@@ -113,6 +113,7 @@ enum class TokenType {
    KW_MOD,
    KW_TRUE,
    KW_FALSE,
+   KW_AT,
 
    OP_ASSIGN,
    OP_ASSIGN_REF,
@@ -140,6 +141,19 @@ enum class TokenType {
    DOT,
    AT,
    PERCENT,
+
+   ADDRESS_INPUT,  // %I
+   ADDRESS_OUTPUT, // %Q
+   ADDRESS_MARKER, // %M
+   ADDRESS_TEMP,   // %T (optional, for temporary variables)
+   ADDRESS_DIRECT, // %D (optional, for direct representation)
+
+   ADDR_BIT,     // %IX, %QX, %MX
+   ADDR_BYTE,    // %IB, %QB, %MB
+   ADDR_WORD,    // %IW, %QW, %MW
+   ADDR_DWORD,   // %ID, %QD, %MD
+   ADDR_LWORD,   // %IL, %QL, %ML
+   ADDR_POINTER, // %P (for pointers)
 
    END_OF_FILE,
    UNKNOWN

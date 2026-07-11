@@ -33,8 +33,8 @@
  *
  * @param tu The translation unit AST to convert
  * @param headerName Name of the header file (used for include guards)
- * @param namespaceName C++ namespace to wrap generated code (defaults to "st2cpp")
- * @param runtimeHeader Path to runtime header to include (defaults to "st2cpp_types.hpp")
+ * @param namespaceName C++ namespace to wrap generated code (defaults to "undoCore")
+ * @param runtimeHeader Path to runtime header to include (defaults to "undoCore/undoCore.hpp")
  * @param caseSensitive If true, preserves original case; if false, converts identifiers to uppercase
  * @return CodegenResult containing both header and source code strings
  */
@@ -59,7 +59,38 @@ CodegenResult CodeGenerator::generate(const TranslationUnit& tu,
    }
    guard += "_HPP";
 
+   // Check if any AT addresses are used
+   for (const auto& pou : tu.pous) {
+      for (const auto& sec : pou.varSections) {
+         for (const auto& d : sec.decls) {
+            if (!d.atAddress.empty()) {
+               m_hasAddresses = true;
+               break;
+            }
+         }
+         if (m_hasAddresses) {
+            break;
+         }
+      }
+      if (m_hasAddresses) {
+         break;
+      }
+   }
+   // Also check globals
+   for (const auto& sec : tu.globals) {
+      for (const auto& d : sec.decls) {
+         if (!d.atAddress.empty()) {
+            m_hasAddresses = true;
+            break;
+         }
+      }
+      if (m_hasAddresses) {
+         break;
+      }
+   }
+
    // Emit header prolog
+   m_hdr << generateHeaderComment();
    m_hdr << "#pragma once\n";
    m_hdr << "#define ST2CPP_RUNTIME_NAMESPACE " << m_namespace << "\n";
    if (m_runtimeHeader.find('/') != std::string::npos || m_runtimeHeader.find('\\') != std::string::npos) {
@@ -70,6 +101,8 @@ CodegenResult CodeGenerator::generate(const TranslationUnit& tu,
       m_hdr << "#include \"" << m_runtimeHeader << "\"\n\n";
    }
 
+   // print comment about auto-generated code
+   m_src << generateHeaderComment();
    // Open namespace if specified
    if (m_namespace.empty()) {
       m_src << "#include \"" << headerName << "\"\n\n";
@@ -79,6 +112,12 @@ CodegenResult CodeGenerator::generate(const TranslationUnit& tu,
       m_src << "namespace " << m_namespace << " {\n\n";
    }
 
+   // Generate Global process image
+   if (m_hasAddresses) {
+      m_hdr << "// Global Process Image instance\n";
+      m_hdr << "inline ProcessImage<" << m_piConfig.inputBytes << ", " << m_piConfig.outputBytes << ", " << m_piConfig.markerBytes << "> "
+            << m_piConfig.instanceName << ";\n\n";
+   }
    // Generate all AST components in dependency order
    for (const auto& en : tu.enums) {
       genEnum(en); // Enums first (always independent)
@@ -94,6 +133,7 @@ CodegenResult CodeGenerator::generate(const TranslationUnit& tu,
       if (pou.kind == POUKind::FUNCTION_BLOCK) {
          m_isFB[normalizeType(pou.name)] = true;
       }
+      collectSignature(pou);
    }
 
    for (const auto& sec : tu.globals) {
@@ -234,10 +274,15 @@ std::vector<GeneratedFile> CodeGenerator::generateModularProject(const Translati
    m_methodSignatures.clear();
    m_varTypes.clear();
    m_enumTypes.clear();
+   m_enumValues.clear();
+   m_enumeratorToEnum.clear();
    m_fbMap.clear();
    m_isFB.clear();
    m_tempCounter.clear();
    m_tempCounterStack.clear();
+   m_globalAtVariables.clear();
+   m_localVarTypes.clear();
+   m_localAtVariables.clear();
 
    return generateModular(tu, outputDir);
 }
@@ -331,7 +376,6 @@ void CodeGenerator::collectSignature(const POU& pou)
  */
 void CodeGenerator::genPOU(const POU& pou)
 {
-   collectSignature(pou);
    switch (pou.kind) {
    case POUKind::FUNCTION_BLOCK:
       genFunctionBlock(pou);
@@ -637,10 +681,95 @@ void CodeGenerator::genFunction(const POU& pou)
 // ============================================================================
 
 /**
- * @brief Generate C++ struct for a PROGRAM
+ * @brief Helper function to parse an IEC address string into an AddressExpr
+ * 
+ * @param addrStr The address string (e.g., "%IX0.0", "%QW2", "%MW10")
+ * @param out The AddressExpr to fill
+ * @return true if parsing succeeded, false otherwise
+ */
+bool parseAddressString(const std::string& addrStr, AddressExpr& out)
+{
+   // Parse %IX0.0, %QB10, %MW5, etc.
+   if (addrStr.size() < 3) {
+      return false;
+   }
+
+   if (addrStr[0] != '%') {
+      return false;
+   }
+
+   // Determine type
+   switch (addrStr[1]) {
+   case 'I':
+      out.type = AddressExpr::AddressType::INPUT;
+      break;
+   case 'Q':
+      out.type = AddressExpr::AddressType::OUTPUT;
+      break;
+   case 'M':
+      out.type = AddressExpr::AddressType::MARKER;
+      break;
+   default:
+      return false;
+   }
+
+   // Determine qualifier
+   switch (addrStr[2]) {
+   case 'X':
+      out.qualifier = AddressExpr::AddressQualifier::BIT;
+      break;
+   case 'B':
+      out.qualifier = AddressExpr::AddressQualifier::BYTE;
+      break;
+   case 'W':
+      out.qualifier = AddressExpr::AddressQualifier::WORD;
+      break;
+   case 'D':
+      out.qualifier = AddressExpr::AddressQualifier::DWORD;
+      break;
+   case 'L':
+      out.qualifier = AddressExpr::AddressQualifier::LWORD;
+      break;
+   default:
+      return false;
+   }
+
+   // Parse offsets
+   size_t pos = 3;
+   std::string numStr;
+   while (pos < addrStr.size() && std::isdigit(addrStr[pos])) {
+      numStr += addrStr[pos++];
+   }
+   if (numStr.empty()) {
+      return false;
+   }
+   out.byteOffset = std::stoi(numStr);
+
+   if (pos < addrStr.size() && addrStr[pos] == '.') {
+      pos++;
+      numStr.clear();
+      while (pos < addrStr.size() && std::isdigit(addrStr[pos])) {
+         numStr += addrStr[pos++];
+      }
+      if (numStr.empty()) {
+         return false;
+      }
+      out.bitOffset = std::stoi(numStr);
+   } else {
+      out.bitOffset = -1;
+   }
+
+   out.rawText = addrStr;
+   return true;
+}
+
+/**
+ * @brief Generate C++ struct for a PROGRAM (FLAT mode)
  *
  * Programs are emitted as structs with:
+ * - A ProcessImage member
  * - Member variables for all VAR sections
+ * - Getter/setter methods for AT address variables
  * - A run() method containing the program body
  *
  * This approach allows multiple instances of the same program
@@ -653,7 +782,14 @@ void CodeGenerator::genProgram(const POU& pou)
    // Register variable types for use in genExpr (for enum resolution)
    for (const auto& sec : pou.varSections) {
       for (const auto& d : sec.decls) {
-         m_varTypes[normalizeIdent(d.name)] = mapType(d.type);
+         std::string varName = normalizeIdent(d.name);
+         std::string varType = mapType(d.type);
+         // Register as local variable
+         m_localVarTypes[varName] = varType;
+         m_varTypes[varName] = varType;
+         if (!d.atAddress.empty()) {
+            m_localAtVariables[varName] = d.atAddress;
+         }
       }
    }
 
@@ -665,7 +801,27 @@ void CodeGenerator::genProgram(const POU& pou)
    // Generate all member variables
    for (const auto& sec : pou.varSections) {
       for (const auto& d : sec.decls) {
-         m_hdr << ind() << memberDecl(d) << ";\n";
+         if (!d.atAddress.empty()) {
+            std::string varName = normalizeIdent(d.name);
+            std::string ctype = mapType(d.type);
+
+            AddressExpr addr;
+            if (parseAddressString(d.atAddress, addr)) {
+               m_hdr << ind() << "// AT " << d.atAddress << "\n";
+               // Getter (const and non-const)
+               m_hdr << ind() << "inline " << ctype << " getPi_" << varName << "() const {\n";
+               m_hdr << ind() << "    return " << generateAddressAccess(addr) << ";\n";
+               m_hdr << ind() << "}\n";
+               // Setter
+               m_hdr << ind() << "inline void setPi_" << varName << "(" << ctype << " value) {\n";
+               m_hdr << ind() << "    " << generateAddressWrite(addr, "value") << ";\n";
+               m_hdr << ind() << "}\n";
+            } else {
+               m_hdr << ind() << memberDecl(d) << ";\n";
+            }
+         } else {
+            m_hdr << ind() << memberDecl(d) << ";\n";
+         }
       }
    }
 
@@ -842,6 +998,14 @@ void CodeGenerator::genEnum(const EnumType& et)
    std::string upperName = normalizeType(et.name);
    // Register enum type for special handling in expression generation
    m_enumTypes[upperName] = true;
+
+   // Register each enumerator with its enum name for qualified access
+   for (const auto& enumerator : et.enumerators) {
+      std::string upperEnumerator = normalizeIdent(enumerator.name);
+      m_enumValues[upperName].insert(upperEnumerator);
+      m_enumeratorToEnum[upperEnumerator] = upperName;
+   }
+
    m_hdr << "// ENUM " << upperName << "\n";
    m_hdr << "enum class " << upperName << " : int {\n";
    push();
@@ -877,6 +1041,9 @@ void CodeGenerator::genEnum(const EnumType& et)
  * This avoids multiple definition issues when the header is included
  * in multiple translation units. Arrays are emitted using STArray type.
  *
+ * For global variables with AT addresses, getter and setter functions
+ * are generated instead of direct variable access.
+ *
  * @param globals List of global variable sections to generate
  */
 void CodeGenerator::genGlobals(const std::vector<VarSection>& globals)
@@ -892,6 +1059,30 @@ void CodeGenerator::genGlobals(const std::vector<VarSection>& globals)
          std::string ctype = mapType(d.type);
          std::string upperName = normalizeIdent(d.name);
 
+         // Register as global variable
+         m_globalVarTypes[upperName] = ctype;
+
+         // Global AT address variable - generate getter and setter
+         if (!d.atAddress.empty()) {
+            AddressExpr addr;
+            if (parseAddressString(d.atAddress, addr)) {
+               // Register as AT variable
+               m_globalAtVariables[upperName] = d.atAddress;
+
+               // Getter
+               m_hdr << "// AT " << d.atAddress << "\n";
+               m_hdr << "inline " << ctype << " getPi_" << upperName << "() {\n";
+               m_hdr << "    return " << generateAddressAccess(addr) << ";\n";
+               m_hdr << "}\n";
+               // Setter
+               m_hdr << "inline void setPi_" << upperName << "(" << ctype << " value) {\n";
+               m_hdr << "    " << generateAddressWrite(addr, "value") << ";\n";
+               m_hdr << "}\n";
+            }
+            continue;
+         }
+
+         // Normal global variable
          if (!d.type.arrayDims.empty()) {
             // Array global - STArray type already includes bounds
             std::string arrayDecl = ctype + " " + upperName;
@@ -1510,14 +1701,34 @@ void CodeGenerator::genStmt(const Stmt& stmt)
          using T = std::decay_t<decltype(s)>;
 
          if constexpr (std::is_same_v<T, AssignStmt>) {
-            // Assignment statement
             std::string lhsStr = genExpr(*s.lhs);
-            // Translate assignment to function name to _ret variable
+            std::string rhsStr = genExpr(*s.rhs);
+
+            // Check if LHS is a getter for an AT variable (get_NOMEVAR())
+            std::string varName;
+            if (lhsStr.rfind("getPi_", 0) == 0 && lhsStr.length() > 6 && lhsStr.back() == ')') {
+               // It is a getter: getPi_NOMEVAR()
+               varName = lhsStr.substr(6, lhsStr.length() - 8); // Remove getPi_ and ()
+               // Check if it is an AT variable
+               if (isATVariable(varName)) {
+                  // Use setter instead of assignment
+                  m_src << ind() << "setPi_" << varName << "(" << rhsStr << ");\n";
+                  return;
+               }
+            }
+
+            // Check if LHS is an address (write access required)
+            if (auto* addr = std::get_if<AddressExpr>(&s.lhs->node)) {
+               std::string writeAccess = generateAddressWrite(*addr, rhsStr);
+               m_src << ind() << writeAccess << ";\n";
+               return;
+            }
+
+            // Normal assignment
             if (lhsStr == m_currentFunctionName) {
                lhsStr = m_currentFunctionName + "_ret";
             }
-
-            m_src << ind() << lhsStr << " = " << genExpr(*s.rhs) << ";\n";
+            m_src << ind() << lhsStr << " = " << rhsStr << ";\n";
          } else if constexpr (std::is_same_v<T, ExprStmt>) {
             // Expression statement (often a function call)
             if (auto* call = std::get_if<CallExpr>(&s.expr->node)) {
@@ -2006,12 +2217,63 @@ std::string CodeGenerator::genExpr(const Expr& expr)
             if (e.suffix == "TIME") {
                return "IEC_TIME_LITERAL(\"" + e.value + "\")";
             }
-            return e.value;
+            std::string value = e.value;
+
+            // Convert 16#... to 0x...
+            if (value.rfind("16#", 0) == 0) {
+               std::string hex = value.substr(3);
+               // Remove underscores
+               hex.erase(std::remove(hex.begin(), hex.end(), '_'), hex.end());
+               return "0x" + hex;
+            }
+            // Convert 2#... to 0b... (C++14 binary literals)
+            else if (value.rfind("2#", 0) == 0) {
+               std::string bin = value.substr(2);
+               bin.erase(std::remove(bin.begin(), bin.end(), '_'), bin.end());
+               return "0b" + bin;
+            }
+            // Convert 8#... to 0... (octal)
+            else if (value.rfind("8#", 0) == 0) {
+               std::string oct = value.substr(2);
+               oct.erase(std::remove(oct.begin(), oct.end(), '_'), oct.end());
+               return "0" + oct;
+            }
+
+            return value;
          } else if constexpr (std::is_same_v<T, BoolLitExpr>) {
             return e.value ? "true" : "false";
          } else if constexpr (std::is_same_v<T, IdentExpr>) {
-            return normalizeIdent(e.name);
-         } else if constexpr (std::is_same_v<T, UnaryExpr>) {
+            std::string varName = normalizeIdent(e.name);
+
+            // Check if this identifier is an enum enumerator (O(1) lookup)
+            auto enumIt = m_enumeratorToEnum.find(varName);
+            if (enumIt != m_enumeratorToEnum.end()) {
+               // This is an enum enumerator - return qualified name
+               return enumIt->second + "::" + varName;
+            }
+
+            // First, check if it's a local variable (local variables have priority over globals)
+            if (m_localVarTypes.find(varName) != m_localVarTypes.end()) {
+               // It's a local variable - check if it has AT address
+               if (m_localAtVariables.find(varName) != m_localAtVariables.end()) {
+                  // Local variable with AT address - use getter
+                  return "getPi_" + varName + "()";
+               }
+               // Local variable without AT address - use directly
+               return varName;
+            }
+
+            // Not a local variable - check if it's an AT global variable
+            if (m_globalAtVariables.find(varName) != m_globalAtVariables.end()) {
+               // Global AT variable - use getter
+               return "getPi_" + varName + "()";
+            }
+
+            // Fallback: use name directly
+            return varName;
+         }
+
+         else if constexpr (std::is_same_v<T, UnaryExpr>) {
             if (e.op == "NOT") {
                return "!" + genExpr(*e.operand);
             }
@@ -2164,11 +2426,128 @@ std::string CodeGenerator::genExpr(const Expr& expr)
             }
             r += ")";
             return r;
+         } else if constexpr (std::is_same_v<T, AddressExpr>) {
+            // Default to read access
+            return generateAddressAccess(e);
          }
 
          return "";
       },
       expr.node);
+}
+
+// ============================================================================
+//  Address and process image
+// ============================================================================
+
+/**
+ * @brief Generate C++ code for accessing process image addresses
+ */
+std::string CodeGenerator::generateAddressAccess(const AddressExpr& addr)
+{
+   std::string imageVar = m_piConfig.instanceName;
+   std::string accessor;
+
+   switch (addr.qualifier) {
+   case AddressExpr::AddressQualifier::BIT:
+      accessor = (addr.type == AddressExpr::AddressType::INPUT)    ? "readInputBit"
+                 : (addr.type == AddressExpr::AddressType::OUTPUT) ? "readOutputBit"
+                                                                   : "readMarkerBit";
+      if (addr.bitOffset >= 0) {
+         return imageVar + "." + accessor + "(" + std::to_string(addr.byteOffset) + ", " + std::to_string(addr.bitOffset) + ")";
+      } else {
+         return imageVar + "." + accessor + "(" + std::to_string(addr.byteOffset) + ", 0)";
+      }
+
+   case AddressExpr::AddressQualifier::BYTE:
+      accessor = (addr.type == AddressExpr::AddressType::INPUT)    ? "readInputByte"
+                 : (addr.type == AddressExpr::AddressType::OUTPUT) ? "readOutputByte"
+                                                                   : "readMarkerByte";
+      return imageVar + "." + accessor + "(" + std::to_string(addr.byteOffset) + ")";
+
+   case AddressExpr::AddressQualifier::WORD:
+      accessor = (addr.type == AddressExpr::AddressType::INPUT)    ? "readInputWord"
+                 : (addr.type == AddressExpr::AddressType::OUTPUT) ? "readOutputWord"
+                                                                   : "readMarkerWord";
+      return imageVar + "." + accessor + "(" + std::to_string(addr.byteOffset) + ")";
+
+   case AddressExpr::AddressQualifier::DWORD:
+      accessor = (addr.type == AddressExpr::AddressType::INPUT)    ? "readInputDword"
+                 : (addr.type == AddressExpr::AddressType::OUTPUT) ? "readOutputDword"
+                                                                   : "readMarkerDword";
+      return imageVar + "." + accessor + "(" + std::to_string(addr.byteOffset) + ")";
+
+   case AddressExpr::AddressQualifier::LWORD:
+      accessor = (addr.type == AddressExpr::AddressType::INPUT)    ? "readInputLword"
+                 : (addr.type == AddressExpr::AddressType::OUTPUT) ? "readOutputLword"
+                                                                   : "readMarkerLword";
+      return imageVar + "." + accessor + "(" + std::to_string(addr.byteOffset) + ")";
+
+   case AddressExpr::AddressQualifier::POINTER:
+      return "&" + imageVar + ".busInputPtr()[" + std::to_string(addr.byteOffset) + "]";
+   }
+
+   return "";
+}
+
+/**
+ * @brief Generate write access for addresses (when on LHS of assignment)
+ */
+std::string CodeGenerator::generateAddressWrite(const AddressExpr& addr, const std::string& value)
+{
+   std::string imageVar = m_piConfig.instanceName;
+   std::string accessor;
+
+   switch (addr.qualifier) {
+   case AddressExpr::AddressQualifier::BIT:
+      accessor = (addr.type == AddressExpr::AddressType::INPUT)    ? "writeInputBit"
+                 : (addr.type == AddressExpr::AddressType::OUTPUT) ? "writeOutputBit"
+                                                                   : "writeMarkerBit";
+      if (addr.bitOffset >= 0) {
+         return imageVar + "." + accessor + "(" + std::to_string(addr.byteOffset) + ", " + std::to_string(addr.bitOffset) + ", " + value
+                + ")";
+      } else {
+         return imageVar + "." + accessor + "(" + std::to_string(addr.byteOffset) + ", 0, " + value + ")";
+      }
+
+   case AddressExpr::AddressQualifier::BYTE:
+      accessor = (addr.type == AddressExpr::AddressType::INPUT)    ? "writeInputByte"
+                 : (addr.type == AddressExpr::AddressType::OUTPUT) ? "writeOutputByte"
+                                                                   : "writeMarkerByte";
+      return imageVar + "." + accessor + "(" + std::to_string(addr.byteOffset) + ", " + value + ")";
+
+   case AddressExpr::AddressQualifier::WORD:
+      accessor = (addr.type == AddressExpr::AddressType::INPUT)    ? "writeInputWord"
+                 : (addr.type == AddressExpr::AddressType::OUTPUT) ? "writeOutputWord"
+                                                                   : "writeMarkerWord";
+      return imageVar + "." + accessor + "(" + std::to_string(addr.byteOffset) + ", " + value + ")";
+
+   case AddressExpr::AddressQualifier::DWORD:
+      accessor = (addr.type == AddressExpr::AddressType::INPUT)    ? "writeInputDword"
+                 : (addr.type == AddressExpr::AddressType::OUTPUT) ? "writeOutputDword"
+                                                                   : "writeMarkerDword";
+      return imageVar + "." + accessor + "(" + std::to_string(addr.byteOffset) + ", " + value + ")";
+
+   case AddressExpr::AddressQualifier::LWORD:
+      accessor = (addr.type == AddressExpr::AddressType::INPUT)    ? "writeInputLword"
+                 : (addr.type == AddressExpr::AddressType::OUTPUT) ? "writeOutputLword"
+                                                                   : "writeMarkerLword";
+      return imageVar + "." + accessor + "(" + std::to_string(addr.byteOffset) + ", " + value + ")";
+
+   default:
+      throw std::runtime_error("Invalid address qualifier for write access");
+   }
+}
+
+/**
+ * @brief Check if a variable name corresponds to an AT address variable
+ * @param varName The variable name to check
+ * @return true if the variable has an AT address
+ */
+bool CodeGenerator::isATVariable(const std::string& varName) const
+{
+   // Check both local and global AT variables
+   return m_localAtVariables.find(varName) != m_localAtVariables.end() || m_globalAtVariables.find(varName) != m_globalAtVariables.end();
 }
 
 // ============================================================================
@@ -2302,10 +2681,15 @@ std::vector<GeneratedFile> CodeGenerator::generateModular(const TranslationUnit&
       collectSignature(pou);
    }
 
-   // Step 2: Register enum types
+   // Step 2: Register enum types and their enumerators
    for (const auto& et : tu.enums) {
       std::string upperName = normalizeType(et.name);
       m_enumTypes[upperName] = true;
+      for (const auto& enumerator : et.enumerators) {
+         std::string upperEnumerator = normalizeIdent(enumerator.name);
+         m_enumValues[upperName].insert(upperEnumerator);
+         m_enumeratorToEnum[upperEnumerator] = upperName;
+      }
    }
 
    // Step 3: Collect all FBs and mark them
@@ -2329,6 +2713,10 @@ std::vector<GeneratedFile> CodeGenerator::generateModular(const TranslationUnit&
          std::string varName = normalizeIdent(d.name);
          std::string varType = mapType(d.type);
          m_varTypes[varName] = varType;
+         m_globalVarTypes[varName] = varType;
+         if (!d.atAddress.empty()) {
+            m_globalAtVariables[varName] = d.atAddress;
+         }
       }
    }
 
@@ -2349,7 +2737,60 @@ std::vector<GeneratedFile> CodeGenerator::generateModular(const TranslationUnit&
       }
    }
 
+   // Step 7.5: Check if any AT addresses are used
+   m_hasAddresses = false;
+   for (const auto& pou : tu.pous) {
+      for (const auto& sec : pou.varSections) {
+         for (const auto& d : sec.decls) {
+            if (!d.atAddress.empty()) {
+               m_hasAddresses = true;
+               break;
+            }
+         }
+         if (m_hasAddresses) {
+            break;
+         }
+      }
+      if (m_hasAddresses) {
+         break;
+      }
+   }
+   for (const auto& sec : tu.globals) {
+      for (const auto& d : sec.decls) {
+         if (!d.atAddress.empty()) {
+            m_hasAddresses = true;
+            break;
+         }
+      }
+      if (m_hasAddresses) {
+         break;
+      }
+   }
+
    // ========== GENERATION ORDER ==========
+
+   // 0. ProcessImage.hpp - Global Process Image (only an header, no source)
+   if (m_hasAddresses) {
+      std::ostringstream piHeader;
+      piHeader << generateHeaderComment();
+      piHeader << "#pragma once\n";
+      piHeader << "#define ST2CPP_RUNTIME_NAMESPACE " << m_namespace << "\n";
+      piHeader << "#include \"" << m_runtimeHeader << "\"\n";
+
+      if (!m_namespace.empty()) {
+         piHeader << "namespace " << m_namespace << " {\n\n";
+      }
+
+      piHeader << "// Global Process Image instance\n";
+      piHeader << "inline ProcessImage<" << m_piConfig.inputBytes << ", " << m_piConfig.outputBytes << ", " << m_piConfig.markerBytes
+               << "> " << m_piConfig.instanceName << ";\n\n";
+
+      if (!m_namespace.empty()) {
+         piHeader << "} // namespace " << m_namespace << "\n";
+      }
+
+      files.push_back({"ProcessImage", piHeader.str(), GenFileType::HEADER, ""});
+   }
 
    // 1. SimpleGVLs.hpp (ENUM + simple STRUCT + simple globals)
    files.push_back({"SimpleGVLs", generateSimpleGVLsHeader(tu), GenFileType::HEADER, ""});
@@ -2473,6 +2914,10 @@ std::string CodeGenerator::generateSimpleGVLsHeader(const TranslationUnit& tu)
    out << "#define ST2CPP_RUNTIME_NAMESPACE " << m_namespace << "\n";
    out << "#include \"" << m_runtimeHeader << "\"\n\n";
 
+   if (m_hasAddresses) {
+      out << "#include \"ProcessImage.hpp\"\n";
+   }
+
    if (!m_namespace.empty()) {
       out << "namespace " << m_namespace << " {\n\n";
    }
@@ -2480,6 +2925,14 @@ std::string CodeGenerator::generateSimpleGVLsHeader(const TranslationUnit& tu)
    // Generate ENUMs (always, they have no dependencies)
    for (const auto& et : tu.enums) {
       std::string upperName = normalizeType(et.name);
+      // Register enum type for special handling
+      m_enumTypes[upperName] = true;
+      for (const auto& enumerator : et.enumerators) {
+         std::string upperEnumerator = normalizeIdent(enumerator.name);
+         m_enumValues[upperName].insert(upperEnumerator);
+         m_enumeratorToEnum[upperEnumerator] = upperName;
+      }
+
       out << "// ENUM " << upperName << "\n";
       out << "enum class " << upperName << " : int {\n";
       for (size_t i = 0; i < et.enumerators.size(); ++i) {
@@ -2529,6 +2982,46 @@ std::string CodeGenerator::generateSimpleGVLsHeader(const TranslationUnit& tu)
       out << "};\n\n";
    }
 
+   // Generate getter/setter for global variables with AT addresses
+   bool hasGlobalAT = false;
+   for (const auto& sec : tu.globals) {
+      for (const auto& d : sec.decls) {
+         if (!d.atAddress.empty()) {
+            hasGlobalAT = true;
+            break;
+         }
+      }
+      if (hasGlobalAT) {
+         break;
+      }
+   }
+
+   if (hasGlobalAT) {
+      out << "// GLOBAL AT VARIABLES (getter/setter)\n";
+      for (const auto& sec : tu.globals) {
+         for (const auto& d : sec.decls) {
+            if (!d.atAddress.empty()) {
+               std::string upperName = normalizeIdent(d.name);
+               std::string ctype = mapType(d.type);
+
+               AddressExpr addr;
+               if (parseAddressString(d.atAddress, addr)) {
+                  // Getter
+                  out << "// AT " << d.atAddress << "\n";
+                  out << "inline " << ctype << " getPi_" << upperName << "() {\n";
+                  out << "    return " << generateAddressAccess(addr) << ";\n";
+                  out << "}\n";
+                  // Setter
+                  out << "inline void setPi_" << upperName << "(" << ctype << " value) {\n";
+                  out << "    " << generateAddressWrite(addr, "value") << ";\n";
+                  out << "}\n";
+               }
+            }
+         }
+      }
+      out << "\n";
+   }
+
    // Build a cache for structContainsFB to avoid repeated recursion
    std::unordered_map<std::string, bool> structContainsFBCache;
    for (const auto& st : tu.structs) {
@@ -2554,11 +3047,14 @@ std::string CodeGenerator::generateSimpleGVLsHeader(const TranslationUnit& tu)
       generateStructsInOrder(simpleStructs, &out);
    }
 
-   // Generate simple global variables (that don't involve FB types)
+   // Generate simple global variables (that don't involve FB types and are NOT AT)
    if (!tu.globals.empty()) {
       out << "// GLOBAL VARIABLES (simple types)\n";
       for (const auto& sec : tu.globals) {
          for (const auto& d : sec.decls) {
+            if (!d.atAddress.empty()) {
+               continue; // Already generated as getter/setter
+            }
             // Check if this global involves a FB type
             bool isFBType = false;
             if (d.type.base == BaseType::NAMED) {
@@ -2627,6 +3123,23 @@ std::string CodeGenerator::generateGVLsHeader(const TranslationUnit& tu)
    out << "#pragma once\n";
    out << "#define ST2CPP_RUNTIME_NAMESPACE " << m_namespace << "\n";
    out << "#include \"" << m_runtimeHeader << "\"\n";
+
+   m_hasAddresses = false;
+   for (const auto& sec : tu.globals) {
+      for (const auto& d : sec.decls) {
+         if (!d.atAddress.empty()) {
+            m_hasAddresses = true;
+            break;
+         }
+      }
+      if (m_hasAddresses) {
+         break;
+      }
+   }
+   if (m_hasAddresses) {
+      out << "#include \"ProcessImage.hpp\"\n";
+   }
+
    out << "#include \"FunctionBlocks.hpp\"\n\n";
 
    if (!m_namespace.empty()) {
@@ -2807,6 +3320,23 @@ std::string CodeGenerator::generateFBHeader(const POU& pou, const std::unordered
    out << "#pragma once\n";
    out << "#define ST2CPP_RUNTIME_NAMESPACE " << m_namespace << "\n";
    out << "#include \"" << m_runtimeHeader << "\"\n";
+
+   m_hasAddresses = false;
+   for (const auto& sec : pou.varSections) {
+      for (const auto& d : sec.decls) {
+         if (!d.atAddress.empty()) {
+            m_hasAddresses = true;
+            break;
+         }
+      }
+      if (m_hasAddresses) {
+         break;
+      }
+   }
+   if (m_hasAddresses) {
+      out << "#include \"ProcessImage.hpp\"\n";
+   }
+
    out << "#include \"SimpleGVLs.hpp\"\n";
 
    for (const auto& sec : pou.varSections) {
@@ -2994,6 +3524,30 @@ std::string CodeGenerator::generateFunctionsHeader(const TranslationUnit& tu)
    out << "#pragma once\n";
    out << "#define ST2CPP_RUNTIME_NAMESPACE " << m_namespace << "\n";
    out << "#include \"" << m_runtimeHeader << "\"\n";
+
+   m_hasAddresses = false;
+   for (const auto& pou : tu.pous) {
+      if (pou.kind == POUKind::FUNCTION) {
+         for (const auto& sec : pou.varSections) {
+            for (const auto& d : sec.decls) {
+               if (!d.atAddress.empty()) {
+                  m_hasAddresses = true;
+                  break;
+               }
+            }
+            if (m_hasAddresses) {
+               break;
+            }
+         }
+      }
+      if (m_hasAddresses) {
+         break;
+      }
+   }
+   if (m_hasAddresses) {
+      out << "#include \"ProcessImage.hpp\"\n";
+   }
+
    out << "#include \"GVLs.hpp\"\n\n";
 
    if (!m_namespace.empty()) {
@@ -3178,17 +3732,9 @@ std::string CodeGenerator::generateProgramsMaster(const std::vector<std::string>
    out << "#include \"" << m_runtimeHeader << "\"\n";
    out << "#include \"FunctionBlocks.hpp\"\n\n";
 
-   if (!m_namespace.empty()) {
-      out << "namespace " << m_namespace << " {\n\n";
-   }
-
    // Include all program headers
    for (const auto& progName : progNames) {
       out << "#include \"Programs/" << progName << ".hpp\"\n";
-   }
-
-   if (!m_namespace.empty()) {
-      out << "} // namespace " << m_namespace << "\n";
    }
 
    return out.str();
@@ -3208,6 +3754,11 @@ std::string CodeGenerator::generateProgramHeader(const POU& pou)
    out << "#pragma once\n";
    out << "#define ST2CPP_RUNTIME_NAMESPACE " << m_namespace << "\n";
    out << "#include \"" << m_runtimeHeader << "\"\n";
+
+   if (m_hasAddresses) {
+      out << "#include \"ProcessImage.hpp\"\n";
+   }
+
    out << "#include \"FunctionBlocks.hpp\"\n\n";
 
    if (!m_namespace.empty()) {
@@ -3217,17 +3768,49 @@ std::string CodeGenerator::generateProgramHeader(const POU& pou)
    out << "// PROGRAM " << progName << "\n";
    out << "struct " << progName << " {\n";
 
-   // Member variables
+   // Member variables - only non-AT variables
    for (const auto& sec : pou.varSections) {
       for (const auto& d : sec.decls) {
          std::string varName = normalizeIdent(d.name);
          std::string varType = mapType(d.type);
-         m_varTypes[varName] = varType;
-         out << "    " << memberDecl(d) << ";\n";
+
+         // Register as local variable
+         m_localVarTypes[varName] = varType;
+
+         if (d.atAddress.empty()) {
+            out << "    " << memberDecl(d) << ";\n";
+         } else {
+            // Register as local AT variable
+            m_localAtVariables[varName] = d.atAddress;
+         }
       }
    }
 
-   out << "\n    void run();\n";
+   // Generate getter/setter for AT addresses
+   for (const auto& sec : pou.varSections) {
+      for (const auto& d : sec.decls) {
+         if (!d.atAddress.empty()) {
+            std::string varName = normalizeIdent(d.name);
+            std::string ctype = mapType(d.type);
+
+            AddressExpr addr;
+            if (parseAddressString(d.atAddress, addr)) {
+               // Generate getter
+               out << "    // AT " << d.atAddress << "\n";
+               out << "    inline " << ctype << " getPi_" << varName << "() const {\n";
+               out << "        return " << generateAddressAccess(addr) << ";\n";
+               out << "    }\n";
+               // Generate setter
+               out << "    inline void setPi_" << varName << "(" << ctype << " value) {\n";
+               out << "        " << generateAddressWrite(addr, "value") << ";\n";
+               out << "    }\n";
+            }
+         }
+      }
+   }
+
+   out << "\n";
+   out << "    void run();\n";
    out << "};\n\n";
 
    if (!m_namespace.empty()) {
@@ -3255,9 +3838,25 @@ std::string CodeGenerator::generateProgramSource(const POU& pou)
       out << "namespace " << m_namespace << " {\n\n";
    }
 
+   // run() method
    out << "void " << progName << "::run() {\n";
+
+   m_localVarTypes.clear();
+   m_localAtVariables.clear();
+   // Register variable types and AT variables for expression generation
+   for (const auto& sec : pou.varSections) {
+      for (const auto& d : sec.decls) {
+         std::string varName = normalizeIdent(d.name);
+         m_localVarTypes[varName] = mapType(d.type);
+         if (!d.atAddress.empty()) {
+            m_localAtVariables[varName] = d.atAddress;
+         }
+      }
+   }
+
+   // Generate body using generateProgramBody
    std::string body = generateProgramBody(pou);
-   out << body; // body already contains indented statements
+   out << body;
    out << "}\n\n";
 
    if (!m_namespace.empty()) {
@@ -3524,13 +4123,16 @@ std::string CodeGenerator::generateProgramBody(const POU& pou)
 {
    std::ostringstream out;
 
-   // Register variable types for expression generation (for enum resolution)
-   // Nota: m_enumTypes è già stato popolato in generateModular, qui registriamo solo i tipi delle variabili
+   // Register variable types for expression generation
    for (const auto& sec : pou.varSections) {
       for (const auto& d : sec.decls) {
          std::string varName = normalizeIdent(d.name);
          std::string varType = mapType(d.type);
          m_varTypes[varName] = varType;
+         m_localVarTypes[varName] = varType;
+         if (!d.atAddress.empty()) {
+            m_localAtVariables[varName] = d.atAddress;
+         }
       }
    }
 
@@ -3547,6 +4149,20 @@ std::string CodeGenerator::generateProgramBody(const POU& pou)
    m_indent = 1;
 
    pushTempScope();
+
+   // Generate VAR_TEMP locals
+   for (const auto& sec : pou.varSections) {
+      if (sec.kind == VarKind::TEMP) {
+         for (const auto& d : sec.decls) {
+            if (d.atAddress.empty()) {
+               std::string ctype = mapType(d.type);
+               std::string varName = normalizeIdent(d.name);
+               std::string init = d.initialValue ? "{" + genExpr(*d.initialValue) + "}" : "{}";
+               m_src << ind() << ctype << " " << varName << init << ";\n";
+            }
+         }
+      }
+   }
 
    // Generate body by using genStmt
    for (const auto& stmt : pou.body) {
@@ -3588,4 +4204,240 @@ std::string CodeGenerator::generateHeaderComment() const
    out << " * This is free software; see the source for copying conditions.\n";
    out << " */\n\n";
    return out.str();
+}
+
+// ============================================================================
+//  ProcessImageAnalyzer Implementation
+// ============================================================================
+
+void ProcessImageAnalyzer::analyze(const TranslationUnit& tu)
+{
+   // Reset state
+   m_addressInfos.clear();
+   m_typeMap.clear();
+
+   // Initialize type map
+   m_typeMap[AddressExpr::AddressType::INPUT] = {AddressExpr::AddressType::INPUT, 0, 0, false};
+   m_typeMap[AddressExpr::AddressType::OUTPUT] = {AddressExpr::AddressType::OUTPUT, 0, 0, false};
+   m_typeMap[AddressExpr::AddressType::MARKER] = {AddressExpr::AddressType::MARKER, 0, 0, false};
+
+   // Scan all POUs
+   for (const auto& pou : tu.pous) {
+      for (const auto& stmt : pou.body) {
+         findAddresses(stmt);
+      }
+   }
+
+   // Scan global variables for AT addresses
+   for (const auto& sec : tu.globals) {
+      for (const auto& decl : sec.decls) {
+         if (!decl.atAddress.empty()) {
+            // Parse the AT address string
+            AddressExpr addr;
+            if (parseAddressString(decl.atAddress, addr)) {
+               updateMaxOffset(addr);
+            }
+         }
+      }
+   }
+}
+
+void ProcessImageAnalyzer::findAddresses(const std::shared_ptr<Stmt>& stmt)
+{
+   if (!stmt) {
+      return;
+   }
+
+   std::visit(
+      [this](const auto& s) {
+         using T = std::decay_t<decltype(s)>;
+
+         if constexpr (std::is_same_v<T, AssignStmt>) {
+            findAddressesInExpr(s.lhs);
+            findAddressesInExpr(s.rhs);
+         } else if constexpr (std::is_same_v<T, ExprStmt>) {
+            findAddressesInExpr(s.expr);
+         } else if constexpr (std::is_same_v<T, IfStmt>) {
+            for (const auto& branch : s.branches) {
+               if (branch.condition) {
+                  findAddressesInExpr(branch.condition);
+               }
+               for (const auto& st : branch.body) {
+                  findAddresses(st);
+               }
+            }
+         } else if constexpr (std::is_same_v<T, ForStmt>) {
+            findAddressesInExpr(s.from);
+            findAddressesInExpr(s.to);
+            if (s.by) {
+               findAddressesInExpr(s.by);
+            }
+            for (const auto& st : s.body) {
+               findAddresses(st);
+            }
+         } else if constexpr (std::is_same_v<T, WhileStmt>) {
+            findAddressesInExpr(s.condition);
+            for (const auto& st : s.body) {
+               findAddresses(st);
+            }
+         } else if constexpr (std::is_same_v<T, RepeatStmt>) {
+            for (const auto& st : s.body) {
+               findAddresses(st);
+            }
+            findAddressesInExpr(s.condition);
+         } else if constexpr (std::is_same_v<T, CaseStmt>) {
+            findAddressesInExpr(s.selector);
+            for (const auto& branch : s.branches) {
+               for (const auto& cv : branch.values) {
+                  findAddressesInExpr(cv.low);
+                  if (cv.high) {
+                     findAddressesInExpr(cv.high);
+                  }
+               }
+               for (const auto& st : branch.body) {
+                  findAddresses(st);
+               }
+            }
+         }
+         // ReturnStmt, ExitStmt, EmptyStmt have no expressions
+      },
+      stmt->node);
+}
+
+void ProcessImageAnalyzer::findAddressesInExpr(const std::shared_ptr<Expr>& expr)
+{
+   if (!expr) {
+      return;
+   }
+
+   std::visit(
+      [this](const auto& e) {
+         using T = std::decay_t<decltype(e)>;
+
+         if constexpr (std::is_same_v<T, AddressExpr>) {
+            updateMaxOffset(e);
+         } else if constexpr (std::is_same_v<T, UnaryExpr>) {
+            findAddressesInExpr(e.operand);
+         } else if constexpr (std::is_same_v<T, BinaryExpr>) {
+            findAddressesInExpr(e.left);
+            findAddressesInExpr(e.right);
+         } else if constexpr (std::is_same_v<T, MemberExpr>) {
+            findAddressesInExpr(e.object);
+         } else if constexpr (std::is_same_v<T, IndexExpr>) {
+            findAddressesInExpr(e.array);
+            for (const auto& idx : e.indices) {
+               findAddressesInExpr(idx);
+            }
+         } else if constexpr (std::is_same_v<T, DerefExpr>) {
+            findAddressesInExpr(e.pointer);
+         } else if constexpr (std::is_same_v<T, CallExpr>) {
+            findAddressesInExpr(e.callee);
+            for (const auto& arg : e.args) {
+               findAddressesInExpr(arg.value);
+            }
+         } else if constexpr (std::is_same_v<T, CastExpr>) {
+            findAddressesInExpr(e.operand);
+         } else if constexpr (std::is_same_v<T, ArrayInitExpr>) {
+            for (const auto& elem : e.elements) {
+               findAddressesInExpr(elem);
+            }
+         }
+         // LiteralExpr, BoolLitExpr, IdentExpr, SuperCallExpr, AdrExpr, SizeofExpr have no nested addresses
+      },
+      expr->node);
+}
+
+void ProcessImageAnalyzer::updateMaxOffset(const AddressExpr& addr)
+{
+   auto it = m_typeMap.find(addr.type);
+   if (it == m_typeMap.end()) {
+      return;
+   }
+
+   AddressInfo& info = it->second;
+
+   // Update byte offset (considering the size of the access)
+   int sizeInBytes = 1;
+   switch (addr.qualifier) {
+   case AddressExpr::AddressQualifier::WORD:
+      sizeInBytes = 2;
+      break;
+   case AddressExpr::AddressQualifier::DWORD:
+      sizeInBytes = 4;
+      break;
+   case AddressExpr::AddressQualifier::LWORD:
+      sizeInBytes = 8;
+      break;
+   default:
+      sizeInBytes = 1;
+      break;
+   }
+
+   int endOffset = addr.byteOffset + sizeInBytes - 1;
+   if (endOffset > info.maxByteOffset) {
+      info.maxByteOffset = endOffset;
+   }
+
+   if (addr.qualifier == AddressExpr::AddressQualifier::BIT) {
+      info.hasBitAccess = true;
+      if (addr.bitOffset > info.maxBitOffset) {
+         info.maxBitOffset = addr.bitOffset;
+      }
+   }
+}
+
+ProcessImageConfig ProcessImageAnalyzer::getRecommendedConfig() const
+{
+   ProcessImageConfig config;
+   config.autoDetect = true;
+
+   if (m_addressInfos.empty()) {
+      // No addresses used - use minimum sizes
+      config.inputBytes = 1024;
+      config.outputBytes = 1024;
+      config.markerBytes = 1024;
+      return config;
+   }
+
+   // Calculate sizes from type map
+   for (const auto& [type, info] : m_typeMap) {
+      size_t needed = info.maxByteOffset + 1;
+      if (info.hasBitAccess) {
+         // Ensure at least one byte for bit access
+         needed = std::max(needed, size_t(1));
+      }
+
+      switch (type) {
+      case AddressExpr::AddressType::INPUT:
+         config.inputBytes = nextPowerOfTwo(needed);
+         break;
+      case AddressExpr::AddressType::OUTPUT:
+         config.outputBytes = nextPowerOfTwo(needed);
+         break;
+      case AddressExpr::AddressType::MARKER:
+         config.markerBytes = nextPowerOfTwo(needed);
+         break;
+      default:
+         break;
+      }
+   }
+
+   // Minimum sizes (like Siemens S7-1200)
+   config.inputBytes = std::max(config.inputBytes, size_t(1024));
+   config.outputBytes = std::max(config.outputBytes, size_t(1024));
+   config.markerBytes = std::max(config.markerBytes, size_t(1024));
+
+   return config;
+}
+
+size_t ProcessImageAnalyzer::nextPowerOfTwo(size_t n) const
+{
+   if (n <= 1) {
+      return 1;
+   }
+   size_t power = 1;
+   while (power < n) {
+      power <<= 1;
+   }
+   return power;
 }

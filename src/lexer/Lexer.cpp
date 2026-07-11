@@ -38,6 +38,7 @@ const std::unordered_map<std::string, TokenType> Lexer::s_keywords = {
    {"VAR_EXTERNAL", TokenType::KW_VAR_EXTERNAL},
    {"VAR_GLOBAL", TokenType::KW_VAR_GLOBAL},
    {"VAR_TEMP", TokenType::KW_VAR_TEMP},
+   {"AT", TokenType::KW_AT},
    {"CONSTANT", TokenType::KW_CONSTANT},
    {"RETAIN", TokenType::KW_RETAIN},
    {"METHOD", TokenType::KW_METHOD},
@@ -271,6 +272,8 @@ Token Lexer::readIdentifierOrKeyword()
  * Handles:
  * - Decimal integers (123)
  * - Hex literals (16#FF)
+ * - Binary literals (2#1010)
+ * - Octal literals (8#1234)
  * - Real numbers (123.456, 1.2e-3)
  *
  * @return Token of type INT_LITERAL or REAL_LITERAL
@@ -280,17 +283,6 @@ Token Lexer::readNumber()
    uint32_t startLine = m_line, startCol = m_col;
    std::string text;
    bool isReal = false;
-
-   // Hex literal: 16#...
-   if (peek() == '1' && peek(1) == '6' && peek(2) == '#') {
-      text += advance();
-      text += advance();
-      text += advance();
-      while (m_pos < m_src.size() && std::isxdigit(static_cast<unsigned char>(peek()))) {
-         text += advance();
-      }
-      return Token(TokenType::INT_LITERAL, text, startLine, startCol);
-   }
 
    // Integer part
    while (m_pos < m_src.size() && std::isdigit(static_cast<unsigned char>(peek()))) {
@@ -415,6 +407,66 @@ std::vector<Token> Lexer::tokenize()
          continue;
       }
 
+      // Numeric literals with base prefix: 2#, 8#, 16#
+      // Read all digits before the '#' to support multi-digit bases like 16#
+      if (std::isdigit(static_cast<unsigned char>(c))) {
+         size_t savedPos = m_pos;
+         uint32_t savedLine = m_line;
+         uint32_t savedCol = m_col;
+         std::string baseText;
+
+         // Read all digits before '#'
+         while (m_pos < m_src.size() && std::isdigit(static_cast<unsigned char>(peek()))) {
+            baseText += advance();
+         }
+
+         // Check if we have a '#' after the digits
+         if (m_pos < m_src.size() && peek() == '#') {
+            std::string text = baseText;
+            text += advance(); // consume '#'
+
+            if (baseText == "16") {
+               // Hexadecimal: 16#FF00
+               while (m_pos < m_src.size() && (std::isxdigit(static_cast<unsigned char>(peek())) || peek() == '_')) {
+                  if (peek() != '_') {
+                     text += advance();
+                  } else {
+                     advance(); // skip underscore
+                  }
+               }
+               tokens.emplace_back(TokenType::INT_LITERAL, text, tokLine, tokCol);
+               continue;
+            } else if (baseText == "2") {
+               // Binary: 2#0101_1010
+               while (m_pos < m_src.size() && (peek() == '0' || peek() == '1' || peek() == '_')) {
+                  if (peek() != '_') {
+                     text += advance();
+                  } else {
+                     advance(); // skip underscore
+                  }
+               }
+               tokens.emplace_back(TokenType::INT_LITERAL, text, tokLine, tokCol);
+               continue;
+            } else if (baseText == "8") {
+               // Octal: 8#1234
+               while (m_pos < m_src.size() && (std::isdigit(static_cast<unsigned char>(peek())) || peek() == '_')) {
+                  if (peek() != '_') {
+                     text += advance();
+                  } else {
+                     advance(); // skip underscore
+                  }
+               }
+               tokens.emplace_back(TokenType::INT_LITERAL, text, tokLine, tokCol);
+               continue;
+            }
+         }
+
+         // Not a base literal - restore position and let number handler process it
+         m_pos = savedPos;
+         m_line = savedLine;
+         m_col = savedCol;
+      }
+
       // Number
       if (std::isdigit(static_cast<unsigned char>(c))) {
          tokens.push_back(readNumber());
@@ -515,9 +567,43 @@ std::vector<Token> Lexer::tokenize()
       case '@':
          tokens.emplace_back(TokenType::AT, "@", tokLine, tokCol);
          break;
-      case '%':
-         tokens.emplace_back(TokenType::PERCENT, "%", tokLine, tokCol);
+      case '%': {
+         char next = peek();
+         if (next == 'I' || next == 'Q' || next == 'M' || next == 'T' || next == 'D') {
+            std::string addr = "%";
+            addr += advance(); // Consume I/Q/M/T/D
+
+            // Read qualifier (X, B, W, D, L, P)
+            if (std::isalpha(peek())) {
+               addr += advance();
+            }
+
+            // Read numeric offset
+            while (std::isdigit(peek())) {
+               addr += advance();
+            }
+
+            // Read bit offset if present
+            if (peek() == '.') {
+               addr += advance(); // Consume '.'
+               while (std::isdigit(peek())) {
+                  addr += advance();
+               }
+            }
+
+            // Determine token type
+            if (addr.rfind("%I", 0) == 0) {
+               tokens.emplace_back(TokenType::ADDRESS_INPUT, addr, tokLine, tokCol);
+            } else if (addr.rfind("%Q", 0) == 0) {
+               tokens.emplace_back(TokenType::ADDRESS_OUTPUT, addr, tokLine, tokCol);
+            } else if (addr.rfind("%M", 0) == 0) {
+               tokens.emplace_back(TokenType::ADDRESS_MARKER, addr, tokLine, tokCol);
+            } else {
+               tokens.emplace_back(TokenType::PERCENT, addr, tokLine, tokCol);
+            }
+         }
          break;
+      }
       default:
          tokens.emplace_back(TokenType::UNKNOWN, std::string(1, c), tokLine, tokCol);
       }

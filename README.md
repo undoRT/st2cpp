@@ -82,11 +82,11 @@ END_FUNCTION_BLOCK
 ## CLI Reference
 
 | Option | Description |
-|---|---|
+| --- | --- |
 | `-o <file>` | Output `.cpp` file (default: `<input>.cpp`) |
 | `-H <file>` | Output `.hpp` file (default: `<input>.hpp`) |
-| `--namespace <name>` | C++ namespace for generated code (default: `st2cpp`) |
-| `--runtime <file>` | Custom runtime header (default: `st2cpp_types.hpp`) |
+| `--namespace <name>` | C++ namespace for generated code (default: `undoCore`) |
+| `--runtime <file>` | Custom runtime header (default: `undoCore/undoCore.hpp`) |
 | `--workspace <path>` | Process all `.st` files recursively |
 | `--project-style` | Modular output with dependency management (requires `--workspace`) |
 | `--output-dir <dir>` | Output directory for workspace/project mode |
@@ -130,8 +130,7 @@ Core standards: C++17, RAII, Doxygen on all public APIs.
 
 ## License
 
-GPL-3.0 — see [LICENSE](LICENSE).  
-The runtime library `st2cpp_types.hpp` carries a linking exception — see [COPYING.ST2CPP_TYPES](COPYING.ST2CPP_TYPES).
+GPL-3.0 — see [LICENSE](LICENSE).
 
 ---
 

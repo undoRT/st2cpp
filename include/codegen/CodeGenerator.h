@@ -5,7 +5,7 @@
  * This header declares the `CodeGenerator` class which emits C++ header
  * and source strings from a parsed Structured Text `TranslationUnit`.
  * The implementation produces a minimal runtime-compatible C++ output
- * using the header-only st2cpp_types in `st2cpp_includes/st2cpp_types.hpp`.
+ * using the header-only types.hpp in `st2cpp_includes/undoCore/include/undoCore/types.hpp`.
  *
  * @author Salvatore Bamundo
  * @date June 2026
@@ -94,6 +94,19 @@ enum class ProjectStyle {
 };
 
 /**
+ * @brief Configuration for Process Image sizing
+ */
+struct ProcessImageConfig
+{
+   size_t inputBytes = 1024;
+   size_t outputBytes = 1024;
+   size_t markerBytes = 1024;
+   bool autoDetect = true;   // Auto-detect from addresses used
+   bool useGlobalPI = false; // Project-style: shared process image
+   std::string instanceName = "processImage";
+};
+
+/**
  * Type simplifier
  */
 using BuildStructDepType = std::unordered_map<std::string, std::unordered_set<std::string>>;
@@ -104,7 +117,7 @@ using BuildStructDepType = std::unordered_map<std::string, std::unordered_set<st
  *
  * The `CodeGenerator` visits the `TranslationUnit` and produces a pair of
  * strings: a C++ header and a C++ source. The generator targets the small
- * `mpscpp` runtime provided in `st2cpp_includes/st2cpp_types.hpp`.
+ * `mpscpp` runtime provided in `undoCore/include/undoCore/types.hpp`.
  */
 class CodeGenerator
 {
@@ -115,14 +128,16 @@ public:
 
    CodegenResult generate(const TranslationUnit& tu,
                           const std::string& headerName,
-                          const std::string& namespaceName = "st2cpp",
-                          const std::string& runtimeHeader = "st2cpp_types.hpp",
+                          const std::string& namespaceName = "undoCore",
+                          const std::string& runtimeHeader = "undoCore/types.hpp",
                           bool caseSensitive = false);
 
    std::vector<GeneratedFile> generateModularProject(const TranslationUnit& tu, const std::string& outputDir);
    void setNamespace(const std::string& ns) { m_namespace = ns; }
    void setRuntimeHeader(const std::string& rt) { m_runtimeHeader = rt; }
    void setCaseSensitive(const bool caseSensitive) { m_caseSensitive = caseSensitive; }
+   void setProcessImageConfig(const ProcessImageConfig& config) { m_piConfig = config; }
+   void setProcessImageGlobal(bool isGlobal) { m_piConfig.useGlobalPI = isGlobal; }
 
 private:
    std::string m_namespace;     // Namespace per il codice generato
@@ -137,6 +152,8 @@ private:
    std::string m_currentBaseClass;
 
    std::unordered_map<std::string, FunctionSignature> m_signatures;
+   std::unordered_map<std::string, std::unordered_set<std::string>> m_enumValues; // enum name -> set of enumerators
+   std::unordered_map<std::string, std::string> m_enumeratorToEnum;               // enumerator -> enum name (O(1) lookup)
    std::unordered_map<std::string, FunctionSignature> m_methodSignatures;
    std::unordered_map<std::string, std::string> m_varTypes;              // variable name -> type name (for FB instances)
    std::unordered_map<std::string, bool> m_enumTypes;                    // enum name -> isScoped
@@ -147,6 +164,12 @@ private:
    std::string m_outputDir;                                              // Output directory
    std::unordered_map<std::string, POU> m_fbMap;                         // FB name -> POU
    std::unordered_map<std::string, bool> m_isFB;                         // Type name -> is FB
+   ProcessImageConfig m_piConfig;
+   bool m_hasAddresses{false};
+   std::unordered_map<std::string, std::string> m_localVarTypes;     // local variables of current POU
+   std::unordered_map<std::string, std::string> m_globalVarTypes;    // global variables
+   std::unordered_map<std::string, std::string> m_localAtVariables;  // local AT variables
+   std::unordered_map<std::string, std::string> m_globalAtVariables; // global AT variables
 
    // ============================================================================
    //  Signature collection
@@ -253,6 +276,13 @@ private:
    std::string genExpr(const Expr& expr);
 
    // ============================================================================
+   //  Address and process image
+   // ============================================================================
+   std::string generateAddressAccess(const AddressExpr& addr);
+   std::string generateAddressWrite(const AddressExpr& addr, const std::string& value);
+   bool isATVariable(const std::string& varName) const;
+
+   // ============================================================================
    //  Project-style generation
    // ============================================================================
 
@@ -288,4 +318,32 @@ private:
    std::string ind() const { return std::string(m_indent * 4, ' '); }
    void push() { ++m_indent; }
    void pop() { --m_indent; }
+};
+
+/**
+ * @brief Analyzer for detecting Process Image sizes from AST
+ */
+class ProcessImageAnalyzer
+{
+public:
+   struct AddressInfo
+   {
+      AddressExpr::AddressType type;
+      int maxByteOffset = 0;
+      int maxBitOffset = 0;
+      bool hasBitAccess = false;
+   };
+
+   void analyze(const TranslationUnit& tu);
+   ProcessImageConfig getRecommendedConfig() const;
+   bool hasAddresses() const { return !m_addressInfos.empty(); }
+
+private:
+   std::vector<AddressInfo> m_addressInfos;
+   std::unordered_map<AddressExpr::AddressType, AddressInfo> m_typeMap;
+
+   void findAddresses(const std::shared_ptr<Stmt>& stmt);
+   void findAddressesInExpr(const std::shared_ptr<Expr>& expr);
+   void updateMaxOffset(const AddressExpr& addr);
+   size_t nextPowerOfTwo(size_t n) const;
 };

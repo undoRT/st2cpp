@@ -440,6 +440,13 @@ std::shared_ptr<Expr> Parser::parsePrimary()
       return parsePostfix(expr);
    }
 
+   // Process Image Address access
+   if (check(TokenType::ADDRESS_INPUT) || check(TokenType::ADDRESS_OUTPUT) || check(TokenType::ADDRESS_MARKER)) {
+      auto tok = advance();
+      auto addr = parseAddressExpression(tok);
+      return addr;
+   }
+
    throw error("Expected expression");
 }
 
@@ -538,4 +545,81 @@ CallExpr::Arg Parser::parseCallArg()
    }
 
    return arg;
+}
+
+/**
+ * @brief TODO: To comment
+ * 
+ * @param tok 
+ * @return std::shared_ptr<Expr> 
+ */
+std::shared_ptr<Expr> Parser::parseAddressExpression(const Token& tok)
+{
+   AddressExpr addr;
+   addr.rawText = tok.text;
+
+   // Parse address string: %IX0.0, %QB10, %MW5
+   std::string text = tok.text;
+
+   // Determine type
+   if (text[1] == 'I') {
+      addr.type = AddressExpr::AddressType::INPUT;
+   } else if (text[1] == 'Q') {
+      addr.type = AddressExpr::AddressType::OUTPUT;
+   } else if (text[1] == 'M') {
+      addr.type = AddressExpr::AddressType::MARKER;
+   } else if (text[1] == 'T') {
+      addr.type = AddressExpr::AddressType::TEMP;
+   } else if (text[1] == 'D') {
+      addr.type = AddressExpr::AddressType::DIRECT;
+   }
+
+   // Determine qualifier
+   char qual = text[2];
+   switch (qual) {
+   case 'X':
+      addr.qualifier = AddressExpr::AddressQualifier::BIT;
+      break;
+   case 'B':
+      addr.qualifier = AddressExpr::AddressQualifier::BYTE;
+      break;
+   case 'W':
+      addr.qualifier = AddressExpr::AddressQualifier::WORD;
+      break;
+   case 'D':
+      addr.qualifier = AddressExpr::AddressQualifier::DWORD;
+      break;
+   case 'L':
+      addr.qualifier = AddressExpr::AddressQualifier::LWORD;
+      break;
+   case 'P':
+      addr.qualifier = AddressExpr::AddressQualifier::POINTER;
+      break;
+   default:
+      throw error("Invalid address qualifier");
+   }
+
+   // Parse offsets
+   size_t pos = 3; // After %IX, %QB, etc.
+   std::string numStr;
+
+   // Parse byte offset
+   while (pos < text.size() && std::isdigit(text[pos])) {
+      numStr += text[pos++];
+   }
+   addr.byteOffset = std::stoi(numStr);
+
+   // Parse bit offset (if present)
+   if (pos < text.size() && text[pos] == '.') {
+      pos++;
+      numStr.clear();
+      while (pos < text.size() && std::isdigit(text[pos])) {
+         numStr += text[pos++];
+      }
+      addr.bitOffset = std::stoi(numStr);
+   } else {
+      addr.bitOffset = -1; // No bit offset
+   }
+
+   return std::make_shared<Expr>(addr, tok.line);
 }

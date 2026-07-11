@@ -1,0 +1,3 @@
+[submodule "st2cpp_includes/undoCore"]
+	path = st2cpp_includes/undoCore
+	url = https://github.com/undoRT/undoCore.git

@@ -123,6 +123,7 @@ private:
    std::shared_ptr<Expr> parsePrimary();
    std::shared_ptr<Expr> parsePostfix(std::shared_ptr<Expr> base);
    CallExpr::Arg parseCallArg();
+   std::shared_ptr<Expr> parseAddressExpression(const Token& tok);
 
    // ========================================================================
    //  Helper Functions

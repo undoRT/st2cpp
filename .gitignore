@@ -8,7 +8,10 @@ cmake-build-*/
 *.hpp
 !src/**/*.cpp
 !include/**/*.hpp
-!st2cpp_includes/**/*.hpp
+!st2cpp_includes/**
+CMakeDoxy*
+CPack*
+libst2cpp_lib.a
 !tests/*.cpp
 !tests/*.hpp
 *.out
@@ -60,5 +63,6 @@ st2cpp
 # Test output directories
 tests/test_output/
 tests/*/test_output/
-*.notrack
+!tests/*/main.cpp
+*.notrac
 clearBeforePush.sh
