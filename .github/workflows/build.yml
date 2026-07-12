@@ -154,10 +154,13 @@ jobs:
 
       - name: Setup vcpkg (Windows)
         if: runner.os == 'Windows'
-        uses: johnwason/vcpkg-action@v6
-        with:
-          pkgs: gtest
-          triplet: x64-windows
+        uses: actions/setup-vcpkg@v1
+
+      - name: Install GTest via vcpkg (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          vcpkg install gtest:x64-windows
 
       - name: Configure CMake (macOS)
         if: runner.os == 'macOS'
@@ -170,7 +173,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON
 
       - name: Build compiler and tests (macOS)
         if: runner.os == 'macOS'
@@ -194,7 +197,6 @@ jobs:
         shell: pwsh
         run: |
           cd build
-          $env:PATH = "$env:PATH;$(pwd)\Release"
           ctest --output-on-failure --verbose
 
       #
