@@ -32,5 +32,6 @@ public:
    static std::string readFile(const std::string& path);
    static void writeFile(const std::string& path, const std::string& content);
    static int compileSource(const std::string& sourcePath, const std::string& includePath, bool isCpp20 = false);
+   static int compileSources(const std::vector<std::string>& sourceFiles, const std::string& includePath, bool isCpp20 = false);
    static std::string runCommand(const std::string& cmd);
 };

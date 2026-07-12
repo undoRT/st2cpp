@@ -217,6 +217,67 @@ int TestHelper::compileSource(const std::string& sourcePath, const std::string& 
 }
 
 /**
+ * @brief Helper to compile multiple source files (for modular projects)
+ * 
+ * @param sourceFiles List of source files to compile
+ * @param includePath filepath for the headers
+ * @return the result
+ */
+int TestHelper::compileSources(const std::vector<std::string>& sourceFiles, const std::string& includePath, bool isCpp20)
+{
+   std::string output;
+   int result = 0;
+
+   if (sourceFiles.empty()) {
+      return 1;
+   }
+
+   // Build the command
+   std::string cmd;
+
+#ifdef _WIN32
+   std::string compiler = findMSVCCompiler();
+   if (compiler.empty()) {
+      std::cerr << "MSVC compiler not found! Falling back to g++ (may fail)" << std::endl;
+      std::string stdFlag = isCpp20 ? "-std=c++20" : "-std=c++17";
+      cmd = "g++ " + stdFlag + " -fsyntax-only";
+      for (const auto& src : sourceFiles) {
+         cmd += " \"" + src + "\"";
+      }
+      cmd += " -I\"" + includePath + "\" 2>&1";
+      output = runCommand(cmd);
+   } else {
+      std::string stdFlag = isCpp20 ? "/std:c++20" : "/std:c++17";
+      cmd = "\"" + compiler + "\" /EHsc " + stdFlag + " /I\"" + includePath + "\"";
+      for (const auto& src : sourceFiles) {
+         cmd += " \"" + src + "\"";
+      }
+      cmd += " /link /out:test.exe 2>&1";
+      output = runCommand(cmd);
+   }
+#else
+   std::string stdFlag = isCpp20 ? "-std=c++20" : "-std=c++17";
+   cmd = "g++ " + stdFlag + " -fsyntax-only";
+   for (const auto& src : sourceFiles) {
+      cmd += " \"" + src + "\"";
+   }
+   cmd += " -I\"" + includePath + "\" 2>&1";
+   output = runCommand(cmd);
+#endif
+
+   // Check for errors
+   if (output.find("error") != std::string::npos || output.find("Error") != std::string::npos
+       || output.find("fatal error") != std::string::npos) {
+      std::cerr << "Compilation errors:\n" << output << std::endl;
+      result = 1;
+   } else {
+      result = 0;
+   }
+
+   return result;
+}
+
+/**
  * @brief Helper to run a command cmd
  * 
  * @param cmd to pass

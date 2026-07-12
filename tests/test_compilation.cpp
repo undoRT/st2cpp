@@ -519,49 +519,29 @@ TEST_F(CompilationTest, CompileModularProject)
 
    listGeneratedFiles();
 
-   std::vector<fs::path> possiblePaths = {m_tempDir / "Programs" / "MAIN.cpp",
-                                          m_tempDir / "Programs" / "Main.cpp",
-                                          m_tempDir / "MAIN.cpp",
-                                          m_tempDir / "Main.cpp"};
-
-   fs::path mainCpp;
-   for (const auto& path : possiblePaths) {
-      if (fs::exists(path)) {
-         mainCpp = path;
-         break;
+   // Find all .cpp files
+   std::vector<std::string> sourceFiles;
+   for (const auto& entry : fs::recursive_directory_iterator(m_tempDir)) {
+      if (entry.is_regular_file() && entry.path().extension() == ".cpp") {
+         sourceFiles.push_back(entry.path().string());
       }
    }
 
-   if (mainCpp.empty()) {
-      FAIL() << "Main.cpp not found";
-      return;
-   }
-
-   std::cout << "Found Main.cpp at: " << mainCpp.string() << "\n";
-
-   std::string compileCmd = "g++ -std=c++17 -fsyntax-only " + mainCpp.string() + " -I" + m_tempDir.string();
-
-   for (const auto& entry : fs::recursive_directory_iterator(m_tempDir)) {
-      if (entry.is_regular_file() && entry.path().extension() == ".cpp") {
-         if (entry.path() != mainCpp) {
-            compileCmd += " " + entry.path().string();
+   // If no .cpp files found, try with .cpp files in subdirectories
+   if (sourceFiles.empty()) {
+      for (const auto& entry : fs::recursive_directory_iterator(m_tempDir)) {
+         if (entry.is_regular_file() && entry.path().extension() == ".cpp") {
+            sourceFiles.push_back(entry.path().string());
          }
       }
    }
 
-   compileCmd += " 2>&1 > /dev/null";
-   std::cout << "Compile command: " << compileCmd << "\n";
-
-   int exitCode = std::system(compileCmd.c_str());
-
-   if (exitCode != 0) {
-      std::string cmd2 = "g++ -std=c++17 -fsyntax-only " + mainCpp.string() + " -I" + m_tempDir.string() + " 2>&1 | head -30";
-      std::string errors = TestHelper::runCommand(cmd2);
-      if (!errors.empty()) {
-         std::cerr << "Compilation errors:\n" << errors << std::endl;
-      }
+   if (sourceFiles.empty()) {
+      FAIL() << "No .cpp files found in " << m_tempDir.string();
+      return;
    }
 
+   int exitCode = TestHelper::compileSources(sourceFiles, m_tempDir.string());
    EXPECT_EQ(exitCode, 0) << "Compilation failed for modular project";
 }
 
