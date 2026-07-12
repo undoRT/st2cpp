@@ -152,10 +152,12 @@ jobs:
         run: |
           brew install cmake googletest
 
-      - name: Install dependencies (Windows)
+      - name: Setup vcpkg (Windows)
         if: runner.os == 'Windows'
-        run: |
-          vcpkg install gtest:x64-windows
+        uses: johnwason/vcpkg-action@v6
+        with:
+          pkgs: gtest
+          triplet: x64-windows
 
       - name: Configure CMake (macOS)
         if: runner.os == 'macOS'
@@ -166,18 +168,23 @@ jobs:
 
       - name: Configure CMake (Windows)
         if: runner.os == 'Windows'
+        shell: pwsh
         run: |
-          cmake -B build \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_TESTS=ON \
-            -DCMAKE_TOOLCHAIN_FILE="${{ env.VCPKG_ROOT }}/scripts/buildsystems/vcpkg.cmake"
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake"
 
-      - name: Build compiler and tests
+      - name: Build compiler and tests (macOS)
+        if: runner.os == 'macOS'
         run: |
           cmake --build build --config Release --target st2cpp st2cpp_tests -j
 
-      - name: Run tests (Unix)
-        if: runner.os != 'Windows'
+      - name: Build compiler and tests (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --target st2cpp st2cpp_tests -j
+
+      - name: Run tests (macOS)
+        if: runner.os == 'macOS'
         run: |
           cd build
           ctest --output-on-failure --verbose
@@ -326,12 +333,19 @@ jobs:
             libgtest-dev \
             lcov
 
+      - name: Clean previous coverage data
+        run: |
+          rm -rf build
+          find . -name "*.gcda" -delete
+          find . -name "*.gcno" -delete
+
       - name: Configure CMake with coverage
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Debug \
             -DBUILD_TESTS=ON \
-            -DCMAKE_CXX_FLAGS="--coverage"
+            -DCMAKE_CXX_FLAGS="--coverage -fprofile-arcs -ftest-coverage" \
+            -DCMAKE_EXE_LINKER_FLAGS="--coverage"
 
       - name: Build tests
         run: |
@@ -342,13 +356,27 @@ jobs:
       - name: Run tests with coverage
         run: |
           cd build
-          ctest --output-on-failure
+          ctest --output-on-failure --verbose
 
       - name: Generate coverage report
         run: |
           cd build
-          lcov --capture --directory . --output-file coverage.info
-          lcov --remove coverage.info '/usr/*' --output-file coverage.info
+          # Ignore warnings and mismatches
+          lcov --capture \
+            --directory . \
+            --output-file coverage.info \
+            --ignore-errors gcov,gcov,mismatch \
+            --rc lcov_branch_coverage=0
+
+          # Remove system headers and test files from coverage
+          lcov --remove coverage.info \
+            '/usr/*' \
+            '*/tests/*' \
+            '*/googletest/*' \
+            --output-file coverage.info \
+            --ignore-errors unused
+
+          # List coverage summary
           lcov --list coverage.info
 
       - name: Upload coverage to Codecov
@@ -356,6 +384,7 @@ jobs:
         with:
           file: ./build/coverage.info
           fail_ci_if_error: false
+          verbose: true
 
   #
   # =========================
