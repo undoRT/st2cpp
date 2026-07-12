@@ -182,6 +182,12 @@ jobs:
           cd build
           ctest --output-on-failure --verbose
 
+      - name: Setup MSVC environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
       - name: Run tests (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

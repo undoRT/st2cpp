@@ -118,6 +118,50 @@ void TestHelper::writeFile(const std::string& path, const std::string& content)
 }
 
 /**
+ * @brief Helper to find MSVC compiler on Windows
+ */
+#ifdef _WIN32
+static std::string findMSVCCompiler()
+{
+   // Try to find cl.exe in PATH
+   std::string cmd = "where cl.exe 2>nul";
+   std::string output = TestHelper::runCommand(cmd);
+   if (!output.empty()) {
+      // Remove newline
+      output.erase(output.find_last_not_of(" \n\r\t") + 1);
+      return output;
+   }
+
+   // Try common VS installation paths
+   std::vector<std::string> paths = {
+      "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/VC/Tools/MSVC/*/bin/Hostx64/x64/cl.exe",
+      "C:/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/MSVC/*/bin/Hostx64/x64/cl.exe",
+      "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/*/bin/Hostx64/x64/cl.exe",
+      "C:/Program Files (x86)/Microsoft Visual Studio/2019/Enterprise/VC/Tools/MSVC/*/bin/Hostx64/x64/cl.exe",
+      "C:/Program Files (x86)/Microsoft Visual Studio/2019/Professional/VC/Tools/MSVC/*/bin/Hostx64/x64/cl.exe",
+      "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/VC/Tools/MSVC/*/bin/Hostx64/x64/cl.exe",
+   };
+
+   for (const auto& pattern : paths) {
+      // Use dir to find the actual path
+      std::string dirCmd = "dir /s /b \"" + pattern + "\" 2>nul | findstr /v \"Hostx86\"";
+      std::string result = TestHelper::runCommand(dirCmd);
+      if (!result.empty()) {
+         // Take the first line
+         size_t pos = result.find_first_of("\n");
+         if (pos != std::string::npos) {
+            result = result.substr(0, pos);
+         }
+         result.erase(result.find_last_not_of(" \n\r\t") + 1);
+         return result;
+      }
+   }
+
+   return "";
+}
+#endif
+
+/**
  * @brief Helper to compile the generated code
  * 
  * @param sourcePath filepath to compile
@@ -126,28 +170,48 @@ void TestHelper::writeFile(const std::string& path, const std::string& content)
  */
 int TestHelper::compileSource(const std::string& sourcePath, const std::string& includePath, bool isCpp20)
 {
-   // Build the compilation command
-   std::string cmd;
-   if (isCpp20) {
-      cmd = "g++ -std=c++20 -fsyntax-only " + sourcePath + " -I" + includePath + " 2>&1 > /dev/null";
+   std::string output;
+   int result = 0;
+
+#ifdef _WIN32
+   // Windows: use MSVC compiler (cl.exe)
+   std::string compiler = findMSVCCompiler();
+   if (compiler.empty()) {
+      std::cerr << "MSVC compiler not found! Falling back to g++ (may fail)" << std::endl;
+      // Fallback: try g++ (from MSYS2/MinGW)
+      std::string stdFlag = isCpp20 ? "-std=c++20" : "-std=c++17";
+      std::string cmd = "g++ " + stdFlag + " -fsyntax-only \"" + sourcePath + "\" -I\"" + includePath + "\" 2>&1";
+      output = runCommand(cmd);
    } else {
-      cmd = "g++ -std=c++17 -fsyntax-only " + sourcePath + " -I" + includePath + " 2>&1 > /dev/null";
+      // Use MSVC cl.exe
+      std::string stdFlag = isCpp20 ? "/std:c++20" : "/std:c++17";
+      std::string cmd = "\"" + compiler + "\" /EHsc " + stdFlag + " /I\"" + includePath + "\" \"" + sourcePath
+                        + "\" /link /out:test.exe 2>&1";
+      output = runCommand(cmd);
    }
 
-   int result = std::system(cmd.c_str());
-
-   if (result != 0) {
-      std::string cmd2;
-      if (isCpp20) {
-         cmd2 = "g++ -std=c++20 -fsyntax-only " + sourcePath + " -I" + includePath + " 2>&1 | head -30";
-      } else {
-         cmd2 = "g++ -std=c++17 -fsyntax-only " + sourcePath + " -I" + includePath + " 2>&1 | head -30";
-      }
-      std::string errors = runCommand(cmd2);
-      if (!errors.empty()) {
-         std::cerr << "Compilation errors:\n" << errors << std::endl;
-      }
+   // Check for errors in output
+   if (output.find("error") != std::string::npos || output.find("Error") != std::string::npos
+       || output.find("fatal error") != std::string::npos) {
+      std::cerr << "Compilation errors:\n" << output << std::endl;
+      result = 1;
+   } else {
+      result = 0;
    }
+#else
+   // Linux/macOS: use g++
+   std::string stdFlag = isCpp20 ? "-std=c++20" : "-std=c++17";
+   std::string cmd = "g++ " + stdFlag + " -fsyntax-only \"" + sourcePath + "\" -I\"" + includePath + "\" 2>&1";
+   output = runCommand(cmd);
+
+   if (output.find("error:") != std::string::npos || output.find("Error:") != std::string::npos
+       || output.find("fatal error:") != std::string::npos) {
+      std::cerr << "Compilation errors:\n" << output << std::endl;
+      result = 1;
+   } else {
+      result = 0;
+   }
+#endif
 
    return result;
 }
