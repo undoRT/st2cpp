@@ -150,17 +150,7 @@ jobs:
       - name: Install dependencies (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install cmake googletest
-
-      - name: Setup vcpkg (Windows)
-        if: runner.os == 'Windows'
-        uses: actions/setup-vcpkg@v1
-
-      - name: Install GTest via vcpkg (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          vcpkg install gtest:x64-windows
+          brew install cmake
 
       - name: Configure CMake (macOS)
         if: runner.os == 'macOS'
