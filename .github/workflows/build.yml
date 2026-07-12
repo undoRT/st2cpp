@@ -46,19 +46,22 @@ jobs:
             package_dir: st2cpp-linux-arm64
 
     steps:
+      - name: Install Git 2.39+
+        run: |
+          apt update
+          apt install -y git
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Install dependencies
+      - name: Install build dependencies
         run: |
-          apt update
           apt install -y \
             build-essential \
             cmake \
             g++ \
-            git \
             libgtest-dev
 
       - name: Configure CMake
