@@ -21,6 +21,11 @@
 #include <cstdio>
 #include <iostream>
 
+#ifdef _WIN32
+#define popen  _popen
+#define pclose _pclose
+#endif
+
 /**
  * @brief Helper class to call the transpiler st2cpp generation functions
  * 
