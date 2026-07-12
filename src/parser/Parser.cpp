@@ -551,6 +551,30 @@ VarSection Parser::parseMethodVarSection(VarKind kind)
    return sec;
 }
 
+/**
+ * @brief Parse a struct initialization body: (member := value, ...)
+ * @return StructInitExpr AST node
+ */
+StructInitExpr Parser::parseStructInitBody()
+{
+   StructInitExpr init;
+   while (!check(TokenType::RPAREN) && !atEnd()) {
+      if (!check(TokenType::IDENTIFIER)) {
+         throw error("Expected member name in struct initialization");
+      }
+      StructInitExpr::MemberInit member;
+      member.member = advance().text;
+      expect(TokenType::OP_ASSIGN, "Expected ':=' after member name");
+      member.value = parseExpr(); // può essere un'altra struct init o un'espressione normale
+      init.members.push_back(std::move(member));
+      if (!check(TokenType::RPAREN)) {
+         expect(TokenType::COMMA, "Expected ',' between struct initializers");
+      }
+   }
+   expect(TokenType::RPAREN, "Expected ')' after struct initialization");
+   return init;
+}
+
 // ============================================================================
 //  Variable Section Parsing
 // ============================================================================
@@ -594,12 +618,19 @@ VarSection Parser::parseVarSection(VarKind kind)
          names.push_back(expect(TokenType::IDENTIFIER, "Expected variable name").text);
       }
 
-      // Optional AT address
+      // AT Address
       std::string atAddr;
-      if (match(TokenType::AT)) {
-         while (!check(TokenType::COLON) && !atEnd()) {
-            atAddr += peek().text;
-            advance();
+      if (match(TokenType::KW_AT)) {
+         // Read address (eg %IX0.0, %QW2, %MW10)
+         if (check(TokenType::ADDRESS_INPUT) || check(TokenType::ADDRESS_OUTPUT) || check(TokenType::ADDRESS_MARKER)
+             || check(TokenType::ADDRESS_TEMP) || check(TokenType::ADDRESS_DIRECT)) {
+            atAddr = advance().text;
+         } else {
+            // Read token by token until ":"
+            while (!check(TokenType::COLON) && !atEnd()) {
+               atAddr += peek().text;
+               advance();
+            }
          }
       }
 
@@ -608,7 +639,6 @@ VarSection Parser::parseVarSection(VarKind kind)
 
       std::shared_ptr<Expr> init;
       if (match(TokenType::OP_ASSIGN)) {
-         // Check for array initializer: [ ... ]
          if (check(TokenType::LBRACKET)) {
             init = parseArrayInitializer();
          } else {
@@ -659,12 +689,19 @@ VarSection Parser::parseGlobalVarSection()
          names.push_back(expect(TokenType::IDENTIFIER, "Expected variable name").text);
       }
 
-      // Optional AT address
+      // AT Address
       std::string atAddr;
-      if (match(TokenType::AT)) {
-         while (!check(TokenType::COLON) && !atEnd()) {
-            atAddr += peek().text;
-            advance();
+      if (match(TokenType::KW_AT)) {
+         // Address can be a token of type ADDRESS_*
+         if (check(TokenType::ADDRESS_INPUT) || check(TokenType::ADDRESS_OUTPUT) || check(TokenType::ADDRESS_MARKER)
+             || check(TokenType::ADDRESS_TEMP) || check(TokenType::ADDRESS_DIRECT)) {
+            atAddr = advance().text;
+         } else {
+            // Fallback: consume token until ":"
+            while (!check(TokenType::COLON) && !atEnd()) {
+               atAddr += peek().text;
+               advance();
+            }
          }
       }
 

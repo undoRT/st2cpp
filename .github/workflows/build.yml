@@ -2,10 +2,18 @@ name: Build and Release
 
 on:
   push:
-
+    branches:
+      - main
+      - develop
+      - 'feature/*'
+    tags:
+      - 'v*'
   pull_request:
-
   workflow_dispatch:
+
+permissions:
+  contents: write
+  packages: write
 
 jobs:
 
@@ -20,7 +28,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
 
     container:
-      image: debian:11
+      image: debian:12
 
     strategy:
       fail-fast: false
@@ -38,29 +46,42 @@ jobs:
             package_dir: st2cpp-linux-arm64
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install dependencies
+      - name: Install Git 2.39+
         run: |
           apt update
+          apt install -y git
 
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
+        run: |
           apt install -y \
             build-essential \
             cmake \
-            g++
+            g++ \
+            libgtest-dev
 
       - name: Configure CMake
         run: |
           cmake -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_TESTS=OFF \
+            -DBUILD_TESTS=ON \
             -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc"
 
-      - name: Build
+      - name: Build compiler and tests
         run: |
           cmake --build build \
             --target st2cpp \
+            --target st2cpp_tests \
             -j$(nproc)
+
+      - name: Run tests
+        run: |
+          cd build
+          ctest --output-on-failure --verbose
 
       - name: Package
         run: |
@@ -72,7 +93,7 @@ jobs:
 
           cp README.md "$PACKAGE_DIR/"
           cp LICENSE "$PACKAGE_DIR/"
-          cp COPYING.ST2CPP_TYPES "$PACKAGE_DIR/"
+          cp CHANGELOG.md "$PACKAGE_DIR/" 2>/dev/null || true
 
           cp -r st2cpp_includes "$PACKAGE_DIR/"
 
@@ -85,7 +106,6 @@ jobs:
       - name: Upload artifact
         if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@v4
-
         with:
           name: ${{ matrix.archive_name }}
           path: ${{ matrix.archive_name }}
@@ -122,15 +142,59 @@ jobs:
             package_dir: st2cpp-macos-arm64
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-      
-      - name: Configure CMake
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install cmake
 
-      
-      - name: Build
-        run: cmake --build build --config Release --target st2cpp -j
+      - name: Configure CMake (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTS=ON
+
+      - name: Configure CMake (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON
+
+      - name: Build compiler and tests (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cmake --build build --config Release --target st2cpp st2cpp_tests -j
+
+      - name: Build compiler and tests (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --target st2cpp st2cpp_tests -j
+
+      - name: Run tests (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd build
+          ctest --output-on-failure --verbose
+
+      - name: Setup MSVC environment (Windows)
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Run tests (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cd build
+          $env:PATH = "$env:PATH;$(pwd)\Release"
+          ctest -C Release --output-on-failure --verbose
 
       #
       # macOS packaging
@@ -147,7 +211,7 @@ jobs:
 
           cp README.md "$PACKAGE_DIR/"
           cp LICENSE "$PACKAGE_DIR/"
-          cp COPYING.ST2CPP_TYPES "$PACKAGE_DIR/"
+          cp CHANGELOG.md "$PACKAGE_DIR/" 2>/dev/null || true
 
           cp -r st2cpp_includes "$PACKAGE_DIR/"
 
@@ -177,7 +241,7 @@ jobs:
 
           Copy-Item "README.md" $PACKAGE_DIR
           Copy-Item "LICENSE" $PACKAGE_DIR
-          Copy-Item "COPYING.ST2CPP_TYPES" $PACKAGE_DIR
+          Copy-Item "CHANGELOG.md" $PACKAGE_DIR -ErrorAction SilentlyContinue
 
           Copy-Item `
             "st2cpp_includes" `
@@ -195,11 +259,131 @@ jobs:
       - name: Upload artifact
         if: startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@v4
-
         with:
           name: ${{ matrix.archive_name }}
           path: ${{ matrix.archive_name }}
           if-no-files-found: error
+
+  #
+  # =========================
+  # Quick test job (runs on every PR and push)
+  # =========================
+  #
+  test-quick:
+    name: Quick Tests (Ubuntu)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            build-essential \
+            cmake \
+            g++ \
+            git \
+            libgtest-dev
+
+      - name: Configure CMake
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBUILD_TESTS=ON
+
+      - name: Build tests
+        run: |
+          cmake --build build \
+            --target st2cpp_tests \
+            -j$(nproc)
+
+      - name: Run tests
+        run: |
+          cd build
+          ctest --output-on-failure --verbose
+
+  #
+  # =========================
+  # Code Coverage
+  # =========================
+  #
+  coverage:
+    name: Code Coverage
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt update
+          sudo apt install -y \
+            build-essential \
+            cmake \
+            g++ \
+            git \
+            libgtest-dev \
+            lcov
+
+      - name: Clean previous coverage data
+        run: |
+          rm -rf build
+          find . -name "*.gcda" -delete
+          find . -name "*.gcno" -delete
+
+      - name: Configure CMake with coverage
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DBUILD_TESTS=ON \
+            -DCMAKE_CXX_FLAGS="--coverage -fprofile-arcs -ftest-coverage" \
+            -DCMAKE_EXE_LINKER_FLAGS="--coverage"
+
+      - name: Build tests
+        run: |
+          cmake --build build \
+            --target st2cpp_tests \
+            -j$(nproc)
+
+      - name: Run tests with coverage
+        run: |
+          cd build
+          ctest --output-on-failure --verbose
+
+      - name: Generate coverage report
+        run: |
+          cd build
+          # Ignore warnings and mismatches
+          lcov --capture \
+            --directory . \
+            --output-file coverage.info \
+            --ignore-errors gcov,gcov,mismatch \
+            --rc lcov_branch_coverage=0
+
+          # Remove system headers and test files from coverage
+          lcov --remove coverage.info \
+            '/usr/*' \
+            '*/tests/*' \
+            '*/googletest/*' \
+            --output-file coverage.info \
+            --ignore-errors unused
+
+          # List coverage summary
+          lcov --list coverage.info
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./build/coverage.info
+          fail_ci_if_error: false
+          verbose: true
 
   #
   # =========================
@@ -221,20 +405,37 @@ jobs:
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
-
         with:
           path: artifacts
 
-      - name: Debug
+      - name: Debug - list artifacts
         run: |
           find artifacts -type f
+          ls -la artifacts/*/
 
       - name: Create Release
         run: |
+          RELEASE_NOTES="st2cpp ${{ github.ref_name }}
+
+          ## Bundled Components
+          - undoCore: included as submodule in st2cpp_includes/
+
+          ## Installation
+          Extract the archive and run:
+          - Linux/macOS: ./st2cpp --help
+          - Windows: st2cpp.exe --help
+
+          ## Runtime Headers
+          The runtime headers (undoCore) are included in st2cpp_includes/.
+          To compile generated C++ code, add:
+          - Linux/macOS: -I./st2cpp_includes/undoCore/include
+          - Windows: /I./st2cpp_includes/undoCore/include
+          "
+
           gh release create "${{ github.ref_name }}" \
             --repo "${{ github.repository }}" \
             --title "st2cpp ${{ github.ref_name }}" \
-            --notes "st2cpp ${{ github.ref_name }}" \
+            --notes "$RELEASE_NOTES" \
             artifacts/st2cpp-linux-x64.tar.gz/st2cpp-linux-x64.tar.gz \
             artifacts/st2cpp-linux-arm64.tar.gz/st2cpp-linux-arm64.tar.gz \
             artifacts/st2cpp-win-x64.zip/st2cpp-win-x64.zip \

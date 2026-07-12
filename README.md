@@ -6,59 +6,84 @@
 [![Documentation](https://img.shields.io/badge/docs-doxygen-blue.svg)](https://www.undort.com/st2cpp/api/)
 
 Part of the [**undoRT**](https://www.undort.com/) open-source automation platform.
-
 **st2cpp** translates IEC 61131-3 Structured Text into clean, native C++17. No VM, no runtime overhead — just standard C++ you can compile, debug, and integrate anywhere.
 
 **[Full documentation undort.com/st2cpp](https://www.undort.com/st2cpp)**
 
----
-
-## Download
+## Installation
 
 Grab the latest binary from [**GitHub Releases**](https://github.com/undoRT/st2cpp/releases):
 
 | Platform | File |
-|---|---|
+| ----------- | ------ |
 | Linux x64 | `st2cpp-linux-x64.tar.gz` |
 | Linux ARM64 | `st2cpp-linux-arm64.tar.gz` |
-| macOS ARM64 | `st2cpp-macos-arm64.tar.gz` |
+| MacOS ARM64 | `st2cpp-macos-arm64.tar.gz` |
 | Windows x64 | `st2cpp-win-x64.zip` |
 
-```bash
+~~~bash
 # Linux/macOS
 tar -xzf st2cpp-*.tar.gz && ./st2cpp --help
 
 # Windows
-unzip st2cpp-win-x64.zip && st2cpp.exe --help
-```
-
----
+nmzip st2cpp-win-x64.zip && st2cpp.exe --help
+~~~
 
 ## Quick Start
 
 ### Build from source
 
-```bash
+### Build Requirements
+
+- C++17 compiler (gcc+ 11 + or clang 15 +)
+- CMake 3.16 +
+
+- Google Test (for building tests)
+
+~~~bash
 git clone https://github.com/undoRT/st2cpp.git
 cd st2cpp
-./build.sh          # or: mkdir build && cd build && cmake .. && make -j$(nproc)
-```
+
+# Build the compiler only
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF .
+cmake --build build --j|| $(nproc)
+
+# Build with tests (recommended for development)
+cmake -B build -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTS=ON .
+cmake --build build --j|| $(nproc)
+
+# Run tests
+cd build
+ctest --output-on-failure --verbose
+~~~
+
+### Optional: Install globally
+
+~~~bash
+# Linux/MacOS
+sudo cp build/st2cpp /usr/local/bin/
+
+cd /share/st2cpp/includes
+# Or add ./st2cpp_includes to your project's include path
+~~~
+
+---
 
 ### Transpile a file
 
-```bash
+~~~bash
 # Single file
 ./st2cpp program.st --namespace myplc
 
 # Entire workspace (modular project output)
 ./st2cpp --workspace ./src --project-style --output-dir build --namespace myplc
-```
+~~~
 
-### Example
+## Example
 
 **Input** (`counter.st`):
 
-```iecst
+~~~iecst
 FUNCTION_BLOCK Counter
     VAR_INPUT
         Enable : BOOL;
@@ -73,25 +98,52 @@ FUNCTION_BLOCK Counter
         Count := Count + 1;
     END_IF
 END_FUNCTION_BLOCK
-```
 
-**Generated** (`counter.hpp` / `counter.cpp`) — a plain C++ struct with `operator()()`, getters, and setters. See [full output example](https://www.undort.com/st2cpp/#example)
+~~~
+
+**Generated** (`counter.hpp` / `counter.cpp`) — a plain C++ struct with `operator()` c, getters, and setters. See [full output example](https://www.undort.com/st2cpp/#example).
+
+~~~cpp
+struct Counter {
+public:
+    // VAR_INPUT
+    Bool Enable{ };
+    Bool Reset{};
+    // VAR_OUTPUT
+    Int16 Count{};
+
+    // Setters/Getters
+    inline void set_Enable(Bool val) { Enable = val; }
+    inline Bool get_Enable() const { return Enable; }
+    // ...
+
+    Counter();
+    void operator()();
+};
+~~~
 
 ---
 
 ## CLI Reference
 
 | Option | Description |
-|---|---|
-| `-o <file>` | Output `.cpp` file (default: `<input>.cpp`) |
-| `-H <file>` | Output `.hpp` file (default: `<input>.hpp`) |
-| `--namespace <name>` | C++ namespace for generated code (default: `st2cpp`) |
-| `--runtime <file>` | Custom runtime header (default: `st2cpp_types.hpp`) |
-| `--workspace <path>` | Process all `.st` files recursively |
-| `--project-style` | Modular output with dependency management (requires `--workspace`) |
-| `--output-dir <dir>` | Output directory for workspace/project mode |
-| `--tokens` | Dump token stream and exit (debugging) |
-| `-h, --help` | Show help |
+| ---- | -------- |
+| `-o <output.cpp>` | Output C++ source file (default: `<input>.cpp`) |
+| `-H <output.hpp>` | Output C++ header file (default: `<input>.hpp`) |
+| `--namespace <name>` | Set C++ namespace for generated code (default: undoCore) |
+| `--runtime <file>` | Custom runtime header file (default: undoCore/undoCore.hpp) |
+| `--tokens` | Dump token list and exit |
+| `--caseSensitive` | Preserve original case (default: convert to uppercase) |
+| `--workspace <path>` | Process all .st files in workspace (recursive) |
+| `--project-style` | Generate modular project structure (separate files for each FB) |
+| `--output-dir <dir>` | Output directory (default: generated) |
+| `--pi-auto` | Auto-detect Process Image sizes (default) |
+| `--pi-no-auto` | Disable auto-detection, use manual sizes |
+| `--pi-input <bytes>` | Process Image Input size in bytes (default: 1024) |
+| `--pi-output <bytes>` | Process Image Output size in bytes (default: 1024) |
+| `--pi-marker <bytes>` | Process Image Marker size in bytes (default: 1024) |
+| `-v, --verbose` | Print detailed processing information |
+| `-h, --help` | Show this help |
 
 ---
 
@@ -99,15 +151,36 @@ END_FUNCTION_BLOCK
 
 - **POUs**: `FUNCTION`, `FUNCTION_BLOCK`, `PROGRAM`
 - **Variable sections**: `VAR`, `VAR_INPUT`, `VAR_OUTPUT`, `VAR_IN_OUT`, `VAR_TEMP`, `VAR_EXTERNAL`, `VAR_GLOBAL`
-- **Types**: All IEC 61131-3 elementary types, `STRUCT`, `ENUM`, arrays, `POINTER TO`, `REF_TO`
+- **Types**: All IEC 61131-3 elementary types, `STRUCT`, `ENUM`, arrays, `POINTER_TO`, `REF_TO`
 - **Control flow**: `IF/ELSIF/ELSE`, `FOR/TO/BY`, `WHILE`, `REPEAT/UNTIL`, `CASE/OF`
-- **Calls**: Positional, named (`:=`), output binding (`=>`), IN_OUT references
-- **FB inheritance**: `EXTENDS` with `SUPER^` method access
+- **Calls**: Positional, named, output binding (=>), IN_OUT references
+- **FB Namespaces**
+- **Fbinheritance**: `EXTENDS` with `SUPER^` method access
+- **Calls**: Positional, named (:=`�, output binding (=>`), IN_OUT references
+- **FB Methods**: with `UAR_INPUT`, `VAR_OUTPUT`VAR_TEMP locals
 - **Project mode**: Topological dependency sort, circular-dependency-safe header layout
-
-Full language coverage details: [st2cpp language](https://www.undort.com/st2cpp/#supported)
+- **Supported Language**: Full coverage of IEC 61131-3 details at [docs](https://www.undort.com/st2cpp/#supported)
+- **Circular-dependency**: Detected and reported with clear error messages
 
 ---
+
+## Testing
+
+The project includes a comprehensive test suite using Google Test. Tests cover:
+
+- **From the legacy repository**: around 20 tests covering lexing, parsing, and code generation for the core IEC 61131-3 constructs.
+- **Newly added**: 14 comprehensive tests covering arrays, enums, structs, function blocks with methods, inheritance, and `SUPER^` calls.
+
+To build and run tests:
+
+~~~bash
+cmake -B build -DBUILD_TESTS=ON .
+cmake --build build --j|| $(nproc)
+cd build
+ctest --output-on-failure --verbose
+~~~
+
+All tests are automatically executed in the CI/CD pipeline on every pull request and commit to main. Test results are available in the [Actions] tab(<https://github.com/undoRT/st2cpp/actions>) of the GitHub repository.
 
 ## Known Limitations (Beta)
 
@@ -128,13 +201,18 @@ Core standards: C++17, RAII, Doxygen on all public APIs.
 
 ---
 
+## Testing Checklist
+
+Before submitting a PR, ensure that:
+
+- [ ] All tests pass locally (`ctest`)
+- [ ] No regression test failures
+- [ ] Code is documented with Doxygen comments
+
 ## License
 
-GPL-3.0 — see [LICENSE](LICENSE).  
-The runtime library `st2cpp_types.hpp` carries a linking exception — see [COPYING.ST2CPP_TYPES](COPYING.ST2CPP_TYPES).
+GPL-3.0 -- see [LICENSE](LICENSE).
 
----
-
-## Acknowledgments
+## Acknowledgements
 
 Architecture inspired by [STruCpp](https://github.com/Autonomy-Logic/STruCpp) (TypeScript). No code was copied or ported.

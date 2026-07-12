@@ -204,6 +204,40 @@ struct IdentExpr
    std::string name;
 };
 
+/**
+ * @struct AddressExpr
+ * @brief Represents an IEC 61131-3 address (e.g., %IX0.0, %QB10, %MW5)
+ */
+struct AddressExpr
+{
+   enum class AddressType {
+      INPUT,  // %I* (Process Image Inputs)
+      OUTPUT, // %Q* (Process Image Outputs)
+      MARKER, // %M* (Internal Memory)
+      TEMP,   // %T* (Temporary)
+      DIRECT  // %D* (Direct Representation)
+   };
+
+   enum class AddressQualifier {
+      BIT,    // X - bit access
+      BYTE,   // B - byte access
+      WORD,   // W - word access
+      DWORD,  // D - dword access
+      LWORD,  // L - lword access
+      POINTER // P - pointer access
+   };
+
+   AddressType type;
+   AddressQualifier qualifier;
+   int byteOffset;      // Byte offset in the process image
+   int bitOffset;       // Bit offset (0-7) - only for BIT qualifier
+   std::string rawText; // Original text (for debugging)
+   bool isPlaceholder;  // true if address contains '*', e.g., %IX*
+
+   // For array-like access: %QW10
+   // For bit access: %IX0.0
+};
+
 struct BoolLitExpr
 {
    bool value;
@@ -253,6 +287,7 @@ struct CallExpr
       uint32_t col = 0;
    };
    std::vector<Arg> args;
+   bool isStructInit = false;
 };
 
 struct SuperCallExpr
@@ -289,9 +324,20 @@ struct ArrayInitExpr
    std::vector<std::shared_ptr<Expr>> elements;
 };
 
+struct StructInitExpr
+{
+   struct MemberInit
+   {
+      std::string member;
+      std::shared_ptr<Expr> value;
+   };
+   std::vector<MemberInit> members;
+};
+
 using ExprVariant = std::variant<LiteralExpr,
                                  BoolLitExpr,
                                  IdentExpr,
+                                 AddressExpr,
                                  UnaryExpr,
                                  BinaryExpr,
                                  MemberExpr,
@@ -302,7 +348,8 @@ using ExprVariant = std::variant<LiteralExpr,
                                  AdrExpr,
                                  SizeofExpr,
                                  CastExpr,
-                                 ArrayInitExpr>;
+                                 ArrayInitExpr,
+                                 StructInitExpr>;
 
 struct Expr
 {

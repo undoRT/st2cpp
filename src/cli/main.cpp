@@ -125,13 +125,18 @@ static void printUsage(const char* prog)
                 "Options:\n"
                 "  -o <output.cpp>      Output C++ source file (default: <input>.cpp)\n"
                 "  -H <output.hpp>      Output C++ header file (default: <input>.hpp)\n"
-                "  --namespace <name>   Set C++ namespace for generated code (default: st2cpp)\n"
-                "  --runtime <file>     Custom runtime header file (default: st2cpp_types.hpp)\n"
+                "  --namespace <name>   Set C++ namespace for generated code (default: undoCore)\n"
+                "  --runtime <file>     Custom runtime header file (default: undoCore/undoCore.hpp)\n"
                 "  --tokens             Dump token list and exit\n"
                 "  --caseSensitive      Preserve original case (default: convert to uppercase)\n"
                 "  --workspace <path>   Process all .st files in workspace (recursive)\n"
                 "  --project-style      Generate modular project structure (separate files for each FB)\n"
                 "  --output-dir <dir>   Output directory (default: generated)\n"
+                "  --pi-auto            Auto-detect Process Image sizes (default)\n"
+                "  --pi-no-auto         Disable auto-detection, use manual sizes\n"
+                "  --pi-input <bytes>   Process Image Input size in bytes (default: 1024)\n"
+                "  --pi-output <bytes>  Process Image Output size in bytes (default: 1024)\n"
+                "  --pi-marker <bytes>  Process Image Marker size in bytes (default: 1024)\n"
                 "  -v, --verbose        Print detailed processing information\n"
                 "  -h, --help           Show this help\n\n"
                 "Examples:\n"
@@ -191,13 +196,17 @@ int main(int argc, char* argv[])
    std::string inputPath;
    std::string outputCpp, outputHpp;
    bool dumpTokens = false;
-   std::string namespaceName = "st2cpp";
-   std::string runtimeHeader = "st2cpp_types.hpp";
+   std::string namespaceName = "undoCore";
+   std::string runtimeHeader = "undoCore/undoCore.hpp";
    bool caseSensitive = false;
    bool workspaceMode = false;
    bool projectStyle = false;
    std::string workspacePath;
    std::string outputDir = "generated";
+   bool autoDetectPI = true;
+   size_t piInputBytes = 1024;
+   size_t piOutputBytes = 1024;
+   size_t piMarkerBytes = 1024;
 
    for (int i = 1; i < argc; ++i) {
       if (std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "--help") == 0) {
@@ -233,6 +242,16 @@ int main(int argc, char* argv[])
          outputDir = argv[++i];
       } else if (std::strcmp(argv[i], "-v") == 0 || std::strcmp(argv[i], "--verbose") == 0) {
          verbose = true;
+      } else if (std::strcmp(argv[i], "--pi-auto") == 0) {
+         autoDetectPI = true;
+      } else if (std::strcmp(argv[i], "--pi-no-auto") == 0) {
+         autoDetectPI = false;
+      } else if (std::strcmp(argv[i], "--pi-input") == 0 && i + 1 < argc) {
+         piInputBytes = std::stoul(argv[++i]);
+      } else if (std::strcmp(argv[i], "--pi-output") == 0 && i + 1 < argc) {
+         piOutputBytes = std::stoul(argv[++i]);
+      } else if (std::strcmp(argv[i], "--pi-marker") == 0 && i + 1 < argc) {
+         piMarkerBytes = std::stoul(argv[++i]);
       } else if (argv[i][0] != '-') {
          inputPath = argv[i];
       } else {
@@ -310,12 +329,33 @@ int main(int argc, char* argv[])
          std::cout << "Generating project files...\n\n";
       }
 
+      // Process Image auto-detection for modular mode
+      ProcessImageAnalyzer piAnalyzer;
+      piAnalyzer.analyze(mergedTu);
+
+      ProcessImageConfig piConfig;
+      if (autoDetectPI && piAnalyzer.hasAddresses()) {
+         piConfig = piAnalyzer.getRecommendedConfig();
+         if (verbose) {
+            std::cout << "Auto-detected Process Image sizes:\n";
+            std::cout << "  Input:  " << piConfig.inputBytes << " bytes\n";
+            std::cout << "  Output: " << piConfig.outputBytes << " bytes\n";
+            std::cout << "  Marker: " << piConfig.markerBytes << " bytes\n\n";
+         }
+      } else {
+         piConfig.inputBytes = piInputBytes;
+         piConfig.outputBytes = piOutputBytes;
+         piConfig.markerBytes = piMarkerBytes;
+      }
+      piConfig.autoDetect = autoDetectPI;
+
       // Generate modular project
       try {
          CodeGenerator gen;
          gen.setNamespace(namespaceName);
          gen.setRuntimeHeader(runtimeHeader);
          gen.setCaseSensitive(caseSensitive);
+         gen.setProcessImageConfig(piConfig);
          auto files = gen.generateModularProject(mergedTu, outputDir);
          writeGeneratedFiles(files, outputDir);
 
@@ -377,10 +417,31 @@ int main(int argc, char* argv[])
          try {
             auto tu = processSingleFile(file, dumpTokens);
 
+            // Process Image auto-detection for flat mode
+            ProcessImageAnalyzer piAnalyzer;
+            piAnalyzer.analyze(tu);
+
+            ProcessImageConfig piConfig;
+            if (autoDetectPI && piAnalyzer.hasAddresses()) {
+               piConfig = piAnalyzer.getRecommendedConfig();
+               if (verbose) {
+                  std::cout << "    Auto-detected Process Image sizes:\n";
+                  std::cout << "      Input:  " << piConfig.inputBytes << " bytes\n";
+                  std::cout << "      Output: " << piConfig.outputBytes << " bytes\n";
+                  std::cout << "      Marker: " << piConfig.markerBytes << " bytes\n";
+               }
+            } else {
+               piConfig.inputBytes = piInputBytes;
+               piConfig.outputBytes = piOutputBytes;
+               piConfig.markerBytes = piMarkerBytes;
+            }
+            piConfig.autoDetect = autoDetectPI;
+
             std::string headerFilename = baseName + ".hpp";
             std::string sourceFilename = baseName + ".cpp";
 
             CodeGenerator gen;
+            gen.setProcessImageConfig(piConfig);
             auto result = gen.generate(tu, headerFilename, namespaceName, runtimeHeader, caseSensitive);
 
             writeFileInDir(outputDir, headerFilename, result.headerCode);
@@ -446,7 +507,28 @@ int main(int argc, char* argv[])
          return 0;
       }
 
+      // Process Image auto-detection for single file
+      ProcessImageAnalyzer piAnalyzer;
+      piAnalyzer.analyze(tu);
+
+      ProcessImageConfig piConfig;
+      if (autoDetectPI && piAnalyzer.hasAddresses()) {
+         piConfig = piAnalyzer.getRecommendedConfig();
+         if (verbose) {
+            std::cout << "\nAuto-detected Process Image sizes:\n";
+            std::cout << "  Input:  " << piConfig.inputBytes << " bytes\n";
+            std::cout << "  Output: " << piConfig.outputBytes << " bytes\n";
+            std::cout << "  Marker: " << piConfig.markerBytes << " bytes\n\n";
+         }
+      } else {
+         piConfig.inputBytes = piInputBytes;
+         piConfig.outputBytes = piOutputBytes;
+         piConfig.markerBytes = piMarkerBytes;
+      }
+      piConfig.autoDetect = autoDetectPI;
+
       CodeGenerator gen;
+      gen.setProcessImageConfig(piConfig);
       auto result = gen.generate(tu, headerName, namespaceName, runtimeHeader, caseSensitive);
 
       writeFile(outputHpp, result.headerCode);

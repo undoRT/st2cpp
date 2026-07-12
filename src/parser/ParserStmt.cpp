@@ -411,9 +411,15 @@ std::shared_ptr<Expr> Parser::parsePrimary()
 
    // Parenthesized expression
    if (match(TokenType::LPAREN)) {
-      auto e = parseExpr();
-      expect(TokenType::RPAREN, "Expected ')'");
-      return e;
+      // Struct initialization: (member := value, ...)
+      if (check(TokenType::IDENTIFIER) && peek(1).type == TokenType::OP_ASSIGN) {
+         StructInitExpr init = parseStructInitBody();
+         return std::make_shared<Expr>(std::move(init), ln);
+      } else {
+         auto e = parseExpr();
+         expect(TokenType::RPAREN, "Expected ')'");
+         return e;
+      }
    }
 
    // SUPER^
@@ -438,6 +444,13 @@ std::shared_ptr<Expr> Parser::parsePrimary()
       advance();
       auto expr = std::make_shared<Expr>(IdentExpr{name}, ln);
       return parsePostfix(expr);
+   }
+
+   // Process Image Address access
+   if (check(TokenType::ADDRESS_INPUT) || check(TokenType::ADDRESS_OUTPUT) || check(TokenType::ADDRESS_MARKER)) {
+      auto tok = advance();
+      auto addr = parseAddressExpression(tok);
+      return addr;
    }
 
    throw error("Expected expression");
@@ -486,6 +499,22 @@ std::shared_ptr<Expr> Parser::parsePostfix(std::shared_ptr<Expr> base)
          }
 
          expect(TokenType::RPAREN, "Expected ')' after arguments");
+
+         // Determine if this is a struct initialization candidate
+         bool isStructInit = false;
+         if (std::get_if<IdentExpr>(&base->node)) {
+            bool allNamedInput = true;
+            for (const auto& arg : call.args) {
+               if (!arg.named || arg.isOutput) {
+                  allNamedInput = false;
+                  break;
+               }
+            }
+            if (allNamedInput && !call.args.empty()) {
+               isStructInit = true;
+            }
+         }
+         call.isStructInit = isStructInit;
          base = std::make_shared<Expr>(std::move(call), ln);
       } else {
          break;
@@ -538,4 +567,103 @@ CallExpr::Arg Parser::parseCallArg()
    }
 
    return arg;
+}
+
+/**
+ * @brief Parse a process image address token into an AddressExpr
+ * 
+ * Handles both fixed addresses (e.g., %IX0.0) and placeholder addresses (e.g., %IX*)
+ *
+ * @param tok The token from the lexer (ADDRESS_INPUT, ADDRESS_INPUT_PLACEHOLDER, etc.)
+ * @return std::shared_ptr<Expr> containing the AddressExpr
+ */
+std::shared_ptr<Expr> Parser::parseAddressExpression(const Token& tok)
+{
+   AddressExpr addr;
+   addr.rawText = tok.text;
+   addr.isPlaceholder = false;
+
+   // Check if this is a placeholder address
+   if (tok.type == TokenType::ADDRESS_INPUT_PLACEHOLDER || tok.type == TokenType::ADDRESS_OUTPUT_PLACEHOLDER
+       || tok.type == TokenType::ADDRESS_MARKER_PLACEHOLDER) {
+      addr.isPlaceholder = true;
+   }
+
+   // Determine type and qualifier from the text
+   std::string text = tok.text;
+
+   // Determine type (I, Q, M)
+   if (text[1] == 'I') {
+      addr.type = AddressExpr::AddressType::INPUT;
+   } else if (text[1] == 'Q') {
+      addr.type = AddressExpr::AddressType::OUTPUT;
+   } else if (text[1] == 'M') {
+      addr.type = AddressExpr::AddressType::MARKER;
+   } else if (text[1] == 'T') {
+      addr.type = AddressExpr::AddressType::TEMP;
+   } else if (text[1] == 'D') {
+      addr.type = AddressExpr::AddressType::DIRECT;
+   }
+
+   // Determine qualifier (X, B, W, D, L, P)
+   char qual = text[2];
+   switch (qual) {
+   case 'X':
+      addr.qualifier = AddressExpr::AddressQualifier::BIT;
+      break;
+   case 'B':
+      addr.qualifier = AddressExpr::AddressQualifier::BYTE;
+      break;
+   case 'W':
+      addr.qualifier = AddressExpr::AddressQualifier::WORD;
+      break;
+   case 'D':
+      addr.qualifier = AddressExpr::AddressQualifier::DWORD;
+      break;
+   case 'L':
+      addr.qualifier = AddressExpr::AddressQualifier::LWORD;
+      break;
+   case 'P':
+      addr.qualifier = AddressExpr::AddressQualifier::POINTER;
+      break;
+   default:
+      throw error("Invalid address qualifier");
+   }
+
+   // Parse offsets (only if not a placeholder)
+   if (addr.isPlaceholder) {
+      // For placeholder, set default offsets (will be resolved later)
+      addr.byteOffset = 0;
+      addr.bitOffset = -1;
+   } else {
+      // Parse numeric offsets from fixed address
+      size_t pos = 3; // After %IX, %QB, etc.
+      std::string numStr;
+
+      // Parse byte offset
+      while (pos < text.size() && std::isdigit(text[pos])) {
+         numStr += text[pos++];
+      }
+      if (numStr.empty()) {
+         throw error("Invalid address: missing byte offset");
+      }
+      addr.byteOffset = std::stoi(numStr);
+
+      // Parse bit offset (if present)
+      if (pos < text.size() && text[pos] == '.') {
+         pos++;
+         numStr.clear();
+         while (pos < text.size() && std::isdigit(text[pos])) {
+            numStr += text[pos++];
+         }
+         if (numStr.empty()) {
+            throw error("Invalid address: missing bit offset");
+         }
+         addr.bitOffset = std::stoi(numStr);
+      } else {
+         addr.bitOffset = -1; // No bit offset
+      }
+   }
+
+   return std::make_shared<Expr>(addr, tok.line);
 }
