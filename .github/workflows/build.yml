@@ -46,6 +46,13 @@ jobs:
             package_dir: st2cpp-linux-arm64
 
     steps:
+      # Install Git 2.18+ from backports (required for submodule support)
+      - name: Install Git from backports
+        run: |
+          echo "deb http://deb.debian.org/debian bullseye-backports main" >> /etc/apt/sources.list
+          apt update
+          apt install -y -t bullseye-backports git
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
