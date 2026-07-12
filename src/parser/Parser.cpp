@@ -551,6 +551,30 @@ VarSection Parser::parseMethodVarSection(VarKind kind)
    return sec;
 }
 
+/**
+ * @brief Parse a struct initialization body: (member := value, ...)
+ * @return StructInitExpr AST node
+ */
+StructInitExpr Parser::parseStructInitBody()
+{
+   StructInitExpr init;
+   while (!check(TokenType::RPAREN) && !atEnd()) {
+      if (!check(TokenType::IDENTIFIER)) {
+         throw error("Expected member name in struct initialization");
+      }
+      StructInitExpr::MemberInit member;
+      member.member = advance().text;
+      expect(TokenType::OP_ASSIGN, "Expected ':=' after member name");
+      member.value = parseExpr(); // può essere un'altra struct init o un'espressione normale
+      init.members.push_back(std::move(member));
+      if (!check(TokenType::RPAREN)) {
+         expect(TokenType::COMMA, "Expected ',' between struct initializers");
+      }
+   }
+   expect(TokenType::RPAREN, "Expected ')' after struct initialization");
+   return init;
+}
+
 // ============================================================================
 //  Variable Section Parsing
 // ============================================================================

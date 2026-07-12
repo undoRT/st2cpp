@@ -119,8 +119,121 @@ target_compile_options(st2cpp PRIVATE
 if(BUILD_TESTS)
     enable_testing()
     
-    # Add test subdirectory
-    add_subdirectory(tests)
+    # Find or download Google Test
+    find_package(GTest QUIET)
+    if(NOT GTest_FOUND)
+        message(STATUS "Google Test not found, downloading via FetchContent")
+        include(FetchContent)
+        FetchContent_Declare(
+            googletest
+            URL https://github.com/google/googletest/archive/refs/tags/v1.15.2.tar.gz
+        )
+        # For Windows: disable MSVC warnings from googletest
+        if(MSVC)
+            set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+        endif()
+        FetchContent_MakeAvailable(googletest)
+    else()
+        message(STATUS "Google Test found: ${GTest_INCLUDE_DIRS}")
+    endif()
+    
+    # Create the test executable
+    add_executable(st2cpp_tests
+        tests/test_main.cpp
+        tests/test_lexer.cpp
+        tests/test_parser.cpp
+        tests/test_allocator.cpp
+        tests/test_scope.cpp
+        tests/test_generation.cpp
+        tests/test_golden.cpp
+        tests/test_compilation.cpp
+        tests/test_process_image.cpp         
+        tests/test_complex_program.cpp  
+        tests/helpers/TestHelper.cpp
+    )
+
+    file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/tests/st_samples/ 
+     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/tests/st_samples/)
+
+    # Link libraries
+    target_link_libraries(st2cpp_tests
+        st2cpp_lib
+        GTest::gtest_main
+        # pthread is required on Linux/Unix, included automatically via GTest on Windows
+    )
+
+    # Include directories for tests
+    target_include_directories(st2cpp_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}
+        ${CMAKE_SOURCE_DIR}/src
+        ${CMAKE_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/helpers
+        ${UNDOCORE_INCLUDE_DIR}
+    )
+    
+    # Compiler options for tests
+    target_compile_options(st2cpp_tests PRIVATE
+        ${ST2CPP_COMPILE_FLAGS}
+    )
+    
+    # Copy ST sample files to build directory for golden tests
+    file(GLOB ST_SAMPLES "${CMAKE_CURRENT_SOURCE_DIR}/tests/st_samples/*.st")
+    set(ST_SAMPLE_FILES "")
+    foreach(SAMPLE ${ST_SAMPLES})
+        get_filename_component(NAME ${SAMPLE} NAME_WE)
+        set(DEST ${CMAKE_CURRENT_BINARY_DIR}/tests/st_samples/${NAME}.st)
+        add_custom_command(
+            OUTPUT ${DEST}
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/tests/st_samples
+            COMMAND ${CMAKE_COMMAND} -E copy ${SAMPLE} ${DEST}
+            DEPENDS ${SAMPLE}
+            COMMENT "Copying ST sample: ${NAME}.st"
+        )
+        list(APPEND ST_SAMPLE_FILES ${DEST})
+    endforeach()
+    
+    # Copia anche i file golden
+    file(GLOB GOLDEN_CPP "${CMAKE_CURRENT_SOURCE_DIR}/tests/st_samples/*.golden.cpp")
+    foreach(GOLDEN ${GOLDEN_CPP})
+        get_filename_component(NAME ${GOLDEN} NAME)
+        set(DEST ${CMAKE_CURRENT_BINARY_DIR}/tests/st_samples/${NAME})
+        add_custom_command(
+            OUTPUT ${DEST}
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/tests/st_samples
+            COMMAND ${CMAKE_COMMAND} -E copy ${GOLDEN} ${DEST}
+            DEPENDS ${GOLDEN}
+            COMMENT "Copying golden CPP: ${NAME}"
+        )
+        list(APPEND ST_SAMPLE_FILES ${DEST})
+    endforeach()
+    
+    file(GLOB GOLDEN_HPP "${CMAKE_CURRENT_SOURCE_DIR}/tests/st_samples/*.golden.hpp")
+    foreach(GOLDEN ${GOLDEN_HPP})
+        get_filename_component(NAME ${GOLDEN} NAME)
+        set(DEST ${CMAKE_CURRENT_BINARY_DIR}/tests/st_samples/${NAME})
+        add_custom_command(
+            OUTPUT ${DEST}
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/tests/st_samples
+            COMMAND ${CMAKE_COMMAND} -E copy ${GOLDEN} ${DEST}
+            DEPENDS ${GOLDEN}
+            COMMENT "Copying golden HPP: ${NAME}"
+        )
+        list(APPEND ST_SAMPLE_FILES ${DEST})
+    endforeach()
+    
+    add_custom_target(st_samples ALL DEPENDS ${ST_SAMPLE_FILES})
+    add_dependencies(st2cpp_tests st_samples)
+    
+    # Passa la directory dei sample al test eseguibile
+    target_compile_definitions(st2cpp_tests PRIVATE
+        ST_SAMPLES_DIR="${CMAKE_CURRENT_BINARY_DIR}/tests/st_samples"
+    )
+    
+    # Registra i test con CTest
+    add_test(NAME st2cpp_tests COMMAND st2cpp_tests)
+    
+    message(STATUS "Tests: Enabled (Google Test)")
 endif()
 
 # ============================================================================

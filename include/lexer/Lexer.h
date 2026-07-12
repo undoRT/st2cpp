@@ -58,5 +58,6 @@ private:
    Token readNumber();
    Token readString();
    Token readTimeLiteral();
+   Token readAddress();
    Token makeToken(TokenType t, const std::string& txt) const;
 };

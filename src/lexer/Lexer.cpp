@@ -360,6 +360,64 @@ Token Lexer::readTimeLiteral()
    return Token(TokenType::TIME_LITERAL, text, startLine, startCol);
 }
 
+/**
+ * @brief Read a process image address with optional placeholder
+ * 
+ * Handles:
+ *   - %IX0.0, %QW2, %MW10   (fixed addresses)
+ *   - %IX*, %QW*, %MD*      (addresses with placeholder)
+ *
+ * @return Token of type ADDRESS_* or ADDRESS_*_PLACEHOLDER
+ */
+Token Lexer::readAddress()
+{
+   uint32_t startLine = m_line, startCol = m_col;
+   std::string addr = "%";
+   addr += advance(); // Consume I/Q/M/T/D
+
+   // Read qualifier (X, B, W, D, L, P)
+   if (std::isalpha(peek())) {
+      addr += advance();
+   }
+
+   // Check for placeholder '*'
+   if (peek() == '*') {
+      addr += advance(); // consume '*'
+      // Determine if it's INPUT, OUTPUT, or MARKER with placeholder
+      if (addr.rfind("%I", 0) == 0) {
+         return Token(TokenType::ADDRESS_INPUT_PLACEHOLDER, addr, startLine, startCol);
+      } else if (addr.rfind("%Q", 0) == 0) {
+         return Token(TokenType::ADDRESS_OUTPUT_PLACEHOLDER, addr, startLine, startCol);
+      } else if (addr.rfind("%M", 0) == 0) {
+         return Token(TokenType::ADDRESS_MARKER_PLACEHOLDER, addr, startLine, startCol);
+      }
+      return Token(TokenType::PERCENT, addr, startLine, startCol);
+   }
+
+   // Read numeric offset (for fixed addresses)
+   while (std::isdigit(peek())) {
+      addr += advance();
+   }
+
+   // Read bit offset if present
+   if (peek() == '.') {
+      addr += advance(); // Consume '.'
+      while (std::isdigit(peek())) {
+         addr += advance();
+      }
+   }
+
+   // Determine token type for fixed addresses
+   if (addr.rfind("%I", 0) == 0) {
+      return Token(TokenType::ADDRESS_INPUT, addr, startLine, startCol);
+   } else if (addr.rfind("%Q", 0) == 0) {
+      return Token(TokenType::ADDRESS_OUTPUT, addr, startLine, startCol);
+   } else if (addr.rfind("%M", 0) == 0) {
+      return Token(TokenType::ADDRESS_MARKER, addr, startLine, startCol);
+   }
+   return Token(TokenType::PERCENT, addr, startLine, startCol);
+}
+
 // ============================================================================
 //  Main Tokenization
 // ============================================================================
@@ -521,11 +579,7 @@ std::vector<Token> Lexer::tokenize()
          tokens.emplace_back(TokenType::OP_MINUS, "-", tokLine, tokCol);
          break;
       case '*':
-         if (match('*')) {
-            tokens.emplace_back(TokenType::OP_POWER, "**", tokLine, tokCol);
-         } else {
-            tokens.emplace_back(TokenType::OP_MUL, "*", tokLine, tokCol);
-         }
+         tokens.emplace_back(TokenType::OP_MUL, "*", tokLine, tokCol);
          break;
       case '/':
          tokens.emplace_back(TokenType::OP_DIV, "/", tokLine, tokCol);
@@ -568,40 +622,9 @@ std::vector<Token> Lexer::tokenize()
          tokens.emplace_back(TokenType::AT, "@", tokLine, tokCol);
          break;
       case '%': {
-         char next = peek();
-         if (next == 'I' || next == 'Q' || next == 'M' || next == 'T' || next == 'D') {
-            std::string addr = "%";
-            addr += advance(); // Consume I/Q/M/T/D
-
-            // Read qualifier (X, B, W, D, L, P)
-            if (std::isalpha(peek())) {
-               addr += advance();
-            }
-
-            // Read numeric offset
-            while (std::isdigit(peek())) {
-               addr += advance();
-            }
-
-            // Read bit offset if present
-            if (peek() == '.') {
-               addr += advance(); // Consume '.'
-               while (std::isdigit(peek())) {
-                  addr += advance();
-               }
-            }
-
-            // Determine token type
-            if (addr.rfind("%I", 0) == 0) {
-               tokens.emplace_back(TokenType::ADDRESS_INPUT, addr, tokLine, tokCol);
-            } else if (addr.rfind("%Q", 0) == 0) {
-               tokens.emplace_back(TokenType::ADDRESS_OUTPUT, addr, tokLine, tokCol);
-            } else if (addr.rfind("%M", 0) == 0) {
-               tokens.emplace_back(TokenType::ADDRESS_MARKER, addr, tokLine, tokCol);
-            } else {
-               tokens.emplace_back(TokenType::PERCENT, addr, tokLine, tokCol);
-            }
-         }
+         // Read the address (fixed or with placeholder)
+         Token addrToken = readAddress();
+         tokens.push_back(std::move(addrToken));
          break;
       }
       default:

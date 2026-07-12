@@ -1,0 +1,2 @@
+
+./st2cpp_tests --gtest_filter=*

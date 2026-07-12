@@ -42,6 +42,104 @@ struct ParameterInfo
    {}
 };
 
+// ============================================================================
+//  Address Allocator - Gestisce l'allocazione di indirizzi AT con placeholder '*'
+// ============================================================================
+
+/**
+ * @brief Manages allocation of AT addresses with placeholder '*'
+ * 
+ * Handles:
+ * - Fixed addresses (e.g., %IX0.0) - marked as occupied
+ * - Placeholder addresses (e.g., %IX*) - allocated to first free position
+ * - Proper alignment for multi-byte types (WORD aligned to 2, DWORD to 4, etc.)
+ * - Memory region expansion when needed
+ */
+class AddressAllocator
+{
+public:
+   /**
+    * @brief Result of an address allocation
+    */
+   struct AllocationResult
+   {
+      int byteOffset;
+      int bitOffset; // -1 if not a bit access
+      bool success;
+   };
+
+   /**
+    * @brief Information about a memory region
+    */
+   struct MemoryRegion
+   {
+      size_t size;                    // Current size in bytes
+      std::vector<bool> byteOccupied; // true if byte is occupied
+      std::vector<bool> bitOccupied;  // true if bit is occupied (for BIT access)
+   };
+
+   AddressAllocator();
+
+   /**
+    * @brief Mark a fixed address as occupied
+    * @param addr The address to mark
+    * @param sizeInBytes Size of the variable in bytes
+    */
+   void markFixedAddress(const AddressExpr& addr, int sizeInBytes);
+
+   /**
+    * @brief Allocate a placeholder address
+    * @param area Memory area (INPUT, OUTPUT, MARKER)
+    * @param qualifier Address qualifier (BIT, BYTE, WORD, DWORD, LWORD)
+    * @param sizeInBytes Size of the variable in bytes
+    * @param alignment Required alignment in bytes
+    * @return AllocationResult with the allocated offset
+    */
+   AllocationResult allocatePlaceholder(AddressExpr::AddressType area,
+                                        AddressExpr::AddressQualifier qualifier,
+                                        int sizeInBytes,
+                                        int alignment);
+
+   /**
+    * @brief Get the current size of a memory region
+    * @param area Memory area
+    * @return Size in bytes
+    */
+   size_t getRegionSize(AddressExpr::AddressType area) const;
+
+   /**
+    * @brief Check if the allocator has any allocations
+    */
+   bool hasAllocations() const { return !m_regions.empty(); }
+
+private:
+   std::unordered_map<AddressExpr::AddressType, MemoryRegion> m_regions;
+
+   /**
+    * @brief Ensure a region exists with at least the specified size
+    */
+   void ensureRegion(AddressExpr::AddressType area, size_t minSize);
+
+   /**
+    * @brief Expand a region to accommodate more allocations
+    */
+   void expandRegion(AddressExpr::AddressType area, size_t newSize);
+
+   /**
+    * @brief Align a value to the next multiple of alignment
+    */
+   size_t alignUp(size_t value, size_t alignment) const;
+
+   /**
+    * @brief Get the size of a region type
+    */
+   size_t getDefaultRegionSize(AddressExpr::AddressType area) const;
+};
+
+// ============================================================================
+//  Scope Manager
+// ============================================================================
+
 /**
  * @brief Manages the symbol scope stack for code generation.
  *
@@ -56,6 +154,13 @@ struct ParameterInfo
 class ScopeManager
 {
 public:
+   struct VarInfo
+   {
+      std::string type;
+      std::optional<std::string> atAddress;
+      bool isFunctionLocal = false;
+   };
+
    // --- Scope lifecycle ---
    void pushScope(); ///< Enter a new scope (POU, method, etc.)
    void popScope();  ///< Leave the current scope
@@ -67,6 +172,7 @@ public:
    // --- Lookup (innermost first) ---
    std::optional<std::string> lookupVariable(const std::string& name) const;
    std::optional<std::string> lookupATAddress(const std::string& name) const;
+   std::optional<VarInfo> lookupVariableInfo(const std::string& name) const;
 
    // --- Base class for SUPER^ ---
    void setBaseClass(const std::string& base);
@@ -75,6 +181,12 @@ public:
    // --- Temporary counters (for output parameters) ---
    int getNextTempCounter(const std::string& baseName);
 
+   // --- To analyze function AT Statement variables ---
+   void setFunctionScope(bool isFunc);
+   bool isFunctionScope() const;
+   void setLocalToFunction(bool isLocal);
+   bool isLocalToFunction() const;
+
 private:
    struct Scope
    {
@@ -82,6 +194,8 @@ private:
       std::unordered_map<std::string, std::string> atAddrs;
       std::unordered_map<std::string, int> tempCounters;
       std::string baseClass;
+      bool isFunctionScope = false;
+      bool isLocalToFunction = false;
    };
 
    std::vector<Scope> m_scopes; // index 0 = global scope
@@ -207,13 +321,17 @@ private:
    std::unordered_map<std::string, std::string> m_enumeratorToEnum;               // enumerator -> enum name (O(1) lookup)
    std::unordered_map<std::string, FunctionSignature> m_methodSignatures;
    std::unordered_map<std::string, bool> m_enumTypes; // enum name -> isScoped
-   std::string m_currentFunctionReturnType;           // Empty if void, otherwise the return type
-   ProjectStyle m_projectStyle = ProjectStyle::FLAT;  // Current mode
-   std::string m_outputDir;                           // Output directory
-   std::unordered_map<std::string, POU> m_fbMap;      // FB name -> POU
-   std::unordered_map<std::string, bool> m_isFB;      // Type name -> is FB
+   std::unordered_set<std::string> m_structTypes;
+   std::unordered_map<std::string, std::vector<std::string>> m_structMembers; // struct name -> ordered members list
+   std::string m_currentFunctionReturnType;                                   // Empty if void, otherwise the return type
+   ProjectStyle m_projectStyle = ProjectStyle::FLAT;                          // Current mode
+   std::string m_outputDir;                                                   // Output directory
+   std::unordered_map<std::string, POU> m_fbMap;                              // FB name -> POU
+   std::unordered_map<std::string, bool> m_isFB;                              // Type name -> is FB
    ProcessImageConfig m_piConfig;
    bool m_hasAddresses{false};
+   AddressAllocator m_addressAllocator; // Address allocator for AT placeholders
+   std::unordered_map<std::string, AddressExpr> m_resolvedATAddresses;
 
    // ============================================================================
    //  Signature collection
@@ -323,8 +441,11 @@ private:
    //  Address and process image
    // ============================================================================
    std::string generateAddressAccess(const AddressExpr& addr);
+   std::string generateAddressAccess(const AddressExpr& addr, const TypeRef* type) const;
    std::string generateAddressWrite(const AddressExpr& addr, const std::string& value);
-   bool isATVariable(const std::string& varName) const;
+   std::string generateAddressWrite(const AddressExpr& addr, const std::string& value, const TypeRef* type) const;
+   int getTypeSizeInBytes(const TypeRef& tr) const;
+   int getTypeAlignment(const TypeRef& tr) const;
 
    // ============================================================================
    //  Project-style generation
@@ -357,6 +478,10 @@ private:
    // ============================================================================
    //  Helper
    // ============================================================================
+
+   std::vector<StructInitExpr::MemberInit> orderStructMembers(const std::vector<StructInitExpr::MemberInit>& members,
+                                                              const std::string& structName);
+   std::string generateOrderedStructInit(const TypeRef& type, const std::shared_ptr<Expr>& initExpr);
 
    std::string generateHeaderComment() const;
    std::string ind() const { return std::string(m_indent * 4, ' '); }

@@ -84,6 +84,7 @@ private:
    Method parseMethod();
    Interface parseInterface();
    VarSection parseMethodVarSection(VarKind kind);
+   StructInitExpr parseStructInitBody();
 
    // ========================================================================
    //  Variable Section Parsing

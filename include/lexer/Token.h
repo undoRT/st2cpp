@@ -145,15 +145,20 @@ enum class TokenType {
    ADDRESS_INPUT,  // %I
    ADDRESS_OUTPUT, // %Q
    ADDRESS_MARKER, // %M
-   ADDRESS_TEMP,   // %T (optional, for temporary variables)
-   ADDRESS_DIRECT, // %D (optional, for direct representation)
+   ADDRESS_TEMP,   // %T
+   ADDRESS_DIRECT, // %D
 
    ADDR_BIT,     // %IX, %QX, %MX
    ADDR_BYTE,    // %IB, %QB, %MB
    ADDR_WORD,    // %IW, %QW, %MW
    ADDR_DWORD,   // %ID, %QD, %MD
    ADDR_LWORD,   // %IL, %QL, %ML
-   ADDR_POINTER, // %P (for pointers)
+   ADDR_POINTER, // %P
+
+   // Address with placeholder '*' (e.g., %IX*, %QW*, %MD*)
+   ADDRESS_INPUT_PLACEHOLDER,
+   ADDRESS_OUTPUT_PLACEHOLDER,
+   ADDRESS_MARKER_PLACEHOLDER,
 
    END_OF_FILE,
    UNKNOWN
