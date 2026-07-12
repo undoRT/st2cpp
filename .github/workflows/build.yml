@@ -187,7 +187,8 @@ jobs:
         shell: pwsh
         run: |
           cd build
-          ctest --output-on-failure --verbose
+          $env:PATH = "$env:PATH;$(pwd)\Release"
+          ctest -C Release --output-on-failure --verbose
 
       #
       # macOS packaging
