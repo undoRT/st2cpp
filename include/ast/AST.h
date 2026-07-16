@@ -140,6 +140,12 @@ struct MethodParameter
    std::shared_ptr<Expr> initialValue;
 };
 
+enum class MethodVisibility {
+   PRIVATE,
+   PROTECTED,
+   PUBLIC
+};
+
 /**
  * @struct Method
  * @brief Method declaration inside a FUNCTION_BLOCK
@@ -155,6 +161,7 @@ struct Method
    bool isOverride = false;
    bool isFinal = false;
    bool isAbstract = false;
+   MethodVisibility visibility = MethodVisibility::PUBLIC;
 };
 
 /**
@@ -310,7 +317,9 @@ struct AdrExpr
 
 struct SizeofExpr
 {
-   TypeRef type;
+   TypeRef type;               // Type for SIZEOF(type)
+   std::shared_ptr<Expr> expr; // Expression for SIZEOF(expression) - optional
+   bool isType = true;         // true for SIZEOF(type), false for SIZEOF(expression)
 };
 
 struct CastExpr

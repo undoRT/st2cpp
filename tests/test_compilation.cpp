@@ -398,6 +398,10 @@ protected:
                 return static_cast<Int16>(val);
             }
 
+            inline UInt32 ULINT_TO_UDINT(UInt64 v) {
+               return static_cast<UInt32>(v);
+            }
+
             /**
              * @brief Truncate a floating point value
              * @param val Value to truncate
@@ -844,12 +848,12 @@ TEST_F(CompilationTest, CompileFunctionBlockWithMethods)
                 product : INT;
             END_VAR
 
-            METHOD Add : INT
+            METHOD PRIVATE Add : INT
                 VAR_INPUT x : INT; y : INT; END_VAR
                 Add := x + y;
             END_METHOD
 
-            METHOD Multiply : INT
+            METHOD PUBLIC Multiply : INT
                 VAR_INPUT x : INT; y : INT; END_VAR
                 Multiply := x * y;
             END_METHOD
@@ -1250,4 +1254,295 @@ TEST_F(CompilationTest, DISABLED_CompileInvalidCode)
 
    int exitCode = TestHelper::compileSource(cpp.string(), m_tempDir.string());
    EXPECT_NE(exitCode, 0) << "Invalid code should fail compilation";
+}
+
+// ============================================================================
+//  Typed Literal Compilation Tests
+// ============================================================================
+
+/**
+ * @brief Test that code with typed integer literals compiles successfully
+ */
+TEST_F(CompilationTest, CompileTypedIntegerLiterals)
+{
+   const std::string st = R"(
+        FUNCTION Test : UDINT
+            VAR
+                x : UDINT;
+            END_VAR
+            x := UDINT#123;
+            Test := x;
+        END_FUNCTION
+
+        PROGRAM Main
+            VAR
+                result : UDINT;
+            END_VAR
+            result := Test();
+        END_PROGRAM
+    )";
+
+   auto result = TestHelper::generateFromST(st);
+   int exitCode = compileGenerated(result.header, result.source);
+   EXPECT_EQ(exitCode, 0) << "Compilation failed for typed integer literals";
+}
+
+/**
+ * @brief Test that code with typed hexadecimal literals compiles successfully
+ */
+TEST_F(CompilationTest, CompileTypedHexLiterals)
+{
+   const std::string st = R"(
+        FUNCTION Test : UDINT
+            VAR
+                x : UDINT;
+                y : ULINT;
+            END_VAR
+            x := ULINT#16#85EBCA6B;
+            y := ULINT#16#9E3779B97F4A7C15;
+            Test := ULINT_TO_UDINT(x);
+        END_FUNCTION
+
+        PROGRAM Main
+            VAR
+                result : UDINT;
+            END_VAR
+            result := Test();
+        END_PROGRAM
+    )";
+
+   auto result = TestHelper::generateFromST(st);
+   int exitCode = compileGenerated(result.header, result.source);
+   EXPECT_EQ(exitCode, 0) << "Compilation failed for typed hex literals";
+}
+
+/**
+ * @brief Test that code with typed real literals compiles successfully
+ */
+TEST_F(CompilationTest, CompileTypedRealLiterals)
+{
+   const std::string st = R"(
+        FUNCTION Test : LREAL
+            VAR
+                x : LREAL;
+                y : REAL;
+            END_VAR
+            x := LREAL#3.14159;
+            y := REAL#1.5e-10;
+            Test := LREAL#0.0;
+        END_FUNCTION
+
+        PROGRAM Main
+            VAR
+                result : LREAL;
+            END_VAR
+            result := Test();
+        END_PROGRAM
+    )";
+
+   auto result = TestHelper::generateFromST(st);
+   int exitCode = compileGenerated(result.header, result.source);
+   EXPECT_EQ(exitCode, 0) << "Compilation failed for typed real literals";
+}
+
+/**
+ * @brief Test that code with typed literals in expressions compiles successfully
+ */
+TEST_F(CompilationTest, CompileTypedLiteralsInExpressions)
+{
+   const std::string st = R"(
+        FUNCTION Test : ULINT
+            VAR
+                x : ULINT;
+                y : ULINT;
+            END_VAR
+            x := ULINT#100;
+            y := x + ULINT#200;
+            Test := y * ULINT#2;
+        END_FUNCTION
+
+        PROGRAM Main
+            VAR
+                result : ULINT;
+            END_VAR
+            result := Test();
+        END_PROGRAM
+    )";
+
+   auto result = TestHelper::generateFromST(st);
+   int exitCode = compileGenerated(result.header, result.source);
+   EXPECT_EQ(exitCode, 0) << "Compilation failed for typed literals in expressions";
+}
+
+/**
+ * @brief Test that code with typed literals and bitwise operations compiles successfully
+ */
+TEST_F(CompilationTest, CompileTypedLiteralsBitwise)
+{
+   const std::string st = R"(
+        FUNCTION Test : UDINT
+            VAR
+                x : UDINT;
+                mask : UDINT;
+            END_VAR
+            x := UDINT#16#12345678;
+            mask := UDINT#16#A5A5A5A5;
+            x := x XOR mask;
+            x := x AND UDINT#16#FFFFFFFF;
+            Test := x;
+        END_FUNCTION
+
+        PROGRAM Main
+            VAR
+                result : UDINT;
+            END_VAR
+            result := Test();
+        END_PROGRAM
+    )";
+
+   auto result = TestHelper::generateFromST(st);
+   int exitCode = compileGenerated(result.header, result.source);
+   EXPECT_EQ(exitCode, 0) << "Compilation failed for typed literals with bitwise ops";
+}
+
+/**
+ * @brief Test that code with typed literals in arrays compiles successfully
+ */
+TEST_F(CompilationTest, CompileTypedLiteralsInArray)
+{
+   const std::string st = R"(
+        VAR_GLOBAL
+            data : ARRAY[0..2] OF UDINT := [UDINT#10, UDINT#20, UDINT#30];
+        END_VAR
+
+        PROGRAM Main
+            VAR
+                result : UDINT;
+            END_VAR
+            result := data[0] + data[1] + data[2];
+        END_PROGRAM
+    )";
+
+   auto result = TestHelper::generateFromST(st);
+   int exitCode = compileGenerated(result.header, result.source);
+   EXPECT_EQ(exitCode, 0) << "Compilation failed for typed literals in arrays";
+}
+
+/**
+ * @brief Test that code with typed literals in structs compiles successfully
+ */
+TEST_F(CompilationTest, CompileTypedLiteralsInStruct)
+{
+   const std::string st = R"(
+        TYPE Point :
+            STRUCT
+                x : UDINT;
+                y : UDINT;
+            END_STRUCT
+        END_TYPE
+
+        VAR_GLOBAL
+            p : Point := (x := UDINT#100, y := UDINT#200);
+        END_VAR
+
+        PROGRAM Main
+            VAR
+                result : UDINT;
+            END_VAR
+            result := p.x + p.y;
+        END_PROGRAM
+    )";
+
+   auto result = TestHelper::generateFromST(st);
+   int exitCode = compileGenerated(result.header, result.source);
+   EXPECT_EQ(exitCode, 0) << "Compilation failed for typed literals in structs";
+}
+
+/**
+ * @brief Test that code with typed literals with underscores compiles successfully
+ */
+TEST_F(CompilationTest, CompileTypedLiteralsWithUnderscores)
+{
+   const std::string st = R"(
+        FUNCTION Test : UDINT
+            VAR
+                x : UDINT;
+            END_VAR
+            x := UDINT#123_456_789;
+            Test := x;
+        END_FUNCTION
+
+        PROGRAM Main
+            VAR
+                result : UDINT;
+            END_VAR
+            result := Test();
+        END_PROGRAM
+    )";
+
+   auto result = TestHelper::generateFromST(st);
+   int exitCode = compileGenerated(result.header, result.source);
+   EXPECT_EQ(exitCode, 0) << "Compilation failed for typed literals with underscores";
+}
+
+/**
+ * @brief Test that code with mixed typed and untyped literals compiles successfully
+ */
+TEST_F(CompilationTest, CompileMixedTypedUntyped)
+{
+   const std::string st = R"(
+        FUNCTION Test : UDINT
+            VAR
+                x : UDINT;
+            END_VAR
+            x := UDINT#100 + 200;
+            Test := x * 2;
+        END_FUNCTION
+
+        PROGRAM Main
+            VAR
+                result : UDINT;
+            END_VAR
+            result := Test();
+        END_PROGRAM
+    )";
+
+   auto result = TestHelper::generateFromST(st);
+   int exitCode = compileGenerated(result.header, result.source);
+   EXPECT_EQ(exitCode, 0) << "Compilation failed for mixed typed and untyped literals";
+}
+
+/**
+ * @brief Test that code with all typed literal types compiles successfully
+ */
+TEST_F(CompilationTest, CompileAllTypedLiterals)
+{
+   const std::string st = R"(
+        FUNCTION Test : ULINT
+            VAR
+                a : UDINT;
+                b : ULINT;
+                c : INT;
+                d : LREAL;
+                e : REAL;
+            END_VAR
+            a := UDINT#123;
+            b := ULINT#16#9E3779B97F4A7C15;
+            c := INT#-42;
+            d := LREAL#3.14159265359;
+            e := REAL#2.71828;
+            Test := ULINT#0;
+        END_FUNCTION
+
+        PROGRAM Main
+            VAR
+                result : ULINT;
+            END_VAR
+            result := Test();
+        END_PROGRAM
+    )";
+
+   auto result = TestHelper::generateFromST(st);
+   int exitCode = compileGenerated(result.header, result.source);
+   EXPECT_EQ(exitCode, 0) << "Compilation failed for all typed literal types";
 }

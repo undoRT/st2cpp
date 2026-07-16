@@ -576,3 +576,167 @@ TEST(LexerTest, FullProgram)
    EXPECT_TRUE(foundIf);
    EXPECT_TRUE(foundEndIf);
 }
+
+// ============================================================================
+//  Typed Literal Tests
+// ============================================================================
+
+/**
+ * @brief Test that typed integer literals are correctly recognized
+ * 
+ * IEC 61131-3 supports typed literals with the syntax: TYPE#VALUE
+ * where TYPE is a data type like UDINT, ULINT, INT, etc.
+ */
+TEST(LexerTest, TypedIntegerLiteral)
+{
+   Lexer lexer("UDINT#123", "<test>");
+   auto tokens = lexer.tokenize();
+   EXPECT_EQ(tokens[0].type, TokenType::INT_LITERAL);
+   EXPECT_EQ(tokens[0].text, "UDINT#123");
+}
+
+/**
+ * @brief Test that typed hexadecimal literals are correctly recognized
+ */
+TEST(LexerTest, TypedHexLiteral)
+{
+   Lexer lexer("UDINT#16#85EBCA6B", "<test>");
+   auto tokens = lexer.tokenize();
+   EXPECT_EQ(tokens[0].type, TokenType::INT_LITERAL);
+   EXPECT_EQ(tokens[0].text, "UDINT#16#85EBCA6B");
+}
+
+/**
+ * @brief Test that typed binary literals are correctly recognized
+ */
+TEST(LexerTest, TypedBinaryLiteral)
+{
+   Lexer lexer("ULINT#2#1010_1100_1111", "<test>");
+   auto tokens = lexer.tokenize();
+   EXPECT_EQ(tokens[0].type, TokenType::INT_LITERAL);
+   EXPECT_EQ(tokens[0].text, "ULINT#2#101011001111");
+}
+
+/**
+ * @brief Test that typed real literals are correctly recognized
+ */
+TEST(LexerTest, TypedRealLiteral)
+{
+   Lexer lexer("LREAL#3.14159", "<test>");
+   auto tokens = lexer.tokenize();
+   EXPECT_EQ(tokens[0].type, TokenType::REAL_LITERAL);
+   EXPECT_EQ(tokens[0].text, "LREAL#3.14159");
+}
+
+/**
+ * @brief Test that typed real literals with exponent are correctly recognized
+ */
+TEST(LexerTest, TypedRealLiteralExponent)
+{
+   Lexer lexer("LREAL#1.5e-10", "<test>");
+   auto tokens = lexer.tokenize();
+   EXPECT_EQ(tokens[0].type, TokenType::REAL_LITERAL);
+   EXPECT_EQ(tokens[0].text, "LREAL#1.5e-10");
+}
+
+/**
+ * @brief Test that multiple typed literals are correctly recognized
+ */
+TEST(LexerTest, MultipleTypedLiterals)
+{
+   Lexer lexer("UDINT#123 ULINT#456 INT#789 DINT#101112", "<test>");
+   auto tokens = lexer.tokenize();
+
+   EXPECT_EQ(tokens[0].type, TokenType::INT_LITERAL);
+   EXPECT_EQ(tokens[0].text, "UDINT#123");
+
+   EXPECT_EQ(tokens[1].type, TokenType::INT_LITERAL);
+   EXPECT_EQ(tokens[1].text, "ULINT#456");
+
+   EXPECT_EQ(tokens[2].type, TokenType::INT_LITERAL);
+   EXPECT_EQ(tokens[2].text, "INT#789");
+
+   EXPECT_EQ(tokens[3].type, TokenType::INT_LITERAL);
+   EXPECT_EQ(tokens[3].text, "DINT#101112");
+}
+
+/**
+ * @brief Test that typed literals with different types are correctly recognized
+ */
+TEST(LexerTest, TypedLiteralsAllTypes)
+{
+   Lexer lexer("UDINT#1 ULINT#2 UINT#3 DINT#4 INT#5 SINT#6 "
+               "LREAL#1.1 REAL#2.2 WORD#0xFFFF DWORD#0xFFFFFFFF LWORD#0xFFFFFFFFFFFFFFFF",
+               "<test>");
+   auto tokens = lexer.tokenize();
+
+   // 12 token
+   EXPECT_EQ(tokens.size(), 12);
+
+   EXPECT_EQ(tokens[0].type, TokenType::INT_LITERAL);
+   EXPECT_EQ(tokens[0].text, "UDINT#1");
+
+   EXPECT_EQ(tokens[5].type, TokenType::INT_LITERAL);
+   EXPECT_EQ(tokens[5].text, "SINT#6");
+
+   EXPECT_EQ(tokens[6].type, TokenType::REAL_LITERAL);
+   EXPECT_EQ(tokens[6].text, "LREAL#1.1");
+
+   EXPECT_EQ(tokens[7].type, TokenType::REAL_LITERAL);
+   EXPECT_EQ(tokens[7].text, "REAL#2.2");
+}
+
+/**
+ * @brief Test that typed literals with underscores in values are correctly handled
+ */
+TEST(LexerTest, TypedLiteralWithUnderscore)
+{
+   Lexer lexer("UDINT#123_456_789", "<test>");
+   auto tokens = lexer.tokenize();
+   EXPECT_EQ(tokens[0].type, TokenType::INT_LITERAL);
+   EXPECT_EQ(tokens[0].text, "UDINT#123456789");
+}
+
+/**
+ * @brief Test that TIME literals with different types are correctly handled
+ */
+TEST(LexerTest, TimeLiteralsVariants)
+{
+   Lexer lexer("T#100ms TIME#5s T#1h TIME#30m", "<test>");
+   auto tokens = lexer.tokenize();
+
+   EXPECT_EQ(tokens[0].type, TokenType::TIME_LITERAL);
+   EXPECT_EQ(tokens[0].text, "T#100ms");
+
+   EXPECT_EQ(tokens[1].type, TokenType::TIME_LITERAL);
+   EXPECT_EQ(tokens[1].text, "TIME#5s");
+
+   EXPECT_EQ(tokens[2].type, TokenType::TIME_LITERAL);
+   EXPECT_EQ(tokens[2].text, "T#1h");
+
+   EXPECT_EQ(tokens[3].type, TokenType::TIME_LITERAL);
+   EXPECT_EQ(tokens[3].text, "TIME#30m");
+}
+
+/**
+ * @brief Test that typed literals with decimal numbers are correctly recognized
+ */
+TEST(LexerTest, TypedLiteralDecimal)
+{
+   Lexer lexer("UDINT#123.456", "<test>");
+   auto tokens = lexer.tokenize();
+   // Dovrebbe essere riconosciuto come REAL_LITERAL
+   EXPECT_EQ(tokens[0].type, TokenType::REAL_LITERAL);
+   EXPECT_EQ(tokens[0].text, "UDINT#123.456");
+}
+
+/**
+ * @brief Test that typed literals with negative values are correctly recognized
+ */
+TEST(LexerTest, TypedLiteralNegative)
+{
+   Lexer lexer("INT#-123", "<test>");
+   auto tokens = lexer.tokenize();
+   EXPECT_EQ(tokens[0].type, TokenType::INT_LITERAL);
+   EXPECT_EQ(tokens[0].text, "INT#-123");
+}

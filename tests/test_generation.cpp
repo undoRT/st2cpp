@@ -418,11 +418,8 @@ TEST_F(GenerationTest, WhileLoop)
 
 /**
  * @brief Test that REPEAT loop is correctly translated
- * 
- * NOTE: This test is DISABLED because the parser does not yet support
- * REPEAT...UNTIL loops. The parse error occurs at END_REPEAT.
  */
-TEST_F(GenerationTest, DISABLED_RepeatLoop)
+TEST_F(GenerationTest, RepeatLoop)
 {
    std::string st = R"(
         PROGRAM Test
@@ -724,4 +721,263 @@ TEST_F(GenerationTest, CommentsPreserved)
    // Just verify that generation succeeds
    EXPECT_FALSE(result.header.empty());
    EXPECT_FALSE(result.source.empty());
+}
+
+// ============================================================================
+//  Typed Literal Generation Tests
+// ============================================================================
+
+/**
+ * @brief Test that typed integer literals are correctly generated as C++ literals
+ * 
+ * The typed prefix (UDINT#, ULINT#, etc.) should be stripped in the generated C++,
+ * leaving just the value.
+ */
+TEST_F(GenerationTest, TypedIntegerLiteralGeneration)
+{
+   std::string st = R"(
+        FUNCTION Test : UDINT
+            VAR
+                x : UDINT;
+                y : ULINT;
+                z : INT;
+            END_VAR
+            x := UDINT#123;
+            y := ULINT#456;
+            z := INT#789;
+            Test := UDINT_TO_UDINT(x);
+        END_FUNCTION
+    )";
+
+   auto result = generate(st);
+
+   // The typed prefix should be stripped in generated C++
+   // The value 123 should appear as 123, not UDINT#123
+   expectRegex(result.source, R"(X\s*=\s*123\s*;)");
+   expectRegex(result.source, R"(Y\s*=\s*456\s*;)");
+   expectRegex(result.source, R"(Z\s*=\s*789\s*;)");
+}
+
+/**
+ * @brief Test that typed hexadecimal literals are correctly generated
+ */
+TEST_F(GenerationTest, TypedHexLiteralGeneration)
+{
+   std::string st = R"(
+        FUNCTION Test : UDINT
+            VAR
+                x : UDINT;
+                y : ULINT;
+            END_VAR
+            x := UDINT#16#85EBCA6B;
+            y := ULINT#16#9E3779B97F4A7C15;
+            Test := UDINT_TO_UDINT(x);
+        END_FUNCTION
+    )";
+
+   auto result = generate(st);
+
+   // The typed prefix should be stripped, but the hex prefix should remain
+   // The generated C++ should have 0x85EBCA6B and 0x9E3779B97F4A7C15
+   // The numeric literal may appear with 'U' suffix for ULINT
+   expectRegex(result.source, R"(X\s*=\s*0x85EBCA6B\s*;)");
+   // For ULINT, the hex literal should be generated without U suffix in the regex
+   // since the runtime type handles the value
+   expectRegex(result.source, R"(Y\s*=\s*0x9E3779B97F4A7C15\s*;)");
+}
+
+/**
+ * @brief Test that typed real literals are correctly generated
+ */
+TEST_F(GenerationTest, TypedRealLiteralGeneration)
+{
+   std::string st = R"(
+        FUNCTION Test : LREAL
+            VAR
+                x : LREAL;
+                y : REAL;
+            END_VAR
+            x := LREAL#3.14159;
+            y := REAL#1.5e-10;
+            Test := LREAL#0.0;
+        END_FUNCTION
+    )";
+
+   auto result = generate(st);
+
+   // The typed prefix should be stripped, leaving just the numeric literal
+   expectRegex(result.source, R"(X\s*=\s*3.14159\s*;)");
+   expectRegex(result.source, R"(Y\s*=\s*1.5e-10\s*;)");
+   expectRegex(result.source, R"(TEST_ret\s*=\s*0.0\s*;)");
+}
+
+/**
+ * @brief Test that typed literals in expressions are correctly generated
+ */
+TEST_F(GenerationTest, TypedLiteralsInExpressions)
+{
+   std::string st = R"(
+        FUNCTION Test : ULINT
+            VAR
+                x : ULINT;
+                y : ULINT;
+            END_VAR
+            x := ULINT#100;
+            y := x + ULINT#200;
+            Test := y * ULINT#2;
+        END_FUNCTION
+    )";
+
+   auto result = generate(st);
+
+   // The typed prefixes should be stripped in generated C++
+   expectRegex(result.source, R"(X\s*=\s*100\s*;)");
+   expectRegex(result.source, R"(Y\s*=\s*X\s*\+\s*200\s*;)");
+   expectRegex(result.source, R"(TEST_ret\s*=\s*Y\s*\*\s*2\s*;)");
+}
+
+/**
+ * @brief Test that typed literals with bitwise operations are correctly generated
+ */
+TEST_F(GenerationTest, TypedLiteralsBitwiseGeneration)
+{
+   std::string st = R"(
+        FUNCTION Test : UDINT
+            VAR
+                x : UDINT;
+                mask : UDINT;
+            END_VAR
+            x := UDINT#16#12345678;
+            mask := UDINT#16#A5A5A5A5;
+            x := x XOR mask;
+            x := x AND UDINT#16#FFFFFFFF;
+            Test := x;
+        END_FUNCTION
+    )";
+
+   auto result = generate(st);
+
+   expectRegex(result.source, R"(X\s*=\s*0x12345678\s*;)");
+   expectRegex(result.source, R"(MASK\s*=\s*0xA5A5A5A5\s*;)");
+   expectRegex(result.source, R"(X\s*=\s*X\s*\^\s*MASK\s*;)");
+   expectRegex(result.source, R"(X\s*=\s*X\s*&\s*0xFFFFFFFF\s*;)");
+}
+
+/**
+ * @brief Test that typed literals in array initialization are correctly generated
+ */
+TEST_F(GenerationTest, TypedLiteralsInArrayGeneration)
+{
+   std::string st = R"(
+        VAR_GLOBAL
+            data : ARRAY[0..2] OF UDINT := [UDINT#10, UDINT#20, UDINT#30];
+            matrix : ARRAY[0..1, 0..1] OF ULINT := [[ULINT#1, ULINT#2], [ULINT#3, ULINT#4]];
+        END_VAR
+    )";
+
+   auto result = generate(st);
+
+   // The typed prefixes should be stripped in array initialization
+   // The array initialization should contain just the numeric values
+   expectRegex(result.header, R"(10,\s*20,\s*30)");
+   expectRegex(result.header, R"(\{1,\s*2\},\s*\{3,\s*4\})");
+}
+
+/**
+ * @brief Test that typed literals in struct initialization are correctly generated
+ */
+TEST_F(GenerationTest, TypedLiteralsInStructGeneration)
+{
+   std::string st = R"(
+        TYPE Point :
+            STRUCT
+                x : UDINT;
+                y : UDINT;
+            END_STRUCT
+        END_TYPE
+
+        TYPE Config :
+            STRUCT
+                id : UDINT;
+                value : ULINT;
+            END_STRUCT
+        END_TYPE
+
+        VAR_GLOBAL
+            p : Point := (x := UDINT#100, y := UDINT#200);
+            cfg : Config := (id := UDINT#42, value := ULINT#16#ABCDEF0123456789);
+        END_VAR
+    )";
+
+   auto result = generate(st);
+
+   // The typed prefixes should be stripped in struct initialization
+   expectRegex(result.header, R"(\.X\s*=\s*100)");
+   expectRegex(result.header, R"(\.Y\s*=\s*200)");
+   expectRegex(result.header, R"(\.ID\s*=\s*42)");
+   expectRegex(result.header, R"(\.VALUE\s*=\s*0xABCDEF0123456789)");
+}
+
+/**
+ * @brief Test that typed literals with underscores are correctly generated
+ */
+TEST_F(GenerationTest, TypedLiteralsWithUnderscores)
+{
+   std::string st = R"(
+        FUNCTION Test : UDINT
+            VAR
+                x : UDINT;
+            END_VAR
+            x := UDINT#123_456_789;
+            Test := x;
+        END_FUNCTION
+    )";
+
+   auto result = generate(st);
+
+   // Underscores should be removed in generated C++
+   expectRegex(result.source, R"(X\s*=\s*123456789\s*;)");
+}
+
+/**
+ * @brief Test that typed literals with negative values are correctly generated
+ */
+TEST_F(GenerationTest, TypedLiteralNegativeGeneration)
+{
+   std::string st = R"(
+        FUNCTION Test : INT
+            VAR
+                x : INT;
+            END_VAR
+            x := INT#-123;
+            Test := x;
+        END_FUNCTION
+    )";
+
+   auto result = generate(st);
+
+   // The negative sign should be preserved, typed prefix stripped
+   expectRegex(result.source, R"(X\s*=\s*-123\s*;)");
+}
+
+/**
+ * @brief Test that mixed typed and untyped literals are correctly generated
+ */
+TEST_F(GenerationTest, MixedTypedUntypedLiterals)
+{
+   std::string st = R"(
+        FUNCTION Test : UDINT
+            VAR
+                x : UDINT;
+            END_VAR
+            x := UDINT#100 + 200;
+            Test := x * 2;
+        END_FUNCTION
+    )";
+
+   auto result = generate(st);
+
+   // Both typed and untyped literals should be handled
+   expectRegex(result.source, R"(X\s*=\s*100\s*\+\s*200\s*;)");
+   expectRegex(result.source, R"(TEST_ret\s*=\s*X\s*\*\s*2\s*;)");
 }

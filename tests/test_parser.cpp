@@ -797,3 +797,158 @@ TEST(ParserTest, ParseCompleteProject)
    EXPECT_EQ(tu.structs.size(), 1);
    EXPECT_EQ(tu.pous.size(), 3); // Add, Counter, Main
 }
+
+// ============================================================================
+//  Typed Literal Tests
+// ============================================================================
+
+/**
+ * @brief Test parsing typed integer literals
+ */
+TEST(ParserTest, ParseTypedIntegerLiterals)
+{
+   std::string st = R"(
+        FUNCTION Test : UDINT
+            VAR
+                x : UDINT;
+                y : ULINT;
+                z : INT;
+            END_VAR
+            x := UDINT#123;
+            y := ULINT#456;
+            z := INT#789;
+            Test := UDINT_TO_UDINT(x);
+        END_FUNCTION
+    )";
+   Lexer lexer(st, "<test>");
+   auto tokens = lexer.tokenize();
+   Parser parser(std::move(tokens));
+   auto tu = parser.parseTranslationUnit();
+
+   ASSERT_EQ(tu.pous.size(), 1);
+   EXPECT_EQ(tu.pous[0].name, "Test");
+}
+
+/**
+ * @brief Test parsing typed hexadecimal literals
+ */
+TEST(ParserTest, ParseTypedHexLiterals)
+{
+   std::string st = R"(
+        FUNCTION Test : UDINT
+            VAR
+                x : UDINT;
+                y : ULINT;
+            END_VAR
+            x := UDINT#16#85EBCA6B;
+            y := ULINT#16#9E3779B97F4A7C15;
+            Test := UDINT_TO_UDINT(x);
+        END_FUNCTION
+    )";
+   Lexer lexer(st, "<test>");
+   auto tokens = lexer.tokenize();
+   Parser parser(std::move(tokens));
+   auto tu = parser.parseTranslationUnit();
+
+   ASSERT_EQ(tu.pous.size(), 1);
+   EXPECT_EQ(tu.pous[0].name, "Test");
+}
+
+/**
+ * @brief Test parsing typed real literals
+ */
+TEST(ParserTest, ParseTypedRealLiterals)
+{
+   std::string st = R"(
+        FUNCTION Test : LREAL
+            VAR
+                x : LREAL;
+                y : REAL;
+            END_VAR
+            x := LREAL#3.14159;
+            y := REAL#1.5e-10;
+            Test := LREAL#0.0;
+        END_FUNCTION
+    )";
+   Lexer lexer(st, "<test>");
+   auto tokens = lexer.tokenize();
+   Parser parser(std::move(tokens));
+   auto tu = parser.parseTranslationUnit();
+
+   ASSERT_EQ(tu.pous.size(), 1);
+   EXPECT_EQ(tu.pous[0].name, "Test");
+}
+
+/**
+ * @brief Test parsing typed literals in expressions
+ */
+TEST(ParserTest, ParseTypedLiteralsInExpressions)
+{
+   std::string st = R"(
+        FUNCTION Test : ULINT
+            VAR
+                x : ULINT;
+                y : ULINT;
+            END_VAR
+            x := ULINT#100;
+            y := x + ULINT#200;
+            Test := y * ULINT#2;
+        END_FUNCTION
+    )";
+   Lexer lexer(st, "<test>");
+   auto tokens = lexer.tokenize();
+   Parser parser(std::move(tokens));
+   auto tu = parser.parseTranslationUnit();
+
+   ASSERT_EQ(tu.pous.size(), 1);
+   EXPECT_EQ(tu.pous[0].name, "Test");
+}
+
+/**
+ * @brief Test parsing typed literals in array initialization
+ */
+TEST(ParserTest, ParseTypedLiteralsInArray)
+{
+   std::string st = R"(
+        VAR_GLOBAL
+            data : ARRAY[0..2] OF UDINT := [UDINT#10, UDINT#20, UDINT#30];
+            matrix : ARRAY[0..1, 0..1] OF ULINT := [[ULINT#1, ULINT#2], [ULINT#3, ULINT#4]];
+        END_VAR
+    )";
+   Lexer lexer(st, "<test>");
+   auto tokens = lexer.tokenize();
+   Parser parser(std::move(tokens));
+   auto tu = parser.parseTranslationUnit();
+
+   ASSERT_EQ(tu.globals.size(), 1);
+   ASSERT_EQ(tu.globals[0].decls.size(), 2);
+   EXPECT_EQ(tu.globals[0].decls[0].name, "data");
+   EXPECT_EQ(tu.globals[0].decls[1].name, "matrix");
+}
+
+/**
+ * @brief Test parsing typed literals with bitwise operations
+ */
+TEST(ParserTest, ParseTypedLiteralsBitwise)
+{
+   std::string st = R"(
+        FUNCTION Test : UDINT
+            VAR
+                x : UDINT;
+                mask : UDINT;
+            END_VAR
+            x := UDINT#16#12345678;
+            mask := UDINT#16#A5A5A5A5;
+            x := x XOR mask;
+            x := x AND UDINT#16#FFFFFFFF;
+            Test := x;
+        END_FUNCTION
+    )";
+   Lexer lexer(st, "<test>");
+   auto tokens = lexer.tokenize();
+   Parser parser(std::move(tokens));
+   auto tu = parser.parseTranslationUnit();
+
+   ASSERT_EQ(tu.pous.size(), 1);
+   EXPECT_EQ(tu.pous[0].name, "Test");
+}

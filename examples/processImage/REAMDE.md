@@ -9,7 +9,7 @@ To execute this example, copy st2cpp bin to this folder and execute:
 Then:
 
 ~~~bash
-cmake CMakeLists.txt D
+cmake CMakeLists.txt
 
 make
 ~~~

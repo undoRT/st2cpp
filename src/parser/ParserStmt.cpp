@@ -176,17 +176,43 @@ std::shared_ptr<Stmt> Parser::parseWhileStmt()
 
 /**
  * @brief Parse a REPEAT-UNTIL loop statement
+ * @details
+ * It handles REPEAT instruction like:
+ * 
+ * REPEAT
+ *   <body>
+ * UNTIL <condition>
+ * END_REPEAT;
+ * 
+ * The ending ";" is optional.
  * @return Statement AST node (RepeatStmt)
  */
 std::shared_ptr<Stmt> Parser::parseRepeatStmt()
 {
    uint32_t ln = peek().line;
    expect(TokenType::KW_REPEAT, "Expected REPEAT");
+
    RepeatStmt stmt;
-   stmt.body = parseStatementList({TokenType::KW_UNTIL});
+
+   // Read the body until "UNTIL" or "END_REPEAT"
+   // "UNTIL" is the termination of the body
+   stmt.body = parseStatementList({TokenType::KW_UNTIL, TokenType::KW_END_REPEAT});
+
+   // If there is "END_REPEAT" without "UNTIL", error!
+   if (check(TokenType::KW_END_REPEAT)) {
+      throw error("Expected UNTIL before END_REPEAT");
+   }
+
+   // Consume UNTIL
    expect(TokenType::KW_UNTIL, "Expected UNTIL");
+
+   // Parse the condition
    stmt.condition = parseExpr();
-   match(TokenType::SEMICOLON);
+
+   // END_REPEAT optionally with ";"
+   expect(TokenType::KW_END_REPEAT, "Expected END_REPEAT");
+   match(TokenType::SEMICOLON); // ; optional!
+
    return std::make_shared<Stmt>(std::move(stmt), ln);
 }
 
@@ -387,12 +413,33 @@ std::shared_ptr<Expr> Parser::parsePrimary()
       return std::make_shared<Expr>(AdrExpr{op}, ln);
    }
 
-   // SIZEOF(type)
+   // SIZEOF(type) or SIZEOF(expression)
    if (match(TokenType::KW_SIZEOF)) {
+      // Need to backtrack because we already consumed SIZEOF
+      // We'll use parseSizeof() which expects SIZEOF already consumed
+      // But we already consumed it, so we need to handle this differently
+
+      // Option 1: Call parseSizeof() but it expects SIZEOF token
+      // We'll refactor: move the SIZEOF parsing logic here directly
+
       expect(TokenType::LPAREN, "Expected '(' after SIZEOF");
-      auto ty = parseTypeRef();
-      expect(TokenType::RPAREN, "Expected ')'");
-      return std::make_shared<Expr>(SizeofExpr{ty}, ln);
+
+      size_t savedPos = m_pos;
+
+      // Try to parse as type
+      try {
+         TypeRef ty = parseTypeRef();
+         expect(TokenType::RPAREN, "Expected ')'");
+         return std::make_shared<Expr>(SizeofExpr{ty, nullptr, true}, ln);
+      } catch (const ParseError& e) {
+         // Not a type - parse as expression
+         m_pos = savedPos;
+         auto expr = parseExpr();
+         expect(TokenType::RPAREN, "Expected ')'");
+         TypeRef dummy;
+         dummy.base = BaseType::VOID;
+         return std::make_shared<Expr>(SizeofExpr{dummy, expr, false}, ln);
+      }
    }
 
    // Literals
@@ -666,4 +713,36 @@ std::shared_ptr<Expr> Parser::parseAddressExpression(const Token& tok)
    }
 
    return std::make_shared<Expr>(addr, tok.line);
+}
+
+/**
+ * @brief Parse a SIZEOF expression
+ * 
+ * Supports both IEC standard SIZEOF(type) and extension SIZEOF(expression).
+ * First tries to parse as type, if fails, parses as expression.
+ * 
+ * @return Expression AST node (SizeofExpr)
+ */
+std::shared_ptr<Expr> Parser::parseSizeof()
+{
+   uint32_t ln = peek().line;
+   expect(TokenType::KW_SIZEOF, "Expected SIZEOF");
+   expect(TokenType::LPAREN, "Expected '(' after SIZEOF");
+
+   size_t savedPos = m_pos;
+
+   // Try to parse as type (IEC standard: SIZEOF(type))
+   try {
+      TypeRef ty = parseTypeRef();
+      expect(TokenType::RPAREN, "Expected ')'");
+      return std::make_shared<Expr>(SizeofExpr{ty, nullptr, true}, ln);
+   } catch (const ParseError& e) {
+      // Not a type - parse as expression (extension)
+      m_pos = savedPos;
+      auto expr = parseExpr();
+      expect(TokenType::RPAREN, "Expected ')'");
+      TypeRef dummy;
+      dummy.base = BaseType::VOID;
+      return std::make_shared<Expr>(SizeofExpr{dummy, expr, false}, ln);
+   }
 }

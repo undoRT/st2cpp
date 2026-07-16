@@ -28,7 +28,7 @@ jobs:
     runs-on: ${{ matrix.runner }}
 
     container:
-      image: debian:12
+      image: debian:11 
 
     strategy:
       fail-fast: false
@@ -46,7 +46,7 @@ jobs:
             package_dir: st2cpp-linux-arm64
 
     steps:
-      - name: Install Git 2.39+
+      - name: Install Git 2.30+
         run: |
           apt update
           apt install -y git

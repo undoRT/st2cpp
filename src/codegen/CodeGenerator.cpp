@@ -1328,9 +1328,48 @@ void CodeGenerator::genFunctionBlock(const POU& pou)
    // Constructor, execution operator, and method declarations
    m_hdr << ind() << upperName << "();\n";
    m_hdr << ind() << "void operator()();\n";
+
+   // Collect all the methods visbility
+   std::vector<const Method*> publicMethods;
+   std::vector<const Method*> protectedMethods;
+   std::vector<const Method*> privateMethods;
+
    for (const auto& method : pou.methods) {
-      genMethodDeclaration(method);
+      switch (method.visibility) {
+      case MethodVisibility::PUBLIC:
+         publicMethods.push_back(&method);
+         break;
+      case MethodVisibility::PROTECTED:
+         protectedMethods.push_back(&method);
+         break;
+      case MethodVisibility::PRIVATE:
+         privateMethods.push_back(&method);
+         break;
+      }
    }
+
+   // Generate private methods (if present)
+   if (!privateMethods.empty()) {
+      m_hdr << "\nprivate:\n";
+      for (const auto* method : privateMethods) {
+         genMethodDeclaration(*method);
+      }
+   }
+
+   // Generate protected methods (if present)
+   if (!protectedMethods.empty()) {
+      m_hdr << "protected:\n";
+      for (const auto* method : protectedMethods) {
+         genMethodDeclaration(*method);
+      }
+   }
+
+   // Generate public methods (if present)
+   m_hdr << "public:\n";
+   for (const auto* method : publicMethods) {
+      genMethodDeclaration(*method);
+   }
+
    m_hdr << ind() << "virtual ~" << upperName << "() = default;\n";
    pop();
    m_hdr << "};\n\n";
@@ -1861,6 +1900,20 @@ void CodeGenerator::genMethodDeclaration(const Method& method)
 
    if (!isVoidType(method.returnType)) {
       returnType = mapType(method.returnType);
+   }
+
+   std::string visibility;
+   switch (method.visibility) {
+   case MethodVisibility::PRIVATE:
+      visibility = "private";
+      break;
+   case MethodVisibility::PROTECTED:
+      visibility = "protected";
+      break;
+   case MethodVisibility::PUBLIC:
+   default:
+      visibility = "public";
+      break;
    }
 
    m_hdr << ind() << "virtual " << returnType << " " << upperMethodName << "(";
@@ -2760,7 +2813,17 @@ void CodeGenerator::genWhile(const WhileStmt& s)
  * Converts a REPEAT-UNTIL loop into a C++ do-while loop.
  * Note that REPEAT executes until condition is true,
  * so the condition is negated in the do-while.
- *
+ * ST syntax:
+ *   REPEAT
+ *     <body>
+ *   UNTIL <condition>
+ *   END_REPEAT
+ * 
+ * In C++ do-while:
+ *   do {
+ *     <body>
+ *   } while (!(<condition>));
+ * 
  * @param s RepeatStmt AST node to generate
  */
 void CodeGenerator::genRepeat(const RepeatStmt& s)
@@ -2913,6 +2976,22 @@ std::string CodeGenerator::genExpr(const Expr& expr)
                return "IEC_TIME_LITERAL(\"" + e.value + "\")";
             }
             std::string value = e.value;
+
+            // Remove type prefix from typed literals (e.g., UDINT#123 -> 123)
+            size_t firstHash = value.find('#');
+            if (firstHash != std::string::npos) {
+               // Verifica se ciò che precede è un tipo valido
+               std::string prefix = value.substr(0, firstHash);
+               // clang-format off
+               static const std::unordered_set<std::string> typePrefixes = {"BOOL", "SINT", "INT", "DINT", "LINT", "USINT", 
+                  "UINT", "UDINT", "ULINT", "REAL", "LREAL", "BYTE", "WORD", "DWORD", "LWORD"};
+               // clang-format on
+
+               if (typePrefixes.find(prefix) != typePrefixes.end()) {
+                  // Rimuovi solo il prefisso del tipo (primo #)
+                  value = value.substr(firstHash + 1);
+               }
+            }
 
             // Convert 16#... to 0x...
             if (value.rfind("16#", 0) == 0) {
@@ -3127,7 +3206,13 @@ std::string CodeGenerator::genExpr(const Expr& expr)
          } else if constexpr (std::is_same_v<T, AdrExpr>) {
             return "&(" + genExpr(*e.operand) + ")";
          } else if constexpr (std::is_same_v<T, SizeofExpr>) {
-            return "sizeof(" + mapType(e.type) + ")";
+            if (e.isType) {
+               // SIZEOF(type) - standard IEC
+               return "sizeof(" + mapType(e.type) + ")";
+            } else {
+               // SIZEOF(expression) - extension
+               return "sizeof(" + genExpr(*e.expr) + ")";
+            }
          } else if constexpr (std::is_same_v<T, CastExpr>) {
             return "static_cast<" + mapType(e.targetType) + ">(" + genExpr(*e.operand) + ")";
          } else if constexpr (std::is_same_v<T, ArrayInitExpr>) {
@@ -4424,23 +4509,38 @@ std::string CodeGenerator::generateFunctionBlocksMaster(const std::vector<std::s
 }
 
 /**
- * @brief Generate single function block header
- * @param pou FB POU
- * @param dependencies Set of FB names this FB depends on
+ * @brief Generate single function block header (modular mode)
+ * 
+ * This function generates the header file for a single Function Block in
+ * modular project mode. The header contains:
+ *   - The FB struct definition with all variables
+ *   - Setter/getter methods for VAR_INPUT, VAR_OUTPUT, and VAR_IN_OUT
+ *   - AT address getter/setter methods for variables with AT addresses
+ *   - Constructor, operator(), and method declarations grouped by visibility
+ * 
+ * Methods are grouped into PUBLIC, PROTECTED, and PRIVATE sections
+ * according to their visibility modifier in the ST source.
+ * 
+ * @param pou The FB POU to generate header for
+ * @param dependencies Set of FB names this FB depends on (for includes)
  * @return File content as string
  */
 std::string CodeGenerator::generateFBHeader(const POU& pou, const std::unordered_set<std::string>& dependencies)
 {
    std::ostringstream out;
    std::string fbName = normalizeType(pou.name);
+
+   // Header prologue
    out << generateHeaderComment();
    out << "#pragma once\n";
    out << "#define ST2CPP_RUNTIME_NAMESPACE " << m_namespace << "\n";
    out << "#include \"" << m_runtimeHeader << "\"\n";
 
+   // Store the base class for SUPER^ calls
    std::string baseClass = pou.extends.empty() ? "" : normalizeType(pou.extends);
    m_currentFBBase = baseClass;
 
+   // Check if this FB uses AT addresses
    m_hasAddresses = false;
    for (const auto& sec : pou.varSections) {
       for (const auto& d : sec.decls) {
@@ -4457,10 +4557,8 @@ std::string CodeGenerator::generateFBHeader(const POU& pou, const std::unordered
       out << "#include \"ProcessImage.hpp\"\n";
    }
 
-   out << "#include \"SimpleGVLs.hpp\"\n";
-
-   // Register variables in the scope for this FB (already done by caller, but we need to ensure they are available for genExpr)
-   // The caller already pushed a scope and registered variables.
+   // Include core headers
+   out << "#include \"SimpleGVLs.hpp\"\n\n";
 
    // Include dependencies (other FBs used as members)
    for (const auto& dep : dependencies) {
@@ -4471,11 +4569,12 @@ std::string CodeGenerator::generateFBHeader(const POU& pou, const std::unordered
       out << "\n";
    }
 
+   // Open namespace
    if (!m_namespace.empty()) {
       out << "namespace " << m_namespace << " {\n\n";
    }
 
-   // Generate FB struct (reuse header part from genFunctionBlock)
+   // FB struct declaration
    out << "// FUNCTION BLOCK " << fbName << "\n";
 
    if (!pou.extends.empty()) {
@@ -4492,7 +4591,7 @@ std::string CodeGenerator::generateFBHeader(const POU& pou, const std::unordered
       out << " : public " << normalizeType(pou.extends);
    }
 
-   // Interfacce (IMPLEMENTS)
+   // Interfaces (IMPLEMENTS)
    for (size_t i = 0; i < pou.implements.size(); ++i) {
       if (i == 0 && pou.extends.empty()) {
          out << " : public " << normalizeType(pou.implements[i]);
@@ -4504,7 +4603,7 @@ std::string CodeGenerator::generateFBHeader(const POU& pou, const std::unordered
    out << " {\n";
    out << "public:\n";
 
-   // Variables
+   // Variables (VAR_INPUT, VAR_OUTPUT, VAR_IN_OUT, VAR_EXTERNAL, VAR_GLOBAL)
    for (const auto& sec : pou.varSections) {
       std::string secLabel;
       switch (sec.kind) {
@@ -4549,7 +4648,7 @@ std::string CodeGenerator::generateFBHeader(const POU& pou, const std::unordered
       }
    }
 
-   // Setters/Getters
+   // Standard Setters/Getters
    out << "\n    // SETTER/GETTER\n";
    for (const auto& sec : pou.varSections) {
       for (const auto& d : sec.decls) {
@@ -4566,7 +4665,7 @@ std::string CodeGenerator::generateFBHeader(const POU& pou, const std::unordered
    }
    out << "    // End SETTER/GETTER\n\n";
 
-   // AT Setters/Getters
+   // AT Address Setters/Getters
    bool hasAT = false;
    for (const auto& sec : pou.varSections) {
       for (const auto& d : sec.decls) {
@@ -4609,19 +4708,46 @@ std::string CodeGenerator::generateFBHeader(const POU& pou, const std::unordered
       out << "    // End AT GETTER/SETTER\n\n";
    }
 
-   // Constructor and methods
-   out << "    " << fbName << "();\n";
-   out << "    void operator()();\n";
+   // Method declarations grouped by visibility
+
+   // Collect methods by visibility
+   std::vector<const Method*> publicMethods;
+   std::vector<const Method*> protectedMethods;
+   std::vector<const Method*> privateMethods;
+
    for (const auto& method : pou.methods) {
-      std::string methodName = normalizeIdent(method.name);
+      switch (method.visibility) {
+      case MethodVisibility::PUBLIC:
+         publicMethods.push_back(&method);
+         break;
+      case MethodVisibility::PROTECTED:
+         protectedMethods.push_back(&method);
+         break;
+      case MethodVisibility::PRIVATE:
+         privateMethods.push_back(&method);
+         break;
+      default:
+         // Default to PUBLIC if visibility is not set
+         publicMethods.push_back(&method);
+         break;
+      }
+   }
+
+   /*
+    * Emit a method declaration to the output stream.
+    * This lambda generates a single method declaration with proper
+    * virtual specifiers, parameters, and override/final/abstract flags.
+    */
+   auto emitMethodDecl = [&](const Method* method) {
+      std::string methodName = normalizeIdent(method->name);
       std::string retType = "void";
-      if (!isVoidType(method.returnType)) {
-         retType = mapType(method.returnType);
+      if (!isVoidType(method->returnType)) {
+         retType = mapType(method->returnType);
       }
 
       out << "    virtual " << retType << " " << methodName << "(";
       bool first = true;
-      for (const auto& param : method.parameters) {
+      for (const auto& param : method->parameters) {
          if (!first) {
             out << ", ";
          }
@@ -4634,20 +4760,50 @@ std::string CodeGenerator::generateFBHeader(const POU& pou, const std::unordered
          }
       }
       out << ")";
-      if (method.isOverride) {
+      if (method->isOverride) {
          out << " override";
       }
-      if (method.isFinal) {
+      if (method->isFinal) {
          out << " final";
       }
-      if (method.isAbstract) {
+      if (method->isAbstract) {
          out << " = 0";
       }
       out << ";\n";
+   };
+
+   /*
+    * Emit a visibility section with the given label and methods.
+    * This lambda generates a visibility section (public/private/protected)
+    * and emits all methods belonging to that visibility group.
+    */
+   auto emitVisibilitySection = [&](const std::string& visibilityLabel, const std::vector<const Method*>& methods) {
+      if (methods.empty()) {
+         return;
+      }
+      out << visibilityLabel << ":\n";
+      for (const auto* method : methods) {
+         emitMethodDecl(method);
+      }
+   };
+
+   // Emit PRIVATE methods first (if any)
+   emitVisibilitySection("private", privateMethods);
+
+   // Emit PROTECTED methods (if any)
+   emitVisibilitySection("protected", protectedMethods);
+
+   // Emit PUBLIC methods (always present)
+   out << "public:\n";
+   out << "    " << fbName << "();\n";
+   out << "    void operator()();\n";
+   for (const auto* method : publicMethods) {
+      emitMethodDecl(method);
    }
    out << "    virtual ~" << fbName << "() = default;\n";
    out << "};\n\n";
 
+   // Epilogue
    if (!m_namespace.empty()) {
       out << "} // namespace " << m_namespace << "\n";
    }
@@ -4831,7 +4987,8 @@ std::string CodeGenerator::generateFBSource(const POU& pou)
    // Variables are already registered in the scope by the caller.
 
    out << generateHeaderComment();
-   out << "#include \"FunctionBlocks/" << fbName << ".hpp\"\n\n";
+   out << "#include \"FunctionBlocks/" << fbName << ".hpp\"\n";
+   out << "#include \"Functions.hpp\"\n\n";
 
    if (!m_namespace.empty()) {
       out << "namespace " << m_namespace << " {\n\n";

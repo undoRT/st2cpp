@@ -390,6 +390,18 @@ Method Parser::parseMethod()
 
    expect(TokenType::KW_METHOD, "Expected METHOD");
 
+   // PRIVATE, PROTECTED, PUBLIC
+   if (match(TokenType::KW_PRIVATE)) {
+      method.visibility = MethodVisibility::PRIVATE;
+   } else if (match(TokenType::KW_PROTECTED)) {
+      method.visibility = MethodVisibility::PROTECTED;
+   } else if (match(TokenType::KW_PUBLIC)) {
+      method.visibility = MethodVisibility::PUBLIC;
+   } else {
+      // Default: PUBLIC
+      method.visibility = MethodVisibility::PUBLIC;
+   }
+
    // ABSTRACT METHOD
    if (match(TokenType::KW_ABSTRACT)) {
       method.isAbstract = true;

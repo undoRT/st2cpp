@@ -15,6 +15,7 @@
 #include <cctype>
 #include <stdexcept>
 #include <algorithm>
+#include <unordered_set>
 
 // ============================================================================
 //  Keyword Table
@@ -42,6 +43,9 @@ const std::unordered_map<std::string, TokenType> Lexer::s_keywords = {
    {"CONSTANT", TokenType::KW_CONSTANT},
    {"RETAIN", TokenType::KW_RETAIN},
    {"METHOD", TokenType::KW_METHOD},
+   {"PRIVATE", TokenType::KW_PRIVATE},
+   {"PROTECTED", TokenType::KW_PROTECTED},
+   {"PUBLIC", TokenType::KW_PUBLIC},
    {"END_METHOD", TokenType::KW_END_METHOD},
    {"PROPERTY", TokenType::KW_PROPERTY},
    {"END_PROPERTY", TokenType::KW_END_PROPERTY},
@@ -451,17 +455,120 @@ std::vector<Token> Lexer::tokenize()
       if (std::isalpha(static_cast<unsigned char>(c)) || c == '_') {
          Token t = readIdentifierOrKeyword();
 
-         // Detect T#, TIME# time literals
+         // FIRST: Check for TIME# or T# time literals
          if ((t.text == "T" || t.text == "t" || t.text == "TIME" || t.text == "time") && peek() == '#') {
             std::string text = t.text;
-            text += advance(); // #
+            text += advance(); // consume '#'
             while (m_pos < m_src.size() && (std::isalnum(static_cast<unsigned char>(peek())) || peek() == '_' || peek() == '.')) {
                text += advance();
             }
             tokens.emplace_back(TokenType::TIME_LITERAL, text, tokLine, tokCol);
-         } else {
-            tokens.push_back(std::move(t));
+            continue;
          }
+
+         // THEN: Check for typed literals (UDINT#, LREAL#, etc.)
+         // clang-format off
+         static const std::unordered_set<std::string> typePrefixes = {"BOOL", "SINT", "INT", "DINT", "LINT", "USINT", "UINT", "UDINT", 
+            "ULINT", "REAL", "LREAL", "BYTE", "WORD", "DWORD", "LWORD"};
+         // clang-format on
+
+         // Detects if there is a type followed by "#" (eg: UDINT#, LREAL#, ULINT#)
+         if (typePrefixes.find(t.text) != typePrefixes.end() && peek() == '#') {
+            std::string text = t.text;
+            text += advance(); // consume '#'
+
+            // Check for negative sign after #
+            if (peek() == '-') {
+               text += advance(); // consume '-'
+            }
+
+            // Read after "#"
+            // It can be a number like decimal, hex (16#...), binary (2#...)
+            if (peek() == '1' && peek(1) == '6' && peek(2) == '#') {
+               // Hex: 16#...
+               text += advance(); // '1'
+               text += advance(); // '6'
+               text += advance(); // '#'
+               while (m_pos < m_src.size() && (std::isxdigit(static_cast<unsigned char>(peek())) || peek() == '_')) {
+                  if (peek() != '_') {
+                     text += advance();
+                  } else {
+                     advance(); // skip underscore
+                  }
+               }
+               tokens.emplace_back(TokenType::INT_LITERAL, text, tokLine, tokCol);
+               continue;
+            } else if (peek() == '2' && peek(1) == '#') {
+               // Binary: 2#...
+               text += advance();
+               text += advance();
+               while (m_pos < m_src.size() && (peek() == '0' || peek() == '1' || peek() == '_')) {
+                  if (peek() != '_') {
+                     text += advance();
+                  } else {
+                     advance();
+                  }
+               }
+               tokens.emplace_back(TokenType::INT_LITERAL, text, tokLine, tokCol);
+               continue;
+            } else if (peek() == '0' && (peek(1) == 'x' || peek(1) == 'X')) {
+               // C++ style hex: 0xFFFF (usato nei test per WORD#0xFFFF)
+               text += advance(); // '0'
+               text += advance(); // 'x' o 'X'
+               while (m_pos < m_src.size() && (std::isxdigit(static_cast<unsigned char>(peek())) || peek() == '_')) {
+                  if (peek() != '_') {
+                     text += advance();
+                  } else {
+                     advance(); // skip underscore
+                  }
+               }
+               tokens.emplace_back(TokenType::INT_LITERAL, text, tokLine, tokCol);
+               continue;
+            } else if (std::isdigit(static_cast<unsigned char>(peek())) || peek() == '.') {
+               // Decimal or Real
+               bool isReal = false;
+
+               // Read integer part
+               while (m_pos < m_src.size() && (std::isdigit(static_cast<unsigned char>(peek())) || peek() == '_')) {
+                  if (peek() != '_') {
+                     text += advance();
+                  } else {
+                     advance(); // skip underscore
+                  }
+               }
+
+               // Check for fractional part
+               if (peek() == '.') {
+                  isReal = true;
+                  text += advance();
+                  while (m_pos < m_src.size() && std::isdigit(static_cast<unsigned char>(peek()))) {
+                     text += advance();
+                  }
+               }
+
+               // Check for exponent (E or e)
+               if (peek() == 'E' || peek() == 'e') {
+                  isReal = true;
+                  text += advance();
+                  if (peek() == '+' || peek() == '-') {
+                     text += advance();
+                  }
+                  while (m_pos < m_src.size() && std::isdigit(static_cast<unsigned char>(peek()))) {
+                     text += advance();
+                  }
+               }
+
+               if (isReal) {
+                  tokens.emplace_back(TokenType::REAL_LITERAL, text, tokLine, tokCol);
+               } else {
+                  tokens.emplace_back(TokenType::INT_LITERAL, text, tokLine, tokCol);
+               }
+               continue;
+            }
+         }
+
+         // Regular identifier/keyword
+         tokens.push_back(std::move(t));
          continue;
       }
 
