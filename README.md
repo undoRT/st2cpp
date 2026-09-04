@@ -5,6 +5,8 @@
 [![Build](https://github.com/undoRT/st2cpp/actions/workflows/build.yml/badge.svg)](https://github.com/undoRT/st2cpp/actions/workflows/build.yml)
 [![Documentation](https://img.shields.io/badge/docs-doxygen-blue.svg)](https://www.undort.com/st2cpp/api/)
 
+This is the official, origianl upstream repository for st2cpp by undoRT.
+
 Part of the [**undoRT**](https://www.undort.com/) open-source automation platform.
 **st2cpp** translates IEC 61131-3 Structured Text into clean, native C++17. No VM, no runtime overhead — just standard C++ you can compile, debug, and integrate anywhere.
 
