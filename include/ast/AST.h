@@ -236,10 +236,11 @@ struct AddressExpr
 
    AddressType type;
    AddressQualifier qualifier;
-   int byteOffset;      // Byte offset in the process image
-   int bitOffset;       // Bit offset (0-7) - only for BIT qualifier
-   std::string rawText; // Original text (for debugging)
-   bool isPlaceholder;  // true if address contains '*', e.g., %IX*
+   int byteOffset;                 // Byte offset in the process image
+   int bitOffset;                  // Bit offset (0-7) - only for BIT qualifier
+   std::string rawText;            // Original text (for debugging)
+   bool isPlaceholder;             // true if address contains '*', e.g., %IX*
+   bool qualifierInferred = false; // true if specifier is not explicit (eg. %I*)
 
    // For array-like access: %QW10
    // For bit access: %IX0.0

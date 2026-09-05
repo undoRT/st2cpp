@@ -24,45 +24,42 @@ jobs:
   #
   build-linux:
     name: Build ${{ matrix.name }}
-
     runs-on: ${{ matrix.runner }}
-
     container:
       image: debian:11 
 
     strategy:
       fail-fast: false
-
       matrix:
         include:
           - name: linux-x64
             runner: ubuntu-latest
             archive_name: st2cpp-linux-x64.tar.gz
             package_dir: st2cpp-linux-x64
-
           - name: linux-arm64
             runner: ubuntu-24.04-arm
             archive_name: st2cpp-linux-arm64.tar.gz
             package_dir: st2cpp-linux-arm64
 
     steps:
-      - name: Install Git 2.30+
+      - name: Install build dependencies (with retry)
         run: |
-          apt update
-          apt install -y git
+          apt update || true
+          for i in 1 2 3 4 5; do
+            echo "Attempt $i of 5 to install dependencies..."
+            apt install -y --fix-missing --no-install-recommends \
+              build-essential \
+              cmake \
+              g++ \
+              libgtest-dev \
+              && break || sleep 15
+          done
+          cmake --version
 
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
-
-      - name: Install build dependencies
-        run: |
-          apt install -y \
-            build-essential \
-            cmake \
-            g++ \
-            libgtest-dev
 
       - name: Configure CMake
         run: |

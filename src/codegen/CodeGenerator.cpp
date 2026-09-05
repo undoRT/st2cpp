@@ -598,6 +598,16 @@ bool parseAddressString(const std::string& addrStr, AddressExpr& out)
       return false;
    }
 
+   if (out.isPlaceholder && addrStr.size() == 3) {
+      // There is not the third element (X, B, W...)
+      out.qualifier = AddressExpr::AddressQualifier::BIT;
+      out.qualifierInferred = true;
+      out.byteOffset = 0;
+      out.bitOffset = -1;
+      out.rawText = addrStr;
+      return true;
+   }
+
    // Determine qualifier
    switch (addrStr[2]) {
    case 'X':
@@ -718,6 +728,12 @@ CodegenResult CodeGenerator::generate(const TranslationUnit& tu,
          if (!d.atAddress.empty()) {
             AddressExpr addr;
             if (parseAddressString(d.atAddress, addr)) {
+               // If the address qualifier was inferred (e.g., %I*), deduce it from
+               // the declared variable type.
+               if (addr.qualifierInferred) {
+                  addr.qualifier = deduceQualifierFromType(d.type);
+                  addr.qualifierInferred = false;
+               }
                ATDeclaration decl;
                decl.varName = normalizeIdent(d.name);
                decl.pouName = "";
@@ -737,6 +753,12 @@ CodegenResult CodeGenerator::generate(const TranslationUnit& tu,
             if (!d.atAddress.empty()) {
                AddressExpr addr;
                if (parseAddressString(d.atAddress, addr)) {
+                  // If the address qualifier was inferred (e.g., %I*), deduce it from
+                  // the declared variable type.
+                  if (addr.qualifierInferred) {
+                     addr.qualifier = deduceQualifierFromType(d.type);
+                     addr.qualifierInferred = false;
+                  }
                   ATDeclaration decl;
                   decl.varName = normalizeIdent(d.name);
                   decl.pouName = normalizeType(pou.name);
@@ -3467,6 +3489,48 @@ std::string CodeGenerator::generateAddressWrite(const AddressExpr& addr, const s
 }
 
 /**
+ * @brief TODO: DA COMMENTARE
+ * 
+ * @param type 
+ * @return AddressExpr::AddressQualifier 
+ */
+AddressExpr::AddressQualifier CodeGenerator::deduceQualifierFromType(const TypeRef& type) const
+{
+   TypeRef baseType = type;
+   while (!baseType.arrayDims.empty()) {
+      baseType.arrayDims.pop_back();
+   }
+
+   switch (baseType.base) {
+   case BaseType::BOOL:
+      return AddressExpr::AddressQualifier::BIT;
+   case BaseType::BYTE:
+   case BaseType::SINT:
+   case BaseType::USINT:
+      return AddressExpr::AddressQualifier::BYTE;
+   case BaseType::WORD:
+   case BaseType::INT:
+   case BaseType::UINT:
+      return AddressExpr::AddressQualifier::WORD;
+   case BaseType::DWORD:
+   case BaseType::DINT:
+   case BaseType::UDINT:
+   case BaseType::REAL:
+   case BaseType::TIME:
+      return AddressExpr::AddressQualifier::DWORD;
+   case BaseType::LWORD:
+   case BaseType::LINT:
+   case BaseType::ULINT:
+   case BaseType::LREAL:
+   case BaseType::DT:
+   case BaseType::TOD:
+      return AddressExpr::AddressQualifier::LWORD;
+   default:
+      return AddressExpr::AddressQualifier::BYTE;
+   }
+}
+
+/**
  * @brief Get the size of a type in bytes
  *
  * @param tr Type reference
@@ -3803,6 +3867,12 @@ std::vector<GeneratedFile> CodeGenerator::generateModular(const TranslationUnit&
          if (!d.atAddress.empty()) {
             AddressExpr addr;
             if (parseAddressString(d.atAddress, addr)) {
+               // If the address qualifier was inferred (e.g., %I*), deduce it from
+               // the declared variable type.
+               if (addr.qualifierInferred) {
+                  addr.qualifier = deduceQualifierFromType(d.type);
+                  addr.qualifierInferred = false;
+               }
                ATDeclaration decl;
                decl.varName = normalizeIdent(d.name);
                decl.pouName = "";

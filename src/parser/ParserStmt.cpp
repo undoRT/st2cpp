@@ -652,6 +652,17 @@ std::shared_ptr<Expr> Parser::parseAddressExpression(const Token& tok)
       addr.type = AddressExpr::AddressType::DIRECT;
    }
 
+   // Depending on the lenght of the placeholder, let's determine
+   // if there is the qualifier or not
+   if (addr.isPlaceholder && text.size() == 3) {
+      // Qualifier not explicit: detirmin by the type
+      addr.qualifier = AddressExpr::AddressQualifier::BIT; // default (verrà sovrascritto)
+      addr.qualifierInferred = true;
+      addr.byteOffset = 0;
+      addr.bitOffset = -1;
+      return std::make_shared<Expr>(addr, tok.line);
+   }
+
    // Determine qualifier (X, B, W, D, L, P)
    char qual = text[2];
    switch (qual) {

@@ -444,6 +444,7 @@ private:
    std::string generateAddressAccess(const AddressExpr& addr, const TypeRef* type) const;
    std::string generateAddressWrite(const AddressExpr& addr, const std::string& value);
    std::string generateAddressWrite(const AddressExpr& addr, const std::string& value, const TypeRef* type) const;
+   AddressExpr::AddressQualifier deduceQualifierFromType(const TypeRef& type) const;
    int getTypeSizeInBytes(const TypeRef& tr) const;
    int getTypeAlignment(const TypeRef& tr) const;
 
