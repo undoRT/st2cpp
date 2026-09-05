@@ -26,7 +26,7 @@ jobs:
     name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     container:
-      image: debian:11
+      image: debian:12
 
     strategy:
       fail-fast: false
