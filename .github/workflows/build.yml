@@ -26,7 +26,7 @@ jobs:
     name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.runner }}
     container:
-      image: debian:11 
+      image: debian:11
 
     strategy:
       fail-fast: false
@@ -42,7 +42,17 @@ jobs:
             package_dir: st2cpp-linux-arm64
 
     steps:
-      - name: Install build dependencies (with retry)
+      - name: Install Git
+        run: |
+          apt update
+          apt install -y git
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install build dependencies
         run: |
           apt update || true
           for i in 1 2 3 4 5; do
@@ -55,11 +65,7 @@ jobs:
               && break || sleep 15
           done
           cmake --version
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
+          g++ --version
 
       - name: Configure CMake
         run: |
@@ -83,21 +89,15 @@ jobs:
       - name: Package
         run: |
           PACKAGE_DIR="${{ matrix.package_dir }}"
-
           mkdir -p "$PACKAGE_DIR"
-
           cp build/st2cpp "$PACKAGE_DIR/st2cpp"
-
           cp README.md "$PACKAGE_DIR/"
           cp LICENSE "$PACKAGE_DIR/"
           cp CHANGELOG.md "$PACKAGE_DIR/" 2>/dev/null || true
-
           cp -r st2cpp_includes "$PACKAGE_DIR/"
-
           if [ -d tests ]; then
             cp -r tests "$PACKAGE_DIR/"
           fi
-
           tar czf "${{ matrix.archive_name }}" "$PACKAGE_DIR"
 
       - name: Upload artifact
