@@ -1990,13 +1990,17 @@ void CodeGenerator::genMethodDeclaration(const Method& method)
  */
 void CodeGenerator::genMethodDefinition(const std::string& fbName, const Method& method)
 {
+   // Get base class from parent scope (FB scope) BEFORE pushing method scope
+   std::string baseClass = m_scope.getBaseClass();
+
    // Push a scope for this method
    m_scope.pushScope();
    m_scope.setFunctionScope(true); // method = function
    m_scope.setLocalToFunction(true);
 
-   if (!m_currentFBBase.empty()) {
-      m_scope.setBaseClass(m_currentFBBase);
+   // Set base class in method scope for SUPER^ calls
+   if (!baseClass.empty()) {
+      m_scope.setBaseClass(baseClass);
    }
 
    // Register parameters and local variables in the method scope
@@ -2360,6 +2364,307 @@ bool CodeGenerator::isVoidType(const TypeRef& tr) const
 }
 
 // ============================================================================
+//  Semantic-aware helpers
+//
+//  These consume the SemanticInfo produced by SemanticAnalyzer. They REPLACE
+//  the previous name/signature-based inference (m_signatures, m_enumeratorToEnum,
+//  m_enumTypes, collectSignature) with the canonical semantic data instead of
+//  duplicating it. Every helper degrades gracefully: when no SemanticInfo was
+//  attached, the legacy inference path in the callers still applies.
+// ============================================================================
+
+/**
+ * @brief Check whether semantic analysis data is available
+ *
+ * @return true if SemanticInfo is attached and contains a symbol table, false otherwise
+ */
+bool CodeGenerator::semanticAvailable() const
+{
+   return m_semanticInfo != nullptr && m_semanticInfo->symbolTable != nullptr;
+}
+
+/**
+ * @brief Get the semantic symbol table
+ *
+ * @return Pointer to the symbol table, or nullptr when no SemanticInfo is attached
+ */
+const st2cpp::semantic::SymbolTable* CodeGenerator::semanticSymTab() const
+{
+   if (!semanticAvailable()) {
+      return nullptr;
+   }
+   return m_semanticInfo->symbolTable.get();
+}
+
+/**
+ * @brief Map a semantic TypeId to its complete C++ type string
+ *
+ * Central semantic type mapper: resolves the C++ spelling from the canonical
+ * TypeInfo instead of re-deriving it from the syntactic TypeRef.
+ *
+ * @param typeId Canonical type id from the semantic analysis
+ * @return Complete C++ type string (empty if the id is not decodable)
+ */
+std::string CodeGenerator::mapTypeId(st2cpp::semantic::TypeId typeId) const
+{
+   const auto* st = semanticSymTab();
+   if (!st) {
+      return "";
+   }
+   const st2cpp::semantic::TypeInfo* t = st->getType(typeId);
+   if (!t) {
+      return "";
+   }
+
+   switch (t->kind) {
+   case st2cpp::semantic::TypeKind::Elementary:
+      return mapBaseType(t->baseType);
+   case st2cpp::semantic::TypeKind::Array: {
+      std::string elem = mapTypeId(t->elementTypeId);
+      std::string inner = elem.empty() ? normalizeType(t->name) : elem;
+      for (auto it = t->dimensions.rbegin(); it != t->dimensions.rend(); ++it) {
+         inner = "STArray<" + inner + ", " + std::to_string(it->low) + ", " + std::to_string(it->high) + ">";
+      }
+      return inner;
+   }
+   case st2cpp::semantic::TypeKind::Pointer: {
+      std::string inner = mapTypeId(t->pointedTypeId);
+      if (inner.empty() && t->pointedTypeId != 0) {
+         const st2cpp::semantic::TypeInfo* pointed = st->getType(t->pointedTypeId);
+         inner = pointed ? normalizeType(pointed->name) : "";
+      }
+      return inner.empty() ? normalizeType(t->name) : (inner + "*");
+   }
+   case st2cpp::semantic::TypeKind::Reference: {
+      std::string inner = mapTypeId(t->pointedTypeId);
+      if (inner.empty() && t->pointedTypeId != 0) {
+         const st2cpp::semantic::TypeInfo* pointed = st->getType(t->pointedTypeId);
+         inner = pointed ? normalizeType(pointed->name) : "";
+      }
+      return inner + "&";
+   }
+   case st2cpp::semantic::TypeKind::Struct:
+   case st2cpp::semantic::TypeKind::Enum:
+   case st2cpp::semantic::TypeKind::FunctionBlock:
+   case st2cpp::semantic::TypeKind::Interface:
+      return normalizeType(t->name);
+   case st2cpp::semantic::TypeKind::Void:
+      return "void";
+   case st2cpp::semantic::TypeKind::Unknown:
+   default:
+      if (t->baseType != BaseType::VOID && (t->isNumeric || t->isBitType)) {
+         return mapBaseType(t->baseType);
+      }
+      return normalizeType(t->name);
+   }
+}
+
+/**
+ * @brief Decide logical vs bitwise operators using the decorated resolvedTypeId
+ * @param typeId Resolved type of an operand
+ * @return true only when the type is the canonical BOOL
+ */
+bool CodeGenerator::isSemanticBoolType(st2cpp::semantic::TypeId typeId) const
+{
+   const auto* st = semanticSymTab();
+   if (!st) {
+      return false;
+   }
+   const st2cpp::semantic::TypeInfo* t = st->getType(typeId);
+   return t != nullptr && t->isBitType;
+}
+
+/**
+ * @brief Check if a resolved type is an ENUM (member access must use '::' not '.')
+ */
+bool CodeGenerator::isSemanticEnumType(st2cpp::semantic::TypeId typeId) const
+{
+   const auto* st = semanticSymTab();
+   if (!st) {
+      return false;
+   }
+   const st2cpp::semantic::TypeInfo* t = st->getType(typeId);
+   return t != nullptr && t->kind == st2cpp::semantic::TypeKind::Enum;
+}
+
+/**
+ * @brief Qualified enum name for an enumerator symbol
+ *
+ * Replaces the name-based m_enumeratorToEnum map: walks the system symbols
+ * to find the ENUM type symbol that owns the given enumerator.
+ *
+ * @param enumeratorId Symbol id of the ENUMERATOR
+ * @return Normalized enum type name, or empty if not found
+ */
+std::string CodeGenerator::semanticEnumNameForEnumerator(st2cpp::semantic::SymbolId enumeratorId) const
+{
+   const auto* st = semanticSymTab();
+   if (!st) {
+      return "";
+   }
+   for (const auto& sym : st->getSymbols()) {
+      if (sym.id == 0 || sym.kind != st2cpp::semantic::SymbolKind::Type) {
+         continue;
+      }
+      for (st2cpp::semantic::SymbolId e : sym.enumerators) {
+         if (e == enumeratorId) {
+            return normalizeType(sym.name);
+         }
+      }
+   }
+   return "";
+}
+
+/**
+ * @brief Rebuild a call signature from calleeSymbolId + SymbolTable::params
+ *
+ * Replaces the name-based m_signatures lookup for call emission. The callee
+ * may be a FUNCTION/FB symbol (params were registered by DeclVisitor) or an
+ * FB instance, whose variable type is resolved back to the FB symbol.
+ *
+ * @param call The call expression being generated
+ * @return Signature with ordered parameters, or nullopt when semantic data
+ *         is unavailable / unhelpful (caller falls back to m_signatures)
+ */
+std::optional<FunctionSignature> CodeGenerator::semanticSignatureForCall(const CallExpr& call) const
+{
+   const auto* st = semanticSymTab();
+   if (!st || call.calleeSymbolId == 0) {
+      return std::nullopt;
+   }
+
+   const st2cpp::semantic::Symbol* callee = st->get(call.calleeSymbolId);
+   if (!callee) {
+      return std::nullopt;
+   }
+
+   // Resolve the signature symbol: for an FB instance variable, use the FB symbol.
+   const st2cpp::semantic::Symbol* sigSym = callee;
+   const st2cpp::semantic::TypeInfo* calleeType = st->getType(callee->typeId);
+   if (calleeType && calleeType->kind == st2cpp::semantic::TypeKind::FunctionBlock) {
+      for (const auto& sym : st->getSymbols()) {
+         if (sym.kind == st2cpp::semantic::SymbolKind::FunctionBlock && sym.name == calleeType->name) {
+            sigSym = &sym;
+            break;
+         }
+      }
+   }
+
+   if (sigSym->params.empty()) {
+      return std::nullopt;
+   }
+
+   FunctionSignature sig;
+   sig.name = normalizeIdent(callee->name);
+   sig.returnType.base = BaseType::NAMED;
+
+   for (st2cpp::semantic::SymbolId pid : sigSym->params) {
+      const st2cpp::semantic::Symbol* p = st->get(pid);
+      if (!p) {
+         continue;
+      }
+      ParameterInfo pi;
+      pi.name = normalizeIdent(p->name);
+      pi.isInput = true;
+      const st2cpp::semantic::TypeInfo* pt = st->getType(p->typeId);
+      pi.type.base = BaseType::NAMED;
+      pi.type.name = pt ? pt->name : "";
+      sig.parameters.push_back(pi);
+   }
+   return sig;
+}
+
+/**
+ * @brief Emit an explicit static_cast for RHS of an assignment/RETURN when the
+ *        semantic types of lhs and rhs differ.
+ *
+ * The semantic analysis already validated the assignment; the runtime types
+ * are C++ primitives, so the cast only makes the intended conversion explicit
+ * (IEC 61131-3 allows widening between numerics). No cast is emitted when the
+ * mode is disabled, types match, or the target is not numeric elementary.
+ *
+ * @param lhs     LHS expression (decorated)
+ * @param rhs     RHS expression (decorated)
+ * @param rhsCode Already generated C++ text of the RHS
+ * @return RHS text, possibly wrapped in static_cast
+ */
+std::string CodeGenerator::applySemanticAssignmentCast(const Expr& lhs, const Expr& rhs, const std::string& rhsCode) const
+{
+   if (!semanticAvailable()) {
+      return rhsCode;
+   }
+   st2cpp::semantic::TypeId lhsId = lhs.resolvedTypeId;
+   st2cpp::semantic::TypeId rhsId = rhs.resolvedTypeId;
+   if (lhsId == 0 || rhsId == 0 || lhsId == rhsId) {
+      return rhsCode;
+   }
+   const auto* st = semanticSymTab();
+   if (!st) {
+      return rhsCode;
+   }
+   const st2cpp::semantic::TypeInfo* lhsType = st->getType(lhsId);
+   if (!lhsType || lhsType->kind != st2cpp::semantic::TypeKind::Elementary || !lhsType->isNumeric) {
+      return rhsCode;
+   }
+   std::string target = mapTypeId(lhsId);
+   if (target.empty()) {
+      return rhsCode;
+   }
+   return "static_cast<" + target + ">(" + rhsCode + ")";
+}
+
+/**
+ * @brief Resolve a FB's symbol id from the semantic symbol table by name
+ *
+ * @param pou The FB POU to resolve
+ * @return SymbolId of the FB symbol, or 0 when no SemanticInfo is attached
+ *         or the FB is not registered (caller degrades to the legacy syntax)
+ */
+st2cpp::semantic::SymbolId CodeGenerator::semanticFbSymbolId(const POU& pou) const
+{
+   const auto* st = semanticSymTab();
+   if (!st) {
+      return 0;
+   }
+   for (const auto& sym : st->getSymbols()) {
+      if (sym.id == 0 || sym.kind != st2cpp::semantic::SymbolKind::FunctionBlock) {
+         continue;
+      }
+      if (normalizeType(sym.name) == normalizeType(pou.name)) {
+         return sym.id;
+      }
+   }
+   return 0;
+}
+
+/**
+ * @brief Resolve a FB's base-class name
+ *
+ * Prefers the canonical semantic record (SemanticInfo::fbBaseClass, keyed by
+ * the FB symbol) over the AST syntax `pou.extends`. When the FB is not in the
+ * symbol table (no semantics attached), the legacy spelling is used so the
+ * degradation path stays byte-identical.
+ *
+ * @param pou The FB POU
+ * @return Normalized base-class name, or empty when the FB has no base
+ */
+std::string CodeGenerator::semanticBaseForFb(const POU& pou) const
+{
+   const auto* st = semanticSymTab();
+   if (st) {
+      st2cpp::semantic::SymbolId fbId = semanticFbSymbolId(pou);
+      auto it = m_semanticInfo->fbBaseClass.find(fbId);
+      if (it != m_semanticInfo->fbBaseClass.end()) {
+         const st2cpp::semantic::Symbol* base = st->get(it->second);
+         if (base) {
+            return normalizeType(base->name);
+         }
+      }
+   }
+   return pou.extends.empty() ? "" : normalizeType(pou.extends);
+}
+
+// ============================================================================
 //  Normalization utilities
 // ============================================================================
 
@@ -2497,6 +2802,9 @@ void CodeGenerator::genStmt(const Stmt& stmt)
             if (lhsStr == m_currentFunctionName) {
                lhsStr = m_currentFunctionName + "_ret";
             }
+            // Semantic-aware conversion: make the validated IEC conversion explicit
+            // (no-op when no semantic info is attached or types are identical).
+            rhsStr = applySemanticAssignmentCast(*s.lhs, *s.rhs, rhsStr);
             m_src << ind() << lhsStr << " = " << rhsStr << ";\n";
          } else if constexpr (std::is_same_v<T, ExprStmt>) {
             // Expression statement (often a function call)
@@ -2793,7 +3101,7 @@ void CodeGenerator::genIf(const IfStmt& s)
  * @brief Generate C++ for loop
  *
  * Converts a FOR loop with from, to, and optional by step
- * into a C++ for loop. Currently assumes positive step.
+ * into a C++ for loop. Handles both positive and negative steps.
  *
  * @param s ForStmt AST node to generate
  */
@@ -2801,8 +3109,32 @@ void CodeGenerator::genFor(const ForStmt& s)
 {
    std::string byExpr = s.by ? genExpr(*s.by) : "1";
    std::string normalizedVar = normalizeIdent(s.var);
-   m_src << ind() << "for (auto " << normalizedVar << " = " << genExpr(*s.from) << "; " << normalizedVar << " <= " << genExpr(*s.to)
-         << "; " << normalizedVar << " += " << byExpr << ") {\n";
+   std::string fromExpr = genExpr(*s.from);
+   std::string toExpr = genExpr(*s.to);
+
+   // Check if step is a negative literal to determine loop direction
+   bool isNegativeStep = false;
+   if (s.by) {
+      if (auto* lit = std::get_if<LiteralExpr>(&s.by->node)) {
+         if (!lit->value.empty() && lit->value[0] == '-') {
+            isNegativeStep = true;
+         }
+      } else if (auto* unary = std::get_if<UnaryExpr>(&s.by->node)) {
+         if (unary->op == "-") {
+            isNegativeStep = true;
+         }
+      }
+   }
+
+   if (isNegativeStep) {
+      // Negative step: loop while var >= to
+      m_src << ind() << "for (auto " << normalizedVar << " = " << fromExpr << "; " << normalizedVar << " >= " << toExpr << "; "
+            << normalizedVar << " += " << byExpr << ") {\n";
+   } else {
+      // Positive step: loop while var <= to
+      m_src << ind() << "for (auto " << normalizedVar << " = " << fromExpr << "; " << normalizedVar << " <= " << toExpr << "; "
+            << normalizedVar << " += " << byExpr << ") {\n";
+   }
    push();
    for (const auto& st : s.body) {
       genStmt(*st);
@@ -3041,7 +3373,16 @@ std::string CodeGenerator::genExpr(const Expr& expr)
          } else if constexpr (std::is_same_v<T, IdentExpr>) {
             std::string varName = normalizeIdent(e.name);
 
-            // Check if this identifier is an enum enumerator (O(1) lookup)
+            // Semantic: the identifier resolved to an ENUMERATOR symbol.
+            // This replaces the name-based m_enumeratorToEnum guesswork.
+            if (semanticAvailable() && e.symbolId != 0) {
+               const std::string enumName = semanticEnumNameForEnumerator(e.symbolId);
+               if (!enumName.empty()) {
+                  return enumName + "::" + varName;
+               }
+            }
+
+            // Legacy fallback: name-based enumerator -> enum map (no semantic info)
             auto enumIt = m_enumeratorToEnum.find(varName);
             if (enumIt != m_enumeratorToEnum.end()) {
                // This is an enum enumerator - return qualified name
@@ -3088,15 +3429,38 @@ std::string CodeGenerator::genExpr(const Expr& expr)
             return e.op + genExpr(*e.operand);
          } else if constexpr (std::is_same_v<T, BinaryExpr>) {
             std::string op = e.op;
+            // Semantic-aware operand check: prefer the decorated resolvedTypeId
+            // (canonical BOOL) over the syntactic isBoolExpression heuristic.
+            auto areBoolOperands = [&]() -> bool {
+               if (semanticAvailable() && e.left->resolvedTypeId != 0 && e.right->resolvedTypeId != 0) {
+                  return isSemanticBoolType(e.left->resolvedTypeId) && isSemanticBoolType(e.right->resolvedTypeId);
+               }
+               return isBoolExpression(e.left) && isBoolExpression(e.right);
+            };
             // Map ST operators to C++
             if (op == "=" || op == "==") {
                op = "==";
             } else if (op == "AND" || op == "&&") {
-               op = "&";
+               // AND is logical (&&) for BOOL, bitwise (&) for integers
+               if (areBoolOperands()) {
+                  op = "&&";
+               } else {
+                  op = "&";
+               }
             } else if (op == "OR" || op == "||") {
-               op = "|";
+               // OR is logical (||) for BOOL, bitwise (|) for integers
+               if (areBoolOperands()) {
+                  op = "||";
+               } else {
+                  op = "|";
+               }
             } else if (op == "XOR") {
-               op = "^";
+               // XOR is logical (!= for bool) for BOOL, bitwise (^) for integers
+               if (areBoolOperands()) {
+                  op = "!="; // Logical XOR for bool
+               } else {
+                  op = "^";
+               }
             } else if (op == "MOD") {
                op = "%";
             } else if (op == "<>") {
@@ -3135,7 +3499,12 @@ std::string CodeGenerator::genExpr(const Expr& expr)
             std::string object = genExpr(*e.object);
             std::string member = normalizeIdent(e.member);
 
-            // Handle enum member access (needs :: instead of .)
+            // Semantic: the object type is an ENUM -> use '::' instead of '.'
+            if (semanticAvailable() && e.object->resolvedTypeId != 0 && isSemanticEnumType(e.object->resolvedTypeId)) {
+               return object + "::" + member;
+            }
+
+            // Legacy fallback: enum member access via name-based maps (needs :: instead of .)
             auto varIt = m_scope.lookupVariable(object);
             if (varIt && m_enumTypes.find(*varIt) != m_enumTypes.end()) {
                return *varIt + "::" + member;
@@ -3183,12 +3552,23 @@ std::string CodeGenerator::genExpr(const Expr& expr)
             std::string r = calleeName + "(";
             bool first = true;
 
-            // Check if we know the function signature (for named arguments)
+            // Check if we know the function signature (for named arguments).
+            // Semantic path: calleeSymbolId + SymbolTable::params; legacy path: m_signatures.
             auto sigIt = m_signatures.find(calleeName);
+            std::optional<FunctionSignature> semanticSig;
+            const FunctionSignature* sigPtr = nullptr;
+            if (sigIt != m_signatures.end()) {
+               sigPtr = &sigIt->second;
+            } else {
+               semanticSig = semanticSignatureForCall(e);
+               if (semanticSig.has_value()) {
+                  sigPtr = &*semanticSig;
+               }
+            }
 
-            if (sigIt != m_signatures.end() && !e.args.empty() && e.args[0].named) {
+            if (sigPtr != nullptr && !e.args.empty() && e.args[0].named) {
                // Named arguments - reorder according to signature
-               const auto& sig = sigIt->second;
+               const auto& sig = *sigPtr;
 
                std::unordered_map<std::string, std::string> argMap;
                for (const auto& arg : e.args) {
@@ -3269,7 +3649,7 @@ std::string CodeGenerator::genExpr(const Expr& expr)
             result += "}";
             return result;
          } else if constexpr (std::is_same_v<T, SuperCallExpr>) {
-            std::string base = m_currentFBBase.empty() ? m_scope.getBaseClass() : m_currentFBBase;
+            std::string base = m_scope.getBaseClass();
             if (base.empty()) {
                throw std::runtime_error("SUPER^ used but no base class in scope");
             }
@@ -3540,7 +3920,9 @@ int CodeGenerator::getTypeSizeInBytes(const TypeRef& tr) const
 {
    // If it's an array, calculate total size
    if (!tr.arrayDims.empty()) {
-      int elemSize = getTypeSizeInBytes(tr);
+      TypeRef elemType = tr;
+      elemType.arrayDims.clear();
+      int elemSize = getTypeSizeInBytes(elemType);
       int totalSize = 1;
       for (const auto& dim : tr.arrayDims) {
          // Calculate dimension size: high - low + 1
@@ -3691,6 +4073,35 @@ int CodeGenerator::getTypeAlignment(const TypeRef& tr) const
 // ============================================================================
 //  Project-style generation
 // ============================================================================
+
+/**
+ * @brief Map the semantic fbTopoOrder (SymbolIds) to codegen FB names
+ * 
+ * Only names of FB symbols that exist in the current m_fbMap are kept; names
+ * are normalized exactly like the legacy path (normalizeType). The semantic
+ * order already accounts for inheritance and composition dependencies.
+ */
+std::vector<std::string> CodeGenerator::orderedFbNamesFromSemantic()
+{
+   std::vector<std::string> names;
+   if (!semanticAvailable() || m_semanticInfo->empty()) {
+      return names;
+   }
+   const st2cpp::semantic::SymbolTable* st = m_semanticInfo->symbolTable.get();
+   if (!st) {
+      return names;
+   }
+   for (st2cpp::semantic::SymbolId id : m_semanticInfo->fbTopoOrder) {
+      const st2cpp::semantic::Symbol* sym = st->get(id);
+      if (sym && sym->kind == st2cpp::semantic::SymbolKind::FunctionBlock) {
+         std::string n = normalizeType(sym->name);
+         if (m_fbMap.count(n)) {
+            names.push_back(n);
+         }
+      }
+   }
+   return names;
+}
 
 /**
  * @brief Build dependency graph between function blocks
@@ -3973,13 +4384,20 @@ std::vector<GeneratedFile> CodeGenerator::generateModular(const TranslationUnit&
       }
    }
 
-   // Step 5: Build dependency graph
+   // Step 5: Build dependency graph (legacy, for the per-FB include lists)
    auto dependencies = buildFBDependencies(tu);
 
-   // Step 6: Topological sort of FBs
+   // Step 6: Topological sort of FBs.
+   // Semantic path (Fase 3): use fbTopoOrder computed by the semantic analyzer,
+   // which covers BOTH inheritance (extends) and composition (FB-typed members
+   // and parameters). Legacy fallback: name-graph sort (members/params only).
    std::vector<std::string> orderedFBs;
-   if (!dependencies.empty()) {
-      orderedFBs = topologicalSort(dependencies);
+   if (semanticAvailable() && !m_semanticInfo->empty() && !m_semanticInfo->fbTopoOrder.empty()) {
+      orderedFBs = orderedFbNamesFromSemantic();
+   } else {
+      if (!dependencies.empty()) {
+         orderedFBs = topologicalSort(dependencies);
+      }
    }
 
    // Step 7: Collect program names
@@ -4031,12 +4449,13 @@ std::vector<GeneratedFile> CodeGenerator::generateModular(const TranslationUnit&
          fbDeps = it->second;
       }
 
-      if (!pou.extends.empty()) {
-         std::string baseName = normalizeType(pou.extends);
-         // Verifica che la base sia un FB (non un'interfaccia)
-         if (m_isFB.find(baseName) != m_isFB.end()) {
-            fbDeps.insert(baseName);
-         }
+      // Base-class dependency for the per-FB include list.
+      // Semantic path (Fase 7): prefers SemanticInfo::fbBaseClass when semantics
+      // are attached; the AST syntax (pou.extends) is the legacy fallback, so
+      // the degrade-without-semantics output is byte-identical.
+      std::string semanticBase = semanticBaseForFb(pou);
+      if (!semanticBase.empty() && m_isFB.find(semanticBase) != m_isFB.end()) {
+         fbDeps.insert(semanticBase);
       }
 
       for (const auto& iface : pou.implements) {
@@ -4056,8 +4475,9 @@ std::vector<GeneratedFile> CodeGenerator::generateModular(const TranslationUnit&
             }
          }
       }
-      if (!pou.extends.empty()) {
-         m_scope.setBaseClass(normalizeType(pou.extends));
+      // SUPER^ scope base: canonical semantic name when available, else legacy.
+      if (!semanticBase.empty()) {
+         m_scope.setBaseClass(semanticBase);
       }
 
       files.push_back({fbName, generateFBHeader(pou, fbDeps), GenFileType::HEADER, "FunctionBlocks"});
@@ -5527,6 +5947,16 @@ std::vector<StructInitExpr::MemberInit> CodeGenerator::orderStructMembers(const 
    return result;
 }
 
+/**
+ * @brief Generate an initializer with struct members in declaration order
+ *
+ * When the type is a known struct, reorders the initializer members to match
+ * the struct's declaration order before generating the C++ text.
+ *
+ * @param type The type being initialized
+ * @param initExpr The initializer expression
+ * @return C++ initializer text
+ */
 std::string CodeGenerator::generateOrderedStructInit(const TypeRef& type, const std::shared_ptr<Expr>& initExpr)
 {
    if (!initExpr) {
@@ -5546,6 +5976,84 @@ std::string CodeGenerator::generateOrderedStructInit(const TypeRef& type, const 
       }
    }
    return genExpr(*initExpr);
+}
+
+/**
+ * @brief Check if an expression is likely BOOL-typed
+ * 
+ * This is a heuristic used to decide between logical (&&, ||) and 
+ * bitwise (&, |) operators for AND/OR/XOR in IEC 61131-3.
+ * 
+ * @param expr Expression to check
+ * @return true if the expression is likely BOOL-typed
+ */
+bool CodeGenerator::isBoolExpression(const std::shared_ptr<Expr>& expr) const
+{
+   if (!expr) {
+      return false;
+   }
+
+   return std::visit(
+      [this](const auto& e) -> bool {
+         using T = std::decay_t<decltype(e)>;
+
+         if constexpr (std::is_same_v<T, BoolLitExpr>) {
+            return true;
+         } else if constexpr (std::is_same_v<T, IdentExpr>) {
+            // Check if variable is BOOL-typed in scope
+            std::string varName = normalizeIdent(e.name);
+            auto infoOpt = m_scope.lookupVariableInfo(varName);
+            if (infoOpt) {
+               const auto& info = *infoOpt;
+               // Check if the C++ type is Bool
+               return info.type == "Bool" || info.type == "bool" || info.type == "BOOL";
+            }
+            // Check if it's an enum (not bool)
+            if (m_enumTypes.find(varName) != m_enumTypes.end()) {
+               return false;
+            }
+            return false;
+         } else if constexpr (std::is_same_v<T, UnaryExpr>) {
+            // NOT returns BOOL
+            if (e.op == "NOT") {
+               return true;
+            }
+            return isBoolExpression(e.operand);
+         } else if constexpr (std::is_same_v<T, BinaryExpr>) {
+            // Comparison operators return BOOL
+            if (e.op == "=" || e.op == "==" || e.op == "<>" || e.op == "!=" || e.op == "<" || e.op == "<=" || e.op == ">"
+                || e.op == ">=") {
+               return true;
+            }
+            // Logical operators return BOOL (but we're trying to determine if operands are BOOL)
+            // For AND/OR/XOR, the result is BOOL if both operands are BOOL
+            if (e.op == "AND" || e.op == "OR" || e.op == "XOR") {
+               return isBoolExpression(e.left) && isBoolExpression(e.right);
+            }
+            return false;
+         } else if constexpr (std::is_same_v<T, CallExpr>) {
+            // Check if function returns BOOL
+            if (auto* ident = std::get_if<IdentExpr>(&e.callee->node)) {
+               std::string funcName = normalizeIdent(ident->name);
+               auto sigIt = m_signatures.find(funcName);
+               if (sigIt != m_signatures.end()) {
+                  return isVoidType(sigIt->second.returnType) == false && sigIt->second.returnType.base == BaseType::BOOL;
+               }
+            }
+            return false;
+         } else if constexpr (std::is_same_v<T, MemberExpr>) {
+            // Check if member access is BOOL
+            return isBoolExpression(e.object);
+         } else if constexpr (std::is_same_v<T, CastExpr>) {
+            // Check target type
+            return e.targetType.base == BaseType::BOOL;
+         } else if constexpr (std::is_same_v<T, AddressExpr>) {
+            // Bit access (%IX, %QX, %MX) returns BOOL
+            return e.qualifier == AddressExpr::AddressQualifier::BIT;
+         }
+         return false;
+      },
+      expr->node);
 }
 
 /**
@@ -5575,6 +6083,14 @@ std::string CodeGenerator::generateHeaderComment() const
 //  ProcessImageAnalyzer Implementation
 // ============================================================================
 
+/**
+ * @brief Analyze a translation unit to detect address usage
+ *
+ * Resets the analyzer state and scans all POU bodies and global AT declarations
+ * to determine the required process image sizes.
+ *
+ * @param tu The translation unit to analyze
+ */
 void ProcessImageAnalyzer::analyze(const TranslationUnit& tu)
 {
    // Reset state
@@ -5607,6 +6123,11 @@ void ProcessImageAnalyzer::analyze(const TranslationUnit& tu)
    }
 }
 
+/**
+ * @brief Recursively find address expressions inside a statement
+ *
+ * @param stmt The statement to scan
+ */
 void ProcessImageAnalyzer::findAddresses(const std::shared_ptr<Stmt>& stmt)
 {
    if (!stmt) {
@@ -5669,6 +6190,11 @@ void ProcessImageAnalyzer::findAddresses(const std::shared_ptr<Stmt>& stmt)
       stmt->node);
 }
 
+/**
+ * @brief Recursively find address expressions inside an expression
+ *
+ * @param expr The expression to scan
+ */
 void ProcessImageAnalyzer::findAddressesInExpr(const std::shared_ptr<Expr>& expr)
 {
    if (!expr) {
@@ -5712,6 +6238,11 @@ void ProcessImageAnalyzer::findAddressesInExpr(const std::shared_ptr<Expr>& expr
       expr->node);
 }
 
+/**
+ * @brief Update the maximum byte and bit offsets for an address's memory area
+ *
+ * @param addr The address expression to record
+ */
 void ProcessImageAnalyzer::updateMaxOffset(const AddressExpr& addr)
 {
    auto it = m_typeMap.find(addr.type);
@@ -5751,6 +6282,14 @@ void ProcessImageAnalyzer::updateMaxOffset(const AddressExpr& addr)
    }
 }
 
+/**
+ * @brief Compute the recommended process image configuration
+ *
+ * Sizes each memory area to the largest offset used, rounded up to a power of
+ * two, with a minimum of 1024 bytes per area.
+ *
+ * @return Recommended ProcessImageConfig
+ */
 ProcessImageConfig ProcessImageAnalyzer::getRecommendedConfig() const
 {
    ProcessImageConfig config;
@@ -5795,6 +6334,12 @@ ProcessImageConfig ProcessImageAnalyzer::getRecommendedConfig() const
    return config;
 }
 
+/**
+ * @brief Round a value up to the next power of two
+ *
+ * @param n The value to round up
+ * @return size_t The smallest power of two greater than or equal to n
+ */
 size_t ProcessImageAnalyzer::nextPowerOfTwo(size_t n) const
 {
    if (n <= 1) {

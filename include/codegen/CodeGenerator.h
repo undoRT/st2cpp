@@ -15,6 +15,8 @@
 #pragma once
 #include "ast/AST.h"
 #include "parser/Parser.h"
+#include "semantic/SemanticInfo.h"
+#include <optional>
 #include <sstream>
 #include <unordered_map>
 #include <unordered_set>
@@ -302,6 +304,12 @@ public:
    void setProcessImageConfig(const ProcessImageConfig& config) { m_piConfig = config; }
    void setProcessImageGlobal(bool isGlobal) { m_piConfig.useGlobalPI = isGlobal; }
 
+   /// Attach the output of the semantic analysis (optional).
+   /// When present, the generator consumes the decorated AST (Expr::resolvedTypeId,
+   /// Expr::symbolId, CallExpr::calleeSymbolId) and the SymbolTable instead of
+   /// re-inferring names, types and signatures from the syntax.
+   void setSemanticInfo(const st2cpp::semantic::SemanticInfo* info) { m_semanticInfo = info; }
+
 private:
    std::string m_namespace;     // Namespace per il codice generato
    std::string m_runtimeHeader; // Header del runtime da includere
@@ -315,6 +323,10 @@ private:
 
    // Handler for variables scope
    ScopeManager m_scope;
+
+   // Optional semantic analysis output consumed by the generator.
+   // Keep this FIRST so it is cleared on re-entry along with the other state.
+   const st2cpp::semantic::SemanticInfo* m_semanticInfo = nullptr;
 
    std::unordered_map<std::string, FunctionSignature> m_signatures;
    std::unordered_map<std::string, std::unordered_set<std::string>> m_enumValues; // enum name -> set of enumerators
@@ -405,6 +417,32 @@ private:
    bool isVoidType(const TypeRef& tr) const;
 
    // ============================================================================
+   //  Semantic-aware helpers (consume SemanticInfo, optional)
+   // ============================================================================
+
+   bool semanticAvailable() const;
+   const st2cpp::semantic::SymbolTable* semanticSymTab() const;
+   /// Map a semantic TypeId to its C++ type string (central type mapper).
+   std::string mapTypeId(st2cpp::semantic::TypeId typeId) const;
+   /// Decide logical vs bitwise operators using the decorated resolvedTypeId.
+   bool isSemanticBoolType(st2cpp::semantic::TypeId typeId) const;
+   /// True if the resolved type is an ENUM (member access uses '::' not '.').
+   bool isSemanticEnumType(st2cpp::semantic::TypeId typeId) const;
+   /// Qualified enum name for an enumerator symbol (semantic replacement of m_enumeratorToEnum).
+   std::string semanticEnumNameForEnumerator(st2cpp::semantic::SymbolId enumeratorId) const;
+   /// Function/method signature rebuilt from calleeSymbolId + SymbolTable::params
+   /// (semantic replacement of collectSignature's m_signatures for call emission).
+   std::optional<FunctionSignature> semanticSignatureForCall(const CallExpr& call) const;
+   /// Emit a static_cast when the semantic types of lhs/rhs differ (assignment/RETURN).
+   std::string applySemanticAssignmentCast(const Expr& lhs, const Expr& rhs, const std::string& rhsCode) const;
+   /// FB symbol id resolved from the semantic symbol table by name (0 when
+   /// no SemanticInfo is attached or the FB is not registered).
+   st2cpp::semantic::SymbolId semanticFbSymbolId(const POU& pou) const;
+   /// Base-class name of a FB: prefers the semantic fbBaseClass record, falls
+   /// back to the AST syntax (pou.extends) when semantics are unavailable.
+   std::string semanticBaseForFb(const POU& pou) const;
+
+   // ============================================================================
    //  Normalization utilities
    // ============================================================================
 
@@ -454,6 +492,7 @@ private:
 
    std::unordered_map<std::string, std::unordered_set<std::string>> buildFBDependencies(const TranslationUnit& tu);
    std::vector<std::string> topologicalSort(const std::unordered_map<std::string, std::unordered_set<std::string>>& dependencies);
+   std::vector<std::string> orderedFbNamesFromSemantic();
    std::vector<GeneratedFile> generateModular(const TranslationUnit& tu, const std::string& outputDir);
    bool structContainsFB(const std::string& structName, const TranslationUnit& tu) const;
    std::string generateSimpleGVLsHeader(const TranslationUnit& tu);
@@ -483,6 +522,9 @@ private:
    std::vector<StructInitExpr::MemberInit> orderStructMembers(const std::vector<StructInitExpr::MemberInit>& members,
                                                               const std::string& structName);
    std::string generateOrderedStructInit(const TypeRef& type, const std::shared_ptr<Expr>& initExpr);
+
+   // Helper to determine if an expression is likely BOOL-typed
+   bool isBoolExpression(const std::shared_ptr<Expr>& expr) const;
 
    std::string generateHeaderComment() const;
    std::string ind() const { return std::string(m_indent * 4, ' '); }
