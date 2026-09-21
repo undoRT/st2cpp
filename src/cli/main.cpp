@@ -15,22 +15,72 @@
 #include "lexer/Lexer.h"
 #include "parser/Parser.h"
 #include "codegen/CodeGenerator.h"
+#include "semantic/SemanticAnalyzer.h"
+#include "semantic/SemanticInfo.h"
 #include "version.hpp"
 #include <iostream>
 #include <fstream>
 #include <filesystem>
 #include <sys/stat.h>
 #include <cstring>
+#include <cctype>
+#include <set>
 
 namespace fs = std::filesystem;
 
 static bool verbose = false;
+static bool strictMode = false;
 
+/**
+ * @brief Run semantic analysis on a translation unit for codegen consumption
+ *
+ * The CodeGenerator consumes the decorated AST and SymbolTable when available.
+ * Semantic errors are reported by the CLI but do NOT block generation in the
+ * default Permissive mode: codegen degrades gracefully to the legacy syntactic
+ * inference. Only `--strict` (explicitly requested) enables generation blocking
+ * on semantic errors, in which case the diagnostics are printed.
+ */
+static st2cpp::semantic::SemanticInfo runSemanticAnalysis(const TranslationUnit& tu)
+{
+   auto strictness = strictMode ? st2cpp::semantic::SemanticAnalyzer::Strictness::Strict
+                                : st2cpp::semantic::SemanticAnalyzer::Strictness::Permissive;
+   st2cpp::semantic::SemanticAnalyzer analyzer;
+   auto info = analyzer.analyze(tu, strictness);
+   if (verbose || strictMode) {
+      if (info.diagnostics.totalCount() > 0) {
+         info.diagnostics.print(std::cerr);
+      }
+      std::cerr << "Semantic analysis: " << info.diagnostics.errorCount() << " errors, " << info.diagnostics.warningCount()
+                << " warnings\n";
+   }
+   return info;
+}
+
+/**
+ * @brief Check whether Strict mode must block generation
+ *
+ * Generation is blocked ONLY when `--strict` was explicitly requested AND the
+ * semantic analysis produced errors. The default Permissive mode never blocks.
+ */
+static bool strictBlocksGeneration(const st2cpp::semantic::SemanticInfo& info)
+{
+   return strictMode && info.diagnostics.hasErrors();
+}
+
+/**
+ * @brief Print the full version string to standard output
+ */
 static void printVersion()
 {
    std::cout << getFullVersion() << "\n";
 }
 
+/**
+ * @brief Find all .st files in a directory, optionally recursing into subdirectories
+ * @param directory Directory to search
+ * @param recursive Whether to search subdirectories recursively
+ * @return Paths of all .st files found
+ */
 static std::vector<std::string> findStFiles(const std::string& directory, bool recursive)
 {
    std::vector<std::string> files;
@@ -52,6 +102,13 @@ static std::vector<std::string> findStFiles(const std::string& directory, bool r
    return files;
 }
 
+/**
+ * @brief Write a file inside a directory, creating the directory if needed
+ * @param dir Destination directory
+ * @param filename File name to write
+ * @param content File contents
+ * @throws std::runtime_error if the file cannot be written
+ */
 static void writeFileInDir(const std::string& dir, const std::string& filename, const std::string& content)
 {
    fs::path dirPath(dir);
@@ -67,6 +124,12 @@ static void writeFileInDir(const std::string& dir, const std::string& filename, 
    f << content;
 }
 
+/**
+ * @brief Write all generated files under a base directory
+ * @param files Generated files to write
+ * @param baseDir Base output directory
+ * @throws std::runtime_error if a directory or file cannot be created or written
+ */
 static void writeGeneratedFiles(const std::vector<GeneratedFile>& files, const std::string& baseDir)
 {
    // Crea la directory base se non esiste
@@ -111,6 +174,10 @@ static void writeGeneratedFiles(const std::vector<GeneratedFile>& files, const s
    }
 }
 
+/**
+ * @brief Print usage and command-line options to standard error
+ * @param prog Program name as invoked, shown in the usage line
+ */
 static void printUsage(const char* prog)
 {
    std::cerr << "st2cpp - Structured Text to C++ Compiler\n"
@@ -128,6 +195,8 @@ static void printUsage(const char* prog)
                 "  --namespace <name>   Set C++ namespace for generated code (default: undoCore)\n"
                 "  --runtime <file>     Custom runtime header file (default: undoCore/undoCore.hpp)\n"
                 "  --tokens             Dump token list and exit\n"
+                "  --strict             Strict IEC 61131-3 mode: block generation on semantic errors\n"
+                "                      (default: permissive, errors never block generation)\n"
                 "  --caseSensitive      Preserve original case (default: convert to uppercase)\n"
                 "  --workspace <path>   Process all .st files in workspace (recursive)\n"
                 "  --project-style      Generate modular project structure (separate files for each FB)\n"
@@ -145,6 +214,12 @@ static void printUsage(const char* prog)
                 "  Project style:   st2cpp --workspace ./my_plc_project --project-style --output-dir build\n";
 }
 
+/**
+ * @brief Read an entire file into a string
+ * @param path File path to read
+ * @return File contents
+ * @throws std::runtime_error if the file cannot be opened
+ */
 static std::string readFile(const std::string& path)
 {
    std::ifstream f(path);
@@ -156,6 +231,12 @@ static std::string readFile(const std::string& path)
    return ss.str();
 }
 
+/**
+ * @brief Write content to a file, overwriting it if it exists
+ * @param path Destination file path
+ * @param content File contents
+ * @throws std::runtime_error if the file cannot be written
+ */
 static void writeFile(const std::string& path, const std::string& content)
 {
    std::ofstream f(path);
@@ -163,6 +244,226 @@ static void writeFile(const std::string& path, const std::string& content)
       throw std::runtime_error("Cannot write file: " + path);
    }
    f << content;
+}
+
+/**
+ * @brief Normalized (case-folded, whitespace-free) key for a type/Var name
+ *
+ * IEC 61131-3 identifiers are case-insensitive and may be decorated with
+ * surrounding whitespace, so workspace merging must compare them ignoring case.
+ */
+static std::string normalizedKey(const std::string& name)
+{
+   std::string key;
+   key.reserve(name.size());
+   for (unsigned char c : name) {
+      if (!std::isspace(c)) {
+         key.push_back(static_cast<char>(std::toupper(c)));
+      }
+   }
+   return key;
+}
+
+/**
+ * @brief Shallow structural equality for type references (name + base only)
+ */
+static bool sameTypeRef(const TypeRef& a, const TypeRef& b)
+{
+   if (a.base != b.base || a.name != b.name || a.isPointer != b.isPointer) {
+      return false;
+   }
+   return a.arrayDims.size() == b.arrayDims.size();
+}
+
+/**
+ * @brief Compare two structs for type-level equality (normalized member names and types)
+ * @param a First struct
+ * @param b Second struct
+ * @return true if the member lists match
+ */
+static bool sameStruct(const StructType& a, const StructType& b)
+{
+   if (a.members.size() != b.members.size()) {
+      return false;
+   }
+   for (size_t i = 0; i < a.members.size(); ++i) {
+      if (normalizedKey(a.members[i].name) != normalizedKey(b.members[i].name) || !sameTypeRef(a.members[i].type, b.members[i].type)) {
+         return false;
+      }
+   }
+   return true;
+}
+
+/**
+ * @brief Compare two enums for equality (normalized enumerator names)
+ * @param a First enum
+ * @param b Second enum
+ * @return true if the enumerator lists match
+ */
+static bool sameEnum(const EnumType& a, const EnumType& b)
+{
+   if (a.enumerators.size() != b.enumerators.size()) {
+      return false;
+   }
+   for (size_t i = 0; i < a.enumerators.size(); ++i) {
+      if (normalizedKey(a.enumerators[i].name) != normalizedKey(b.enumerators[i].name)) {
+         return false;
+      }
+   }
+   return true;
+}
+
+/**
+ * @brief Compare two interfaces for equality (normalized method names and signatures)
+ * @param a First interface
+ * @param b Second interface
+ * @return true if the method lists match
+ */
+static bool sameInterface(const Interface& a, const Interface& b)
+{
+   if (a.methods.size() != b.methods.size()) {
+      return false;
+   }
+   for (size_t i = 0; i < a.methods.size(); ++i) {
+      const Method& ma = a.methods[i];
+      const Method& mb = b.methods[i];
+      if (normalizedKey(ma.name) != normalizedKey(mb.name) || !sameTypeRef(ma.returnType, mb.returnType)
+          || ma.parameters.size() != mb.parameters.size()) {
+         return false;
+      }
+   }
+   return true;
+}
+
+/**
+ * @brief Compare two POUs for equality (kind, return type, inheritance and var counts)
+ * @param a First POU
+ * @param b Second POU
+ * @return true if the two POUs match
+ */
+static bool samePou(const POU& a, const POU& b)
+{
+   if (a.kind != b.kind || !sameTypeRef(a.returnType, b.returnType)) {
+      return false;
+   }
+   if (normalizedKey(a.extends) != normalizedKey(b.extends) || a.implements.size() != b.implements.size()) {
+      return false;
+   }
+   for (size_t i = 0; i < a.implements.size(); ++i) {
+      if (normalizedKey(a.implements[i]) != normalizedKey(b.implements[i])) {
+         return false;
+      }
+   }
+   size_t am = 0, bm = 0;
+   for (const auto& vs : a.varSections) {
+      am += vs.decls.size();
+   }
+   for (const auto& vs : b.varSections) {
+      bm += vs.decls.size();
+   }
+   return am == bm;
+}
+
+/**
+ * @brief Deduplicate a merged translation unit in place
+ *
+ * Workspace files are standalone samples that often re-declare the same shared
+ * types (STRUCT/ENUM/INTERFACE) and global variables independently. Exact
+ * duplicates (same normalized name and same body) are dropped; conflicts that
+ * differ in body are kept as warnings on stderr.
+ */
+static void deduplicateMergedTu(TranslationUnit& tu)
+{
+   {
+      std::set<std::string> seen;
+      std::vector<StructType> out;
+      for (const auto& item : tu.structs) {
+         std::string key = normalizedKey(item.name);
+         if (seen.insert(key).second) {
+            out.push_back(item);
+            continue;
+         }
+         for (const auto& existing : out) {
+            if (normalizedKey(existing.name) == key && !sameStruct(existing, item)) {
+               std::cerr << "  Warning: duplicate STRUCT '" << item.name << "' differs across workspace files; keeping first\n";
+               break;
+            }
+         }
+      }
+      tu.structs = std::move(out);
+   }
+
+   {
+      std::set<std::string> seen;
+      std::vector<EnumType> out;
+      for (const auto& item : tu.enums) {
+         std::string key = normalizedKey(item.name);
+         if (seen.insert(key).second) {
+            out.push_back(item);
+            continue;
+         }
+         for (const auto& existing : out) {
+            if (normalizedKey(existing.name) == key && !sameEnum(existing, item)) {
+               std::cerr << "  Warning: duplicate ENUM '" << item.name << "' differs across workspace files; keeping first\n";
+               break;
+            }
+         }
+      }
+      tu.enums = std::move(out);
+   }
+
+   {
+      std::set<std::string> seen;
+      std::vector<Interface> out;
+      for (const auto& item : tu.interfaces) {
+         std::string key = normalizedKey(item.name);
+         if (seen.insert(key).second) {
+            out.push_back(item);
+            continue;
+         }
+         for (const auto& existing : out) {
+            if (normalizedKey(existing.name) == key && !sameInterface(existing, item)) {
+               std::cerr << "  Warning: duplicate INTERFACE '" << item.name << "' differs across workspace files; keeping first\n";
+               break;
+            }
+         }
+      }
+      tu.interfaces = std::move(out);
+   }
+
+   {
+      std::set<std::string> seen;
+      std::vector<POU> out;
+      for (const auto& item : tu.pous) {
+         std::string key = normalizedKey(item.name);
+         if (seen.insert(key).second) {
+            out.push_back(item);
+            continue;
+         }
+         for (const auto& existing : out) {
+            if (normalizedKey(existing.name) == key && !samePou(existing, item)) {
+               std::cerr << "  Warning: duplicate POU '" << item.name << "' differs across workspace files; keeping first\n";
+               break;
+            }
+         }
+      }
+      tu.pous = std::move(out);
+   }
+
+   {
+      // Globals: deduplicate VarDecl by name across all sections
+      std::set<std::string> seen;
+      for (auto& section : tu.globals) {
+         std::vector<VarDecl> decls;
+         for (const auto& decl : section.decls) {
+            std::string key = normalizedKey(decl.name);
+            if (seen.insert(key).second) {
+               decls.push_back(decl);
+            }
+         }
+         section.decls = std::move(decls);
+      }
+   }
 }
 
 /**
@@ -186,6 +487,17 @@ static TranslationUnit processSingleFile(const std::string& filePath, bool dumpT
    return parser.parseTranslationUnit();
 }
 
+/**
+ * @brief Program entry point: parse command-line arguments and drive the transpilation
+ *
+ * Supports single-file, flat-workspace and project-style workspace modes. Returns 0 on
+ * success (or for --help/--version), 1 on usage, parse or generation errors, and when
+ * strict mode blocks generation on semantic errors.
+ *
+ * @param argc Argument count
+ * @param argv Argument vector
+ * @return Exit code: 0 on success, 1 on error
+ */
 int main(int argc, char* argv[])
 {
    if (argc < 2) {
@@ -217,6 +529,8 @@ int main(int argc, char* argv[])
          return 0;
       } else if (std::strcmp(argv[i], "--tokens") == 0) {
          dumpTokens = true;
+      } else if (std::strcmp(argv[i], "--strict") == 0) {
+         strictMode = true;
       } else if (std::strcmp(argv[i], "-o") == 0 && i + 1 < argc) {
          outputCpp = argv[++i];
       } else if (std::strcmp(argv[i], "--caseSensitive") == 0) {
@@ -308,6 +622,7 @@ int main(int argc, char* argv[])
             mergedTu.structs.insert(mergedTu.structs.end(), tu.structs.begin(), tu.structs.end());
             mergedTu.enums.insert(mergedTu.enums.end(), tu.enums.begin(), tu.enums.end());
             mergedTu.globals.insert(mergedTu.globals.end(), tu.globals.begin(), tu.globals.end());
+            mergedTu.interfaces.insert(mergedTu.interfaces.end(), tu.interfaces.begin(), tu.interfaces.end());
 
             successCount++;
          } catch (const ParseError& e) {
@@ -328,6 +643,9 @@ int main(int argc, char* argv[])
          std::cout << "\nParsing complete: " << successCount << " successful, " << failCount << " failed\n";
          std::cout << "Generating project files...\n\n";
       }
+
+      // Drop duplicate declarations shared across standalone workspace files
+      deduplicateMergedTu(mergedTu);
 
       // Process Image auto-detection for modular mode
       ProcessImageAnalyzer piAnalyzer;
@@ -351,11 +669,19 @@ int main(int argc, char* argv[])
 
       // Generate modular project
       try {
+         auto semanticInfo = runSemanticAnalysis(mergedTu);
+
+         if (strictBlocksGeneration(semanticInfo)) {
+            std::cerr << "Strict mode: " << semanticInfo.diagnostics.errorCount() << " semantic error(s) block generation.\n";
+            return 1;
+         }
+
          CodeGenerator gen;
          gen.setNamespace(namespaceName);
          gen.setRuntimeHeader(runtimeHeader);
          gen.setCaseSensitive(caseSensitive);
          gen.setProcessImageConfig(piConfig);
+         gen.setSemanticInfo(&semanticInfo);
          auto files = gen.generateModularProject(mergedTu, outputDir);
          writeGeneratedFiles(files, outputDir);
 
@@ -440,8 +766,17 @@ int main(int argc, char* argv[])
             std::string headerFilename = baseName + ".hpp";
             std::string sourceFilename = baseName + ".cpp";
 
+            auto semanticInfo = runSemanticAnalysis(tu);
+
+            if (strictBlocksGeneration(semanticInfo)) {
+               std::cerr << "Strict mode: " << semanticInfo.diagnostics.errorCount() << " semantic error(s) block generation.\n";
+               failCount++;
+               continue;
+            }
+
             CodeGenerator gen;
             gen.setProcessImageConfig(piConfig);
+            gen.setSemanticInfo(&semanticInfo);
             auto result = gen.generate(tu, headerFilename, namespaceName, runtimeHeader, caseSensitive);
 
             writeFileInDir(outputDir, headerFilename, result.headerCode);
@@ -527,8 +862,16 @@ int main(int argc, char* argv[])
       }
       piConfig.autoDetect = autoDetectPI;
 
+      auto semanticInfo = runSemanticAnalysis(tu);
+
+      if (strictBlocksGeneration(semanticInfo)) {
+         std::cerr << "Strict mode: " << semanticInfo.diagnostics.errorCount() << " semantic error(s) block generation.\n";
+         return 1;
+      }
+
       CodeGenerator gen;
       gen.setProcessImageConfig(piConfig);
+      gen.setSemanticInfo(&semanticInfo);
       auto result = gen.generate(tu, headerName, namespaceName, runtimeHeader, caseSensitive);
 
       writeFile(outputHpp, result.headerCode);
