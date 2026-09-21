@@ -3777,3 +3777,106 @@ TEST_F(BodyVisitorTest, InheritedVarAccessInsideDerivedMethod) {
     auto info = analyze(st);
     EXPECT_FALSE(info.diagnostics.hasErrors()) << "Diagnostics: " << info.diagnostics.errorCount() << " errors";
 }
+
+// ============================================================================
+// T29 — Type-name conversion call: `INT(32767)`, `REAL(x)` call a TYPE symbol
+// with a single argument and must be treated as an explicit IEC cast, not as a
+// function call with an empty parameter list.
+// ============================================================================
+TEST_F(BodyVisitorTest, TypeNameConversionCallValid) {
+    const std::string st = R"(
+        FUNCTION_BLOCK Test
+            VAR
+                A : INT;
+                B : REAL;
+                C : INT;
+            END_VAR
+            A := INT(32767);
+            B := REAL(A);
+            C := WORD(16#0001);
+        END_FUNCTION_BLOCK
+    )";
+
+    auto info = analyze(st);
+    EXPECT_FALSE(info.diagnostics.hasErrors()) << "Diagnostics: " << info.diagnostics.errorCount() << " errors";
+}
+
+// ============================================================================
+// T30 — Type-name conversion call with the wrong argument count is an error.
+// ============================================================================
+TEST_F(BodyVisitorTest, TypeNameConversionCallWrongArity) {
+    const std::string st = R"(
+        FUNCTION_BLOCK Test
+            VAR
+                A : INT;
+            END_VAR
+            A := INT();
+        END_FUNCTION_BLOCK
+    )";
+
+    auto info = analyze(st);
+    bool found = false;
+    for (const auto& d : info.diagnostics.all()) {
+        if (d.code == DiagnosticCode::WrongArgumentCount) {
+            found = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found);
+}
+
+// ============================================================================
+// T31 — FUNCTION calls may omit parameters that carry a default initial value
+// or that are VAR_OUTPUT / VAR_IN_OUT; every plain VAR_INPUT must be supplied.
+// ============================================================================
+TEST_F(BodyVisitorTest, FunctionCallOmitDefaultedAndOutputParams) {
+    const std::string st = R"(
+        FUNCTION Dummy : REAL
+            VAR_INPUT A : INT := 50; B : INT := 70; END_VAR
+            VAR_OUTPUT C : INT := 10; END_VAR
+        END_FUNCTION
+
+        FUNCTION fun1 : INT
+            VAR_INPUT A : INT := 5; C : REAL; B : INT := 15; END_VAR
+            VAR_OUTPUT R1 : INT := 10; R2 : REAL := 11.2; END_VAR
+            VAR_IN_OUT VIO : INT; END_VAR
+        END_FUNCTION
+
+        FUNCTION_BLOCK Test
+            VAR
+                A : REAL;
+                B : INT;
+            END_VAR
+            A := Dummy(B := 20);
+            A := Dummy(30, 40);
+            A := Dummy(30);
+            B := fun1(1, 2, 3, 4, 5);
+        END_FUNCTION_BLOCK
+    )";
+
+    auto info = analyze(st);
+    EXPECT_FALSE(info.diagnostics.hasErrors()) << "Diagnostics: " << info.diagnostics.errorCount() << " errors";
+}
+
+// ============================================================================
+// T32 — Builtin IEC conversion functions (X_TO_Y) resolve like any FUNCTION:
+// INT_TO_REAL / INT_TO_WORD are known symbols, not undeclared identifiers.
+// ============================================================================
+TEST_F(BodyVisitorTest, BuiltinConversionFunctionResolution) {
+    const std::string st = R"(
+        FUNCTION_BLOCK Test
+            VAR
+                R : REAL;
+                W : WORD;
+                D : DWORD;
+                I : INT;
+            END_VAR
+            R := INT_TO_REAL(I) / 10.0;
+            W := INT_TO_WORD(I);
+            D := INT_TO_DWORD(I);
+        END_FUNCTION_BLOCK
+    )";
+
+    auto info = analyze(st);
+    EXPECT_FALSE(info.diagnostics.hasErrors()) << "Diagnostics: " << info.diagnostics.errorCount() << " errors";
+}

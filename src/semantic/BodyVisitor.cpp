@@ -905,6 +905,22 @@ void BodyVisitor::visitCallExpr(Expr& expr)
    }
 
    if (calleeSym) {
+      // Type-name construction/conversion: CALLING a TYPE symbol with a single
+      // argument (e.g. `INT(32767)`, `REAL(x)`) is an explicit IEC conversion
+      // (cast), not a function call, so no parameter list is validated.
+      const bool isTypeCast = !isFbCall && calleeSym->kind == SymbolKind::Type;
+      if (isTypeCast) {
+         if (call.args.size() != 1) {
+            diag_.addError(DiagnosticCode::WrongArgumentCount,
+                           "type conversion '" + calleeSym->name + "' requires exactly 1 argument, got "
+                              + std::to_string(call.args.size()),
+                           makeLocation(expr.line));
+         } else {
+            expr.resolvedTypeId = calleeSym->typeId;
+         }
+         return;
+      }
+
       if (!isFbCall) {
          expr.resolvedTypeId = calleeSym->returnTypeId;
       }

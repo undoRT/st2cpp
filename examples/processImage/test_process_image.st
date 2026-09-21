@@ -63,7 +63,7 @@ VAR_GLOBAL
     Timestamp AT %MD* : DWORD := 0;        (* Will be allocated automatically *)
 
     (* Mixed placeholders in different areas *)
-    Diagnostic AT %MD* : DWORD := 0;       (* Will be allocated automatically *)
+    DiagDWord AT %MD* : DWORD := 0;       (* Will be allocated automatically *)
     DebugFlag AT %MX* : BOOL := FALSE;     (* Will be allocated automatically *)
     DebugValue AT %MW* : INT := 0;         (* Will be allocated automatically *)
 END_VAR
@@ -137,7 +137,7 @@ PROGRAM Main
     IF Emergency THEN
         MotorOutput := FALSE;
         AlarmLight := TRUE;
-        Flags := Flags OR 16#80;
+        Flags := Flags OR INT_TO_BYTE(16#80);
     END_IF;
 
     (* Update outputs based on state *)
@@ -145,15 +145,15 @@ PROGRAM Main
         IF State = TestEnum.RUNNING THEN
             MotorOutput := TRUE;
             AlarmLight := FALSE;
-            StatusWord := 16#0001;
+            StatusWord := INT_TO_WORD(16#0001);
         ELSIF State = TestEnum.STOPPED THEN
             MotorOutput := FALSE;
             AlarmLight := TRUE;
-            StatusWord := 16#0002;
+            StatusWord := INT_TO_WORD(16#0002);
         ELSE
             MotorOutput := FALSE;
             AlarmLight := FALSE;
-            StatusWord := 16#0000;
+            StatusWord := INT_TO_WORD(16#0000);
         END_IF;
     END_IF;
 
@@ -194,20 +194,20 @@ PROGRAM Diagnostic
 
     (* Set error *)
     ErrorCode := Code;
-    ErrorTime := 0;
+    ErrorTime := INT_TO_DWORD(0);
     ErrorFlag := TRUE;
     Status := 1;
 
     (* Clear error *)
     ErrorCode := 0;
-    ErrorTime := 0;
+    ErrorTime := INT_TO_DWORD(0);
     ErrorFlag := FALSE;
     Status := 0;
 
     (* Use placeholders *)
     DiagData := ErrorTime;
     DiagFlag := ErrorFlag;
-    DiagWord := 16#FFFF;
+    DiagWord := INT_TO_WORD(16#FFFF);
 END_PROGRAM
 
 (* Function that uses process image addresses - fixed and placeholder *)

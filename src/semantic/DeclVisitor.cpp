@@ -364,6 +364,14 @@ void DeclVisitor::registerInterfaceBody(const Interface& iface) {
                         Symbol* paramSym = symTab_.get(paramSymId);
                         if (paramSym) {
                             paramSym->typeId = paramTypeId;
+                            if (param.kind == VarKind::INPUT) {
+                                paramSym->paramDir = ParamDir::Input;
+                            } else if (param.kind == VarKind::OUTPUT) {
+                                paramSym->paramDir = ParamDir::Output;
+                            } else if (param.kind == VarKind::IN_OUT) {
+                                paramSym->paramDir = ParamDir::InOut;
+                            }
+                            paramSym->hasDefaultValue = (param.initialValue != nullptr);
                         }
                         paramSymIds.push_back(paramSymId);
                     }
@@ -576,6 +584,14 @@ void DeclVisitor::registerVarDecl(const VarDecl& decl, SymbolId scopeId, SymbolK
         varSym->isRetain = decl.isRetain;
         varSym->atAddress = decl.atAddress;
         varSym->scopeId = scopeId;
+        if (sectionKind == VarKind::INPUT) {
+            varSym->paramDir = ParamDir::Input;
+        } else if (sectionKind == VarKind::OUTPUT) {
+            varSym->paramDir = ParamDir::Output;
+        } else if (sectionKind == VarKind::IN_OUT) {
+            varSym->paramDir = ParamDir::InOut;
+        }
+        varSym->hasDefaultValue = (decl.initialValue != nullptr);
     }
 
     // If this is a parameter section (INPUT, OUTPUT, IN_OUT) and we're in a POU context,
@@ -651,6 +667,14 @@ void DeclVisitor::registerMethod(const Method& method, SymbolId fbScopeId, Symbo
             Symbol* paramSym = symTab_.get(paramSymId);
             if (paramSym) {
                 paramSym->typeId = paramTypeId;
+                if (param.kind == VarKind::INPUT) {
+                    paramSym->paramDir = ParamDir::Input;
+                } else if (param.kind == VarKind::OUTPUT) {
+                    paramSym->paramDir = ParamDir::Output;
+                } else if (param.kind == VarKind::IN_OUT) {
+                    paramSym->paramDir = ParamDir::InOut;
+                }
+                paramSym->hasDefaultValue = (param.initialValue != nullptr);
             }
             paramSymIds.push_back(paramSymId);
         }

@@ -728,22 +728,67 @@ bool checkCallArguments(const std::vector<SymbolId>& paramSymbols,
                         SymbolTable& symTab,
                         bool allowPartial)
 {
-   // FUNCTION/BUILTIN calls must supply every parameter; FUNCTION_BLOCK
-   // instance calls may omit parameters (unconnected inputs keep their state,
-   // outputs stay unassigned), so only excess arguments are rejected there.
-   if (!allowPartial && paramSymbols.size() != args.size()) {
-      diag.addError(DiagnosticCode::WrongArgumentCount,
-                    "expected " + std::to_string(paramSymbols.size()) + " arguments, got " + std::to_string(args.size()), loc);
-      return false;
-   }
-   if (allowPartial && args.size() > paramSymbols.size()) {
+   // Excess arguments are always an error for every callee kind.
+   if (args.size() > paramSymbols.size()) {
       diag.addError(DiagnosticCode::WrongArgumentCount,
                     "expected " + std::to_string(paramSymbols.size()) + " arguments, got " + std::to_string(args.size()), loc);
       return false;
    }
 
-   bool allOk = true;
+   // Pair provided arguments to parameters. Positional arguments fill the
+   // leading parameters by declaration order; named ones pair by name.
+   std::vector<bool> provided(paramSymbols.size(), false);
    size_t positional = 0;
+   for (const auto& arg : args) {
+      if (arg.named) {
+         for (size_t pi = 0; pi < paramSymbols.size(); ++pi) {
+            const Symbol* p = symTab.get(paramSymbols[pi]);
+            if (p && p->name == arg.name) {
+               provided[pi] = true;
+               break;
+            }
+         }
+      } else if (positional < paramSymbols.size()) {
+         provided[positional] = true;
+         positional++;
+      }
+   }
+
+   // FUNCTION/BUILTIN calls must supply every parameter. IEC 61131-3 allows a
+   // caller to omit parameters that carry an initial value (default) or that
+   // are VAR_OUTPUT / VAR_IN_OUT; every plain VAR_INPUT without a default must
+   // be provided. FUNCTION_BLOCK instance calls may omit anything (unconnected
+   // inputs keep their state, outputs stay unassigned).
+   if (!allowPartial) {
+      std::string missingNames;
+      for (size_t pi = 0; pi < paramSymbols.size(); ++pi) {
+         if (provided[pi]) {
+            continue;
+         }
+         const Symbol* p = symTab.get(paramSymbols[pi]);
+         if (!p) {
+            continue;
+         }
+         const bool mayOmit = p->hasDefaultValue || p->paramDir == ParamDir::Output || p->paramDir == ParamDir::InOut;
+         if (!mayOmit) {
+            if (!missingNames.empty()) {
+               missingNames += ", ";
+            }
+            missingNames += "'" + p->name + "'";
+         }
+      }
+      if (!missingNames.empty()) {
+         diag.addError(DiagnosticCode::WrongArgumentCount,
+                       "expected " + std::to_string(paramSymbols.size()) + " arguments, got " + std::to_string(args.size())
+                          + " (missing required parameter" + (missingNames.find(", ") != std::string::npos ? "s" : "") + ": "
+                          + missingNames + ")",
+                       loc);
+         return false;
+      }
+   }
+
+   bool allOk = true;
+   positional = 0;
    for (size_t i = 0; i < args.size(); i++) {
       // Named arguments pair with their parameter by name; positional ones pair
       // by declaration order.

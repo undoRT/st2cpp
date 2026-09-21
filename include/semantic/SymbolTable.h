@@ -34,6 +34,20 @@ enum class SymbolKind {
     Parameter
 };
 
+/**
+ * @brief Data direction of a POU/method parameter.
+ * @details Tells the call checker whether an omitted parameter is legal for
+ * FUNCTION calls: VAR_INPUT may only be omitted when it carries an initial
+ * value, while VAR_OUTPUT and VAR_IN_OUT parameters never require a caller to
+ * supply a value.
+ */
+enum class ParamDir {
+    None,   // not a parameter section (plain VAR / global)
+    Input,  // VAR_INPUT
+    Output, // VAR_OUTPUT
+    InOut   // VAR_IN_OUT
+};
+
 struct Symbol {
     SymbolId id = 0;
     std::string name;
@@ -54,6 +68,10 @@ struct Symbol {
     bool isRetain = false;
     std::string atAddress;
     SymbolId containingFbId = 0;
+    // Parameter metadata: direction of the section the symbol was declared in
+    // and whether it carries an initial value (default).
+    ParamDir paramDir = ParamDir::None;
+    bool hasDefaultValue = false;
 };
 
 struct Scope {
@@ -94,6 +112,7 @@ public:
         globalScopeId_ = 1;
         currentScopeId_ = 1;
         registerBuiltins();
+        registerIecConversionFunctions();
     }
 
     // ===== Scope Management =====
@@ -313,6 +332,15 @@ private:
         }
         return id;
     }
+    /**
+     * @brief Register the IEC 61131-3 conversion functions (X_TO_Y).
+     * @details Each conversion is a global FUNCTION symbol named after the IEC
+     * conversion (e.g. INT_TO_REAL, INT_TO_WORD) with one input parameter and
+     * the destination base type as return type. The symbol set mirrors the
+     * inline helpers provided by the runtime conversions.hpp header, so the
+     * code generator emits the function name as-is.
+     */
+    void registerIecConversionFunctions();
     std::vector<Scope> scopes_;
     std::vector<Symbol> symbols_;
     std::vector<TypeInfo> types_;
