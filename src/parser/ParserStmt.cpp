@@ -78,12 +78,30 @@ std::shared_ptr<Stmt> Parser::parseStatement()
    }
 
    if (match(TokenType::KW_RETURN)) {
-      match(TokenType::SEMICOLON);
-      return std::make_shared<Stmt>(ReturnStmt{}, ln);
+      ReturnStmt ret;
+      if (!check(TokenType::SEMICOLON)) {
+         ret.expr = parseExpr();
+         match(TokenType::SEMICOLON);
+      } else {
+         match(TokenType::SEMICOLON);
+      }
+      return std::make_shared<Stmt>(ret, ln);
    }
    if (match(TokenType::KW_EXIT)) {
+      ExitStmt ex;
+      if (!check(TokenType::SEMICOLON)) {
+         if (check(TokenType::IDENTIFIER)) {
+            ex.target = expect(TokenType::IDENTIFIER, "Expected identifier").text;
+         }
+         match(TokenType::SEMICOLON);
+      } else {
+         match(TokenType::SEMICOLON);
+      }
+      return std::make_shared<Stmt>(ex, ln);
+   }
+   if (match(TokenType::KW_CONTINUE)) {
       match(TokenType::SEMICOLON);
-      return std::make_shared<Stmt>(ExitStmt{}, ln);
+      return std::make_shared<Stmt>(ContinueStmt{}, ln);
    }
 
    // Assignment or function call expression statement

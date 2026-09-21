@@ -25,6 +25,10 @@ struct Stmt;
 struct Expr;
 struct POU;
 
+// Semantic analysis IDs
+using SymbolId = uint32_t;
+using TypeId = uint32_t;
+
 // Type references
 
 enum class BaseType {
@@ -75,6 +79,7 @@ struct TypeRef
    bool isRefTo = false;            ///< Is this a REF_TO type?
    std::vector<ArrayDim> arrayDims; ///< Array dimensions (non-empty if array)
    std::optional<int> stringLen;    ///< Length for STRING[n]
+   TypeId resolvedTypeId = 0;       // Semantic analysis: resolved canonical type
 };
 
 /**
@@ -177,6 +182,7 @@ struct VarDecl
    bool isRetain = false;
    std::string atAddress; // AT %... address string
    uint32_t line = 0;
+   SymbolId symbolId = 0; // Semantic analysis: link to symbol table
 };
 
 /**
@@ -209,6 +215,7 @@ struct LiteralExpr
 struct IdentExpr
 {
    std::string name;
+   SymbolId symbolId = 0; // Semantic analysis: resolved symbol
 };
 
 /**
@@ -268,6 +275,7 @@ struct MemberExpr
 {
    std::shared_ptr<Expr> object;
    std::string member;
+   SymbolId symbolId = 0; // Semantic analysis: resolved member symbol
 };
 
 struct IndexExpr
@@ -296,6 +304,7 @@ struct CallExpr
    };
    std::vector<Arg> args;
    bool isStructInit = false;
+   SymbolId calleeSymbolId = 0; // Semantic analysis: resolved callee symbol
 };
 
 struct SuperCallExpr
@@ -365,6 +374,8 @@ struct Expr
 {
    ExprVariant node;
    uint32_t line = 0;
+   TypeId resolvedTypeId = 0; // Semantic analysis: inferred type
+   SymbolId symbolId = 0;     // Semantic analysis: for IdentExpr, MemberExpr, CallExpr
 
    template<typename T>
    explicit Expr(T&& v, uint32_t ln = 0) : node(std::forward<T>(v)), line(ln)
@@ -381,8 +392,14 @@ struct ExprStmt
    std::shared_ptr<Expr> expr;
 }; // FB call as statement
 struct ReturnStmt
-{};
+{
+   std::shared_ptr<Expr> expr;
+};
 struct ExitStmt
+{
+   std::string target;
+};
+struct ContinueStmt
 {};
 struct EmptyStmt
 {};
@@ -435,7 +452,8 @@ struct CaseStmt
    std::vector<CaseBranch> branches;
 };
 
-using StmtVariant = std::variant<AssignStmt, ExprStmt, ReturnStmt, ExitStmt, EmptyStmt, IfStmt, ForStmt, WhileStmt, RepeatStmt, CaseStmt>;
+using StmtVariant
+   = std::variant<AssignStmt, ExprStmt, ReturnStmt, ExitStmt, ContinueStmt, EmptyStmt, IfStmt, ForStmt, WhileStmt, RepeatStmt, CaseStmt>;
 
 struct Stmt
 {
@@ -466,6 +484,9 @@ struct POU
    std::vector<std::string> implements;
    bool isAbstract = false;
    bool isFinal = false;
+   SymbolId symbolId = 0;                    // Semantic analysis: link to symbol table
+   SymbolId baseClassSymbolId = 0;           // EXTENDS resolved
+   std::vector<SymbolId> interfaceSymbolIds; // IMPLEMENTS resolved
 };
 
 // Translation unit

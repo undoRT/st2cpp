@@ -67,6 +67,7 @@ enum class TokenType {
    KW_END_CASE,
    KW_EXIT,
    KW_RETURN,
+   KW_CONTINUE,
 
    KW_BOOL,
    KW_SINT,

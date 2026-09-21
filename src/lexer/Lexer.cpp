@@ -79,6 +79,7 @@ const std::unordered_map<std::string, TokenType> Lexer::s_keywords = {
    {"END_CASE", TokenType::KW_END_CASE},
    {"EXIT", TokenType::KW_EXIT},
    {"RETURN", TokenType::KW_RETURN},
+   {"CONTINUE", TokenType::KW_CONTINUE},
 
    {"BOOL", TokenType::KW_BOOL},
    {"SINT", TokenType::KW_SINT},

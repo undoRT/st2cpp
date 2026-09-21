@@ -25,12 +25,15 @@
  * @brief Exception thrown for parsing errors
  *
  * Contains line and column information for error reporting.
+ * The what() message includes location information.
  */
 class ParseError : public std::runtime_error
 {
 public:
    uint32_t line, col;
-   ParseError(const std::string& msg, uint32_t ln, uint32_t c) : std::runtime_error(msg), line(ln), col(c) {}
+   ParseError(const std::string& msg, uint32_t ln, uint32_t c)
+      : std::runtime_error("Parse error at line " + std::to_string(ln) + ":" + std::to_string(c) + ": " + msg), line(ln), col(c)
+   {}
 };
 
 // ============================================================================
