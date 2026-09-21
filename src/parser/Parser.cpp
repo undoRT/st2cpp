@@ -112,9 +112,7 @@ const Token& Parser::expect(TokenType t, const std::string& msg)
 ParseError Parser::error(const std::string& msg) const
 {
    const auto& tok = peek();
-   std::ostringstream oss;
-   oss << "Parse error at line " << tok.line << ":" << tok.col << " ('" << tok.text << "'): " << msg;
-   return ParseError(oss.str(), tok.line, tok.col);
+   return ParseError(msg, tok.line, tok.col);
 }
 
 // ============================================================================
@@ -470,6 +468,7 @@ Method Parser::parseMethod()
             local.name = decl.name;
             local.type = decl.type;
             local.initialValue = decl.initialValue;
+            local.line = decl.line;
             method.localVars.push_back(local);
          }
       } else {
@@ -536,7 +535,9 @@ VarSection Parser::parseMethodVarSection(VarKind kind)
 
    while (!check(TokenType::KW_END_VAR) && !atEnd()) {
       std::vector<std::string> names;
-      names.push_back(expect(TokenType::IDENTIFIER, "Expected variable name").text);
+      Token nameTok = expect(TokenType::IDENTIFIER, "Expected variable name");
+      uint32_t declLine = nameTok.line;
+      names.push_back(nameTok.text);
       while (match(TokenType::COMMA)) {
          names.push_back(expect(TokenType::IDENTIFIER, "Expected variable name").text);
       }
@@ -555,6 +556,7 @@ VarSection Parser::parseMethodVarSection(VarKind kind)
          d.name = nm;
          d.type = ty;
          d.initialValue = init;
+         d.line = declLine;
          sec.decls.push_back(std::move(d));
       }
    }
@@ -625,7 +627,9 @@ VarSection Parser::parseVarSection(VarKind kind)
    while (!check(TokenType::KW_END_VAR) && !atEnd()) {
       // Parse one or more names
       std::vector<std::string> names;
-      names.push_back(expect(TokenType::IDENTIFIER, "Expected variable name").text);
+      Token nameTok = expect(TokenType::IDENTIFIER, "Expected variable name");
+      uint32_t declLine = nameTok.line;
+      names.push_back(nameTok.text);
       while (match(TokenType::COMMA)) {
          names.push_back(expect(TokenType::IDENTIFIER, "Expected variable name").text);
       }
@@ -665,6 +669,7 @@ VarSection Parser::parseVarSection(VarKind kind)
          d.type = ty;
          d.initialValue = init;
          d.atAddress = atAddr;
+         d.line = declLine;
          sec.decls.push_back(std::move(d));
       }
    }
@@ -696,7 +701,9 @@ VarSection Parser::parseGlobalVarSection()
    while (!check(TokenType::KW_END_VAR) && !atEnd()) {
       // Parse variable names
       std::vector<std::string> names;
-      names.push_back(expect(TokenType::IDENTIFIER, "Expected variable name").text);
+      Token nameTok = expect(TokenType::IDENTIFIER, "Expected variable name");
+      uint32_t declLine = nameTok.line;
+      names.push_back(nameTok.text);
       while (match(TokenType::COMMA)) {
          names.push_back(expect(TokenType::IDENTIFIER, "Expected variable name").text);
       }
@@ -736,6 +743,7 @@ VarSection Parser::parseGlobalVarSection()
          d.type = ty;
          d.initialValue = init;
          d.atAddress = atAddr;
+         d.line = declLine;
          sec.decls.push_back(std::move(d));
       }
    }

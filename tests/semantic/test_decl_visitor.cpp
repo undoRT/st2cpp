@@ -1257,23 +1257,23 @@ TEST_F(DeclVisitorTest, UnknownTypeReportsLine) {
     )";
 
     auto info = analyze(st);
-    // The FUNCTION return type must point at the FUNCTION's line. POU-local
-    // VarDecl::line is not populated by the parser (a pre-existing limit),
-    // so the local variable's unknown type may still carry <unknown>.
+    // Both the FUNCTION return type and the POU-local variable's unknown type
+    // must point at their declaration line (the parser now fills
+    // VarDecl::line for local VAR sections).
     bool returnTypeLineOk = false;
-    bool localUnknownSeen = false;
+    bool localUnknownLineOk = false;
     for (const auto& d : info.diagnostics.all()) {
         if (d.code == DiagnosticCode::InvalidTypeName) {
             if (d.message.find(": Missing") != std::string::npos) {
                 returnTypeLineOk = (d.location.line > 0);
             }
-            if (d.message.find("AlsoMissing") != std::string::npos) {
-                localUnknownSeen = true;
+            if (d.message.find(": AlsoMissing") != std::string::npos) {
+                localUnknownLineOk = (d.location.line == 4);
             }
         }
     }
     EXPECT_TRUE(returnTypeLineOk);
-    EXPECT_TRUE(localUnknownSeen);
+    EXPECT_TRUE(localUnknownLineOk);
 }
 
 // ============================================================================
