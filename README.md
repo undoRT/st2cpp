@@ -126,6 +126,30 @@ public:
 
 ---
 
+## Semantic Analysis
+
+st2cpp ships with a full semantic analysis stage that validates Structured Text before code generation. It builds a symbol table with case-insensitive identifier resolution (IEC 61131-3 identifiers are case-insensitive), resolves type references across scopes, and checks assignments, calls, array indices, and member access for type compatibility.
+
+Key capabilities:
+
+- **Scope and symbol management**: POU scopes (functions, function blocks, programs), struct scopes, and method scopes; nested scope-chain lookup (`LOCAL → POU → GLOBAL → BUILTIN`); duplicate declarations detected.
+- **Type checking**: assignments, literals, operator operands, function/FB parameters, struct member access, array indices (bounds and rank), pointer dereferences.
+- **Inheritance and interfaces**: `EXTENDS` / `SUPER^` method resolution; `IMPLEMENTS` interface contract verification (abstract method presence, override checks).
+- **Enum support**: enumerators are typed with the enum type rather than plain `INT`, and can be used in assignments and comparisons.
+- **Struct field resolution**: member access on struct and function block instances (including through interfaces), with nested access like `A.B.C`.
+- **Process image globals**: `AT %I…`, `AT %Q…`, `AT %M…` variables are resolved and validated against the configured process image layout.
+- **Error reporting**: diagnostics carry error/warning codes, human-readable messages, and precise source locations (`file:line:col`).
+
+Analysis runs in two passes — first every enum, struct, interface and POU header is registered (name and type entry, with a stable type id), then bodies are resolved — so forward reference between types (a STRUCT or FUNCTION_BLOCK that uses another struct, FB, enum or interface declared later, `ARRAY OF` / `POINTER TO` / `REF TO` of later types, later FUNCTION return types) and mutual recursion resolve correctly, and the result is independent of the ST declaration order inside a file or after workspace merge. By-value containment cycles (`A` contains `B` contains `A`, or a function block containing itself) are reported as `CircularDependency`; pointer/`REF_TO`-based cycles stay legal.
+
+### Strict vs. Permissive mode
+
+By default the analyzer runs in **Permissive** mode: diagnostics are collected and surfaced (see `--verbose` / `--strict`), but generation proceeds even when errors exist, gracefully falling back to legacy syntactic inference for unresolvable constructs. This eases incremental adoption on existing codebases.
+
+With `--strict`, the analyzer runs in **Strict** mode: all diagnostics are printed and generation is **blocked** as soon as any error is found — a fail-fast workflow suited to CI pipelines and production builds.
+
+---
+
 ## CLI Reference
 
 | Option | Description |
@@ -145,6 +169,7 @@ public:
 | `--pi-output <bytes>` | Process Image Output size in bytes (default: 1024) |
 | `--pi-marker <bytes>` | Process Image Marker size in bytes (default: 1024) |
 | `-v, --verbose` | Print detailed processing information |
+| `--strict` | Strict IEC 61131-3 mode: block generation on semantic errors |
 | `-h, --help` | Show this help |
 
 ---
@@ -168,10 +193,11 @@ public:
 
 ## Testing
 
-The project includes a comprehensive test suite using Google Test. Tests cover:
+The project includes a comprehensive test suite using Google Test (470+ tests), covering:
 
-- **From the legacy repository**: around 20 tests covering lexing, parsing, and code generation for the core IEC 61131-3 constructs.
-- **Newly added**: 14 comprehensive tests covering arrays, enums, structs, function blocks with methods, inheritance, and `SUPER^` calls.
+- **Lexing and parsing** of all IEC 61131-3 constructs
+- **Semantic analysis**: symbol resolution, type checking, scope chains, enums, structs, arrays, interfaces, inheritance, method overriding, forward type references and by-value dependency cycles, and process image globals
+- **Code generation** for single-file and modular project output
 
 To build and run tests:
 
@@ -186,8 +212,6 @@ All tests are automatically executed in the CI/CD pipeline on every pull request
 
 ## Known Limitations (Beta)
 
-- No semantic analysis / type checking yet
-- First parse error stops compilation (no error recovery)
 - `ARRAY[*]` (variable-length arrays) not supported
 - `VAR_CONFIG` and SFC (`ACTION`, `TRANSITION`) not yet implemented
 
