@@ -96,10 +96,10 @@ private:
                                    std::unordered_map<SymbolId, int>& inDegree);
     
     // --- Type Resolution ---
-    TypeId resolveTypeRef(const TypeRef& typeRef);
+    TypeId resolveTypeRef(const TypeRef& typeRef, uint32_t line = 0);
     TypeId resolveBaseType(BaseType baseType);
     std::string baseTypeName(BaseType baseType);
-    TypeId resolveNamedType(const std::string& name);
+    TypeId resolveNamedType(const std::string& name, uint32_t line = 0);
     
     // --- Helpers ---
     SourceLocation makeLocation(uint32_t line, uint32_t col = 0) const;

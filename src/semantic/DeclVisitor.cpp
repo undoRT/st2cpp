@@ -348,17 +348,17 @@ void DeclVisitor::registerInterfaceBody(const Interface& iface) {
                 methodSym->isAbstract = true; // Interface methods are abstract by default
                 methodSym->containingFbId = ifaceSymId;
                 
-                // Register return type
+                // Register return type (interface methods use the interface's line)
                 TypeId returnTypeId = 0;
                 if (method.returnType.base != BaseType::VOID) {
-                    returnTypeId = resolveTypeRef(method.returnType);
+                    returnTypeId = resolveTypeRef(method.returnType, iface.line);
                 }
                 methodSym->returnTypeId = returnTypeId;
                 
                 // Register parameters
                 std::vector<SymbolId> paramSymIds;
                 for (const auto& param : method.parameters) {
-                    TypeId paramTypeId = resolveTypeRef(param.type);
+                    TypeId paramTypeId = resolveTypeRef(param.type, iface.line);
                     SymbolId paramSymId = symTab_.declare(param.name, SymbolKind::Parameter, paramTypeId);
                     if (paramSymId != 0) {
                         Symbol* paramSym = symTab_.get(paramSymId);
@@ -479,7 +479,7 @@ void DeclVisitor::registerPou(const POU& pou) {
     // Resolve FUNCTION return type (deferred to Pass B, when every type name
     // is visible regardless of declaration order).
     if (pou.kind == POUKind::FUNCTION && pou.returnType.base != BaseType::VOID) {
-        pouSym->returnTypeId = resolveTypeRef(pou.returnType);
+        pouSym->returnTypeId = resolveTypeRef(pou.returnType, pou.line);
     }
 
     // Create POU scope
@@ -559,7 +559,7 @@ void DeclVisitor::registerVarDecl(const VarDecl& decl, SymbolId scopeId, SymbolK
         return;
     }
 
-    TypeId typeId = resolveTypeRef(decl.type);
+    TypeId typeId = resolveTypeRef(decl.type, decl.line);
     
     SymbolId varSymId = symTab_.declare(decl.name, varKind, typeId);
     if (varSymId == 0) {
@@ -634,7 +634,7 @@ void DeclVisitor::registerMethod(const Method& method, SymbolId fbScopeId, Symbo
     // Register return type
     TypeId returnTypeId = 0;
     if (method.returnType.base != BaseType::VOID) {
-        returnTypeId = resolveTypeRef(method.returnType);
+        returnTypeId = resolveTypeRef(method.returnType, method.line);
     }
     methodSym->returnTypeId = returnTypeId;
     
@@ -645,7 +645,7 @@ void DeclVisitor::registerMethod(const Method& method, SymbolId fbScopeId, Symbo
     // Register parameters in method scope
     std::vector<SymbolId> paramSymIds;
     for (const auto& param : method.parameters) {
-        TypeId paramTypeId = resolveTypeRef(param.type);
+        TypeId paramTypeId = resolveTypeRef(param.type, method.line);
         SymbolId paramSymId = symTab_.declare(param.name, SymbolKind::Parameter, paramTypeId);
         if (paramSymId != 0) {
             Symbol* paramSym = symTab_.get(paramSymId);
@@ -659,7 +659,7 @@ void DeclVisitor::registerMethod(const Method& method, SymbolId fbScopeId, Symbo
     
     // Register local variables in method scope
     for (const auto& localVar : method.localVars) {
-        TypeId varTypeId = resolveTypeRef(localVar.type);
+        TypeId varTypeId = resolveTypeRef(localVar.type, localVar.line);
         SymbolId varSymId = symTab_.declare(localVar.name, SymbolKind::Variable, varTypeId);
         if (varSymId != 0) {
             Symbol* varSym = symTab_.get(varSymId);
@@ -1017,17 +1017,19 @@ void DeclVisitor::topoSortStructs() {
  * @brief Resolve a type reference to a TypeId.
  * @details Handles POINTER TO, REF_TO and ARRAY wrappers by building the
  * corresponding TypeInfo and registering it; plain references resolve to a base
- * or named type.
+ * or named type. The line is threaded to the named-type resolution so unknown
+ * types are reported on the declaration that references them.
  * @param typeRef The type reference to resolve
+ * @param line The source line of the referencing declaration (0 when unknown)
  * @return The resolved TypeId
  */
-TypeId DeclVisitor::resolveTypeRef(const TypeRef& typeRef) {
+TypeId DeclVisitor::resolveTypeRef(const TypeRef& typeRef, uint32_t line) {
     // Handle POINTER TO
     if (typeRef.isPointer) {
         TypeId pointedTypeId = 0;
         std::string baseName;
         if (typeRef.base == BaseType::NAMED) {
-            pointedTypeId = resolveNamedType(typeRef.name);
+            pointedTypeId = resolveNamedType(typeRef.name, line);
             baseName = typeRef.name;
         } else {
             pointedTypeId = resolveBaseType(typeRef.base);
@@ -1050,7 +1052,7 @@ TypeId DeclVisitor::resolveTypeRef(const TypeRef& typeRef) {
         TypeId pointedTypeId = 0;
         std::string baseName;
         if (typeRef.base == BaseType::NAMED) {
-            pointedTypeId = resolveNamedType(typeRef.name);
+            pointedTypeId = resolveNamedType(typeRef.name, line);
             baseName = typeRef.name;
         } else {
             pointedTypeId = resolveBaseType(typeRef.base);
@@ -1072,7 +1074,7 @@ TypeId DeclVisitor::resolveTypeRef(const TypeRef& typeRef) {
     if (!typeRef.arrayDims.empty()) {
         TypeId elementTypeId = 0;
         if (typeRef.base == BaseType::NAMED) {
-            elementTypeId = resolveNamedType(typeRef.name);
+            elementTypeId = resolveNamedType(typeRef.name, line);
         } else {
             elementTypeId = resolveBaseType(typeRef.base);
         }
@@ -1107,7 +1109,7 @@ TypeId DeclVisitor::resolveTypeRef(const TypeRef& typeRef) {
     }
     
     // Handle named types (user-defined)
-    return resolveNamedType(typeRef.name);
+    return resolveNamedType(typeRef.name, line);
 }
 
 /**
@@ -1156,26 +1158,33 @@ std::string DeclVisitor::baseTypeName(BaseType baseType) {
 
 /**
  * @brief Resolve a user-defined named type to its TypeId.
- * @details Accepts Type, FunctionBlock and Program symbols as valid type
- * declarations; unknown names are reported as an InvalidTypeName diagnostic.
+ * @details Searches only the global (type) namespace via lookupGlobal so a
+ * member variable or struct field with the same name (case-insensitive) can
+ * never shadow a type. Accepts Type, FunctionBlock, Program and Interface
+ * symbols as valid type declarations; unknown names are reported as an
+ * InvalidTypeName diagnostic, pointing at the declaration that referenced the
+ * type when a line is available.
  * @param name The type name to resolve
+ * @param line The source line of the referencing declaration (0 when unknown)
  * @return The resolved TypeId, or 0 when the type is unknown
  */
-TypeId DeclVisitor::resolveNamedType(const std::string& name) {
-    // Try to find the type symbol
-    SymbolId typeSymId = symTab_.lookupRecursive(name);
+TypeId DeclVisitor::resolveNamedType(const std::string& name, uint32_t line) {
+    // Try to find the type symbol in the global (type) namespace only
+    SymbolId typeSymId = symTab_.lookupGlobal(name);
     if (typeSymId != 0) {
         Symbol* typeSym = symTab_.get(typeSymId);
-        // Accept Type, FunctionBlock, and Program as valid types for variable declarations
+        // Accept Type, FunctionBlock, Program, and Interface as valid types
+        // for variable declarations
         if (typeSym && (typeSym->kind == SymbolKind::Type || 
                         typeSym->kind == SymbolKind::FunctionBlock ||
-                        typeSym->kind == SymbolKind::Program)) {
+                        typeSym->kind == SymbolKind::Program ||
+                        typeSym->kind == SymbolKind::Interface)) {
             return typeSym->typeId;
         }
     }
     
     // Type not found - report error
-    reportError(DiagnosticCode::InvalidTypeName, "unknown type: " + name, makeLocation(0));
+    reportError(DiagnosticCode::InvalidTypeName, "unknown type: " + name, makeLocation(line));
     return 0;
 }
 
