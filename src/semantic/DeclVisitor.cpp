@@ -860,11 +860,151 @@ void DeclVisitor::collectFbCompositionEdges(Symbol* fb, const std::vector<Symbol
 }
 
 /**
+ * @brief Compute the topological orders and detect by-value dependency cycles.
+ * @details The two sort functions above still produce the emission orders; this
+ * pass independently walks a unified graph of structs and FBs to flag cycles
+ * that would not compile in C++ (struct A contains struct B contains A, a
+ * function block containing itself, or any mutual struct/FB containment).
+ * Pointer and reference members never participate: they are not by-value
+ * dependencies and pointer cycles are legal.
+ */
+void DeclVisitor::detectValueCycles() {
+    std::unordered_map<SymbolId, std::vector<SymbolId>> graph;
+    std::unordered_map<SymbolId, int> inDegree;
+    std::vector<SymbolId> nodes;
+
+    for (const auto& sym : symTab_.getSymbols()) {
+        if (sym.kind == SymbolKind::FunctionBlock) {
+            nodes.push_back(sym.id);
+            inDegree[sym.id] = 0;
+        } else if (sym.kind == SymbolKind::Type) {
+            TypeInfo* typeInfo = symTab_.getType(sym.typeId);
+            if (typeInfo && typeInfo->kind == TypeKind::Struct) {
+                nodes.push_back(sym.id);
+                inDegree[sym.id] = 0;
+            }
+        }
+    }
+    if (nodes.empty()) return;
+
+    auto addEdge = [&](SymbolId payload, SymbolId container) {
+        if (payload == 0) return;
+        auto& edges = graph[payload];
+        if (std::find(edges.begin(), edges.end(), container) == edges.end()) {
+            edges.push_back(container);
+            inDegree[container]++;
+        }
+    };
+
+    // Struct -> container edges (member holds a struct/FB by value)
+    for (const auto& structId : nodes) {
+        Symbol* structSym = symTab_.get(structId);
+        if (!structSym || structSym->kind != SymbolKind::Type) continue;
+        for (SymbolId memberId : structSym->members) {
+            Symbol* memberSym = symTab_.get(memberId);
+            if (!memberSym) continue;
+            addEdge(valuePayloadSymbol(memberSym->typeId), structId);
+        }
+    }
+
+    // FB -> container edges (owned variables and parameters, including method
+    // parameters, holding a struct/FB by value). Self-containment is a cycle
+    // by value and must be reported, so it is NOT skipped here.
+    for (const auto& fbId : nodes) {
+        Symbol* fbSym = symTab_.get(fbId);
+        if (!fbSym || fbSym->kind != SymbolKind::FunctionBlock) continue;
+        const Scope* scope = symTab_.getScope(fbSym->scopeId);
+        if (!scope) continue;
+        std::vector<SymbolId> owned;
+        for (const auto& [name, symId] : scope->symbols) {
+            Symbol* sym = symTab_.get(symId);
+            if (!sym) continue;
+            if (sym->kind == SymbolKind::Method) {
+                for (SymbolId paramId : sym->params) owned.push_back(paramId);
+                continue;
+            }
+            if (sym->kind == SymbolKind::Variable || sym->kind == SymbolKind::Parameter ||
+                sym->kind == SymbolKind::StructMember) {
+                owned.push_back(symId);
+            }
+        }
+        for (SymbolId ownedId : owned) {
+            Symbol* sym = symTab_.get(ownedId);
+            if (!sym) continue;
+            addEdge(valuePayloadSymbol(sym->typeId), fbId);
+        }
+    }
+
+    // Kahn's algorithm
+    std::queue<SymbolId> q;
+    for (const auto& [nodeId, deg] : inDegree) {
+        if (deg == 0) q.push(nodeId);
+    }
+    size_t processed = 0;
+    while (!q.empty()) {
+        SymbolId nodeId = q.front();
+        q.pop();
+        processed++;
+        for (SymbolId dep : graph[nodeId]) {
+            inDegree[dep]--;
+            if (inDegree[dep] == 0) q.push(dep);
+        }
+    }
+
+    if (processed != nodes.size()) {
+        // Name the types trapped in the cycle
+        std::vector<SymbolId> cyclic;
+        for (const auto& [nodeId, deg] : inDegree) {
+            if (deg > 0) cyclic.push_back(nodeId);
+        }
+        std::sort(cyclic.begin(), cyclic.end());
+        std::string msg = "circular by-value dependency between types: ";
+        for (size_t i = 0; i < cyclic.size(); ++i) {
+            if (i > 0) msg += ", ";
+            Symbol* sym = symTab_.get(cyclic[i]);
+            msg += sym ? sym->name : std::to_string(cyclic[i]);
+        }
+        reportError(DiagnosticCode::CircularDependency, msg, makeLocation(0));
+    }
+}
+
+/**
  * @brief Compute the topological orders for FBs and structs.
  */
 void DeclVisitor::computeTopoOrders() {
     topoSortFbs();
     topoSortStructs();
+    detectValueCycles();
+}
+
+/**
+ * @brief Return the symbol that a resolved type holds by value, or 0.
+ * @details Unwraps ARRAY element types (arrays hold their elements by value);
+ * POINTER TO and REF_TO are never followed because they are not by-value
+ * dependencies (pointer cycles are legal). Named struct/FB references resolve
+ * to their declaring symbol.
+ * @param typeId The resolved type to inspect
+ * @return The symbol of the by-value payload, or 0 when none applies
+ */
+SymbolId DeclVisitor::valuePayloadSymbol(TypeId typeId) const {
+    while (typeId != 0) {
+        const TypeInfo* type = symTab_.getType(typeId);
+        if (!type) return 0;
+        switch (type->kind) {
+            case TypeKind::Array:
+                typeId = type->elementTypeId;
+                continue;
+            case TypeKind::Struct:
+            case TypeKind::FunctionBlock:
+                return type->symbolId;
+            case TypeKind::Pointer:
+            case TypeKind::Reference:
+                return 0;
+            default:
+                return 0;
+        }
+    }
+    return 0;
 }
 
 /**
@@ -930,11 +1070,9 @@ void DeclVisitor::topoSortFbs() {
         }
     }
     
-    // Check for cycles
-    if (fbTopoOrder_.size() != allFbs.size()) {
-        reportError(DiagnosticCode::CircularInheritance,
-            "circular dependency detected in function blocks", makeLocation(0));
-    }
+    // Check for cycles: covered by detectValueCycles() with a dedicated
+    // CircularDependency diagnostic that names the involved types.
+    (void)allFbs;
 }
 
 /**
@@ -1002,11 +1140,9 @@ void DeclVisitor::topoSortStructs() {
         }
     }
     
-    // Check for cycles
-    if (structTopoOrder_.size() != allStructs.size()) {
-        reportWarning(DiagnosticCode::CircularInheritance,
-            "circular dependency detected in structs", makeLocation(0));
-    }
+    // Check for cycles: covered by detectValueCycles() with a dedicated
+    // CircularDependency diagnostic that names the involved types.
+    (void)allStructs;
 }
 
 // ============================================================================

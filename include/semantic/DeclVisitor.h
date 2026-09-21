@@ -87,13 +87,15 @@ private:
     SymbolId resolveTypeName(const std::string& name);
     bool wouldCreateCycle(SymbolId derived, SymbolId base);
     
-    // --- Topological Sorting ---
+// --- Topological Sorting ---
     void computeTopoOrders();
     void topoSortFbs();
     void topoSortStructs();
     void collectFbCompositionEdges(Symbol* fb, const std::vector<SymbolId>& allFbs,
-                                   std::unordered_map<SymbolId, std::vector<SymbolId>>& graph,
-                                   std::unordered_map<SymbolId, int>& inDegree);
+                                  std::unordered_map<SymbolId, std::vector<SymbolId>>& graph,
+                                  std::unordered_map<SymbolId, int>& inDegree);
+    void detectValueCycles();
+    SymbolId valuePayloadSymbol(TypeId typeId) const;
     
     // --- Type Resolution ---
     TypeId resolveTypeRef(const TypeRef& typeRef, uint32_t line = 0);
