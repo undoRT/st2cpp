@@ -182,27 +182,27 @@ FUNCTION_BLOCK MathProcessor
         ProcessedValue := InternalValue;
         IsValid := TRUE;
         Process := InternalValue;
-        
+
         CASE value OF
-            1, 3, 5:
-                result := 1;
-            10..20:
-                result := 2;
-            30..40, 50:
-                result := 3;
-            ELSE
-                result := 0;
+            1, 3, 5 :
+            result := 1;
+            10..20 :
+            result := 2;
+            30..40, 50 :
+            result := 3;
+        ELSE
+            result := 0;
         END_CASE
 
         CASE value OF
-            1, 3, 5:
-                result := 1;
-            10:
-                result := 2;
-            30, 40, 50:
-                result := 3;
-            ELSE
-                result := 0;
+            1, 3, 5 :
+            result := 1;
+            10 :
+            result := 2;
+            30, 40, 50 :
+            result := 3;
+        ELSE
+            result := 0;
         END_CASE
 
     END_METHOD

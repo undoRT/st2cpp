@@ -74,3 +74,15 @@ examples/*/test_output/
 !examples/*/main.cpp
 *.notrac
 clearBeforePush.sh
+libst2cpp_lib.a
+libst2cpp_semantic.a
+undoCoreConfig.cmake
+undoCoreConfigVersion.cmake
+
+# Scratch semantics example (only test_semantics.st is tracked)
+examples/semantics/CMakeLists.txt
+examples/semantics/main.cpp
+examples/semantics/st2cpp
+examples/semantics/generated/
+examples/semantics/test_semantics.cpp
+examples/semantics/test_semantics.hpp
