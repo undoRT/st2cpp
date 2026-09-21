@@ -22,12 +22,22 @@ struct GeneratedCode
 class TestHelper
 {
 public:
-   static GeneratedCode generateFromST(const std::string& stCode,
-                                       const std::string& headerName = "test.hpp",
-                                       const std::string& namespaceName = "undoCore",
-                                       bool caseSensitive = false);
+    static TranslationUnit parseST(const std::string& stCode,
+                                    const std::string& filename = "<test>");
 
-   static std::vector<GeneratedFile> generateModularFromST(const std::string& stCode, const std::string& outputDir = "generated");
+    static GeneratedCode generateFromST(const std::string& stCode,
+                                        const std::string& headerName = "test.hpp",
+                                        const std::string& namespaceName = "undoCore",
+                                        bool caseSensitive = false);
+
+    /// Like generateFromST but attaches the semantic analysis output to the
+    /// CodeGenerator so that the semantic-driven codegen paths are exercised.
+    static GeneratedCode generateFromSTWithSemantics(const std::string& stCode,
+                                                     const std::string& headerName = "test.hpp",
+                                                     const std::string& namespaceName = "undoCore",
+                                                     bool caseSensitive = false);
+
+    static std::vector<GeneratedFile> generateModularFromST(const std::string& stCode, const std::string& outputDir = "generated");
 
    static std::string readFile(const std::string& path);
    static void writeFile(const std::string& path, const std::string& content);

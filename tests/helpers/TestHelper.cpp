@@ -12,6 +12,9 @@
 #include "codegen/CodeGenerator.h"
 #include "parser/Parser.h"
 #include "lexer/Lexer.h"
+#include "semantic/SemanticAnalyzer.h"
+#include "semantic/SemanticInfo.h"
+#include "ast/AST.h"
 #include <fstream>
 #include <sstream>
 #include <cstdlib>
@@ -36,33 +39,77 @@
  * @return GeneratedCode Header and source file in cpp
  */
 GeneratedCode TestHelper::generateFromST(const std::string& stCode,
-                                         const std::string& headerName,
-                                         const std::string& namespaceName,
-                                         bool caseSensitive)
+                                          const std::string& headerName,
+                                          const std::string& namespaceName,
+                                          bool caseSensitive)
 {
-   try {
-      Lexer lexer(stCode, "<test>");
-      auto tokens = lexer.tokenize();
-      Parser parser(std::move(tokens));
-      auto tu = parser.parseTranslationUnit();
+    try {
+       Lexer lexer(stCode, "<test>");
+       auto tokens = lexer.tokenize();
+       Parser parser(std::move(tokens));
+       auto tu = parser.parseTranslationUnit();
 
-      CodeGenerator gen;
-      gen.setNamespace(namespaceName);
-      gen.setRuntimeHeader("undoCore/types.hpp");
-      gen.setCaseSensitive(caseSensitive);
+       CodeGenerator gen;
+       gen.setNamespace(namespaceName);
+       gen.setRuntimeHeader("undoCore/types.hpp");
+       gen.setCaseSensitive(caseSensitive);
 
-      ProcessImageConfig piConfig;
-      piConfig.inputBytes = 1024;
-      piConfig.outputBytes = 1024;
-      piConfig.markerBytes = 1024;
-      gen.setProcessImageConfig(piConfig);
+       ProcessImageConfig piConfig;
+       piConfig.inputBytes = 1024;
+       piConfig.outputBytes = 1024;
+       piConfig.markerBytes = 1024;
+       gen.setProcessImageConfig(piConfig);
 
-      auto result = gen.generate(tu, headerName, namespaceName, "undoCore/types.hpp", caseSensitive);
+       auto result = gen.generate(tu, headerName, namespaceName, "undoCore/types.hpp", caseSensitive);
 
-      return {result.headerCode, result.sourceCode};
-   } catch (const std::exception& e) {
-      throw std::runtime_error(std::string("Generation failed: ") + e.what());
-   }
+       return {result.headerCode, result.sourceCode};
+    } catch (const std::exception& e) {
+       throw std::runtime_error(std::string("Generation failed: ") + e.what());
+    }
+}
+
+GeneratedCode TestHelper::generateFromSTWithSemantics(const std::string& stCode,
+                                                      const std::string& headerName,
+                                                      const std::string& namespaceName,
+                                                      bool caseSensitive)
+{
+    try {
+       Lexer lexer(stCode, "<test>");
+       auto tokens = lexer.tokenize();
+       Parser parser(std::move(tokens));
+       Parser::clearParsedInterfaces();
+       auto tu = parser.parseTranslationUnit();
+
+       st2cpp::semantic::SemanticAnalyzer analyzer;
+       auto semanticInfo = analyzer.analyze(tu, st2cpp::semantic::SemanticAnalyzer::Strictness::Permissive);
+
+       CodeGenerator gen;
+       gen.setNamespace(namespaceName);
+       gen.setRuntimeHeader("undoCore/types.hpp");
+       gen.setCaseSensitive(caseSensitive);
+
+       ProcessImageConfig piConfig;
+       piConfig.inputBytes = 1024;
+       piConfig.outputBytes = 1024;
+       piConfig.markerBytes = 1024;
+       gen.setProcessImageConfig(piConfig);
+       gen.setSemanticInfo(&semanticInfo);
+
+       auto result = gen.generate(tu, headerName, namespaceName, "undoCore/types.hpp", caseSensitive);
+
+       return {result.headerCode, result.sourceCode};
+    } catch (const std::exception& e) {
+       throw std::runtime_error(std::string("Generation failed: ") + e.what());
+    }
+}
+
+TranslationUnit TestHelper::parseST(const std::string& stCode, const std::string& filename)
+{
+    Lexer lexer(stCode, filename);
+    auto tokens = lexer.tokenize();
+    Parser parser(std::move(tokens));
+    Parser::clearParsedInterfaces();
+    return parser.parseTranslationUnit();
 }
 
 /**

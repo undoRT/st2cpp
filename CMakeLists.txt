@@ -86,6 +86,9 @@ target_compile_options(st2cpp_lib PRIVATE
     ${ST2CPP_COMPILE_FLAGS}
 )
 
+# Semantic analysis library
+add_subdirectory(include/semantic)
+
 # If undoCore is available as a CMake target, link it
 if(TARGET undoCore)
     target_link_libraries(st2cpp_lib PUBLIC undoCore)
@@ -102,7 +105,7 @@ endif()
 # ============================================================================
 add_executable(st2cpp src/cli/main.cpp)
 
-target_link_libraries(st2cpp PRIVATE st2cpp_lib)
+target_link_libraries(st2cpp PRIVATE st2cpp_semantic st2cpp_lib)
 
 target_include_directories(st2cpp PRIVATE
     ${ST2CPP_INCLUDE_DIR}
@@ -150,6 +153,12 @@ if(BUILD_TESTS)
         tests/test_process_image.cpp         
         tests/test_complex_program.cpp  
         tests/helpers/TestHelper.cpp
+        tests/semantic/test_diagnostics.cpp
+        tests/semantic/test_symbol_table.cpp
+        tests/semantic/test_type_system.cpp
+        tests/semantic/test_decl_visitor.cpp
+        tests/semantic/test_body_visitor.cpp
+        tests/semantic/test_codegen_semantic.cpp
     )
 
     file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/tests/st_samples/ 
@@ -158,6 +167,7 @@ if(BUILD_TESTS)
     # Link libraries
     target_link_libraries(st2cpp_tests
         st2cpp_lib
+        st2cpp_semantic
         GTest::gtest_main
         # pthread is required on Linux/Unix, included automatically via GTest on Windows
     )
