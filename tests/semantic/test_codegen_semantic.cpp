@@ -560,6 +560,9 @@ TEST_F(CodegenSemanticTest, ReturnNarrowingStrictVsPermissive)
 // ============================================================================
 TEST_F(CodegenSemanticTest, IndexArityAndRealIndexStrictness)
 {
+   // Excess indices (more than the array rank) are a structural type error:
+   // after the first index a 1-D array yields its element, and indexing that
+   // element again is invalid in every mode.
    const std::string arity = R"(
       FUNCTION_BLOCK Test
          VAR
@@ -577,13 +580,13 @@ TEST_F(CodegenSemanticTest, IndexArityAndRealIndexStrictness)
 
    st2cpp::semantic::SemanticAnalyzer permissive;
    auto infoPerm = permissive.analyze(tu, st2cpp::semantic::SemanticAnalyzer::Strictness::Permissive);
-   EXPECT_FALSE(infoPerm.diagnostics.hasErrors())
-       << "Permissive accepts extra indices on a 1-D array";
+   EXPECT_TRUE(infoPerm.diagnostics.hasErrors())
+       << "Indexing the INT element of a 1-D array again must be an error";
 
    st2cpp::semantic::SemanticAnalyzer strict;
    auto infoStrict = strict.analyze(tu, st2cpp::semantic::SemanticAnalyzer::Strictness::Strict);
    EXPECT_TRUE(infoStrict.diagnostics.hasErrors())
-       << "Strict mode must report the indexer arity mismatch";
+       << "Strict mode must report the excess index too";
 
    const std::string realIndex = R"(
       FUNCTION_BLOCK Test
