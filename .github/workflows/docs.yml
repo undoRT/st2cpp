@@ -36,13 +36,13 @@ jobs:
       # 3. Generate HTML documentation
       - name: Generate Doxygen HTML
         run: doxygen Doxyfile
-        # Output goes to docs/html/ as configured in Doxyfile (OUTPUT_DIRECTORY = docs)
+        # Output goes to doxydocs/html/ as configured in Doxyfile (OUTPUT_DIRECTORY = doxydocs)
 
       # 4. Verify output exists
       - name: Verify output
         run: |
-          if [ ! -f docs/html/index.html ]; then
-            echo "::error::Doxygen did not produce docs/html/index.html"
+          if [ ! -f doxydocs/html/index.html ]; then
+            echo "::error::Doxygen did not produce doxydocs/html/index.html"
             exit 1
           fi
           echo "Doxygen output:"
@@ -59,14 +59,14 @@ jobs:
           path: gh-pages
 
       # 6. Copy generated HTML → st2cpp/api/ in the pages repo
-      - name: Copy docs into st2cpp/api/
+      - name: Copy doxydocs into st2cpp/api/
         run: |
           # Remove old API docs, keep everything else in st2cpp/
           rm -rf gh-pages/st2cpp/api
           mkdir -p gh-pages/st2cpp/api
 
           # Copy the generated HTML
-          cp -r docs/html/. gh-pages/st2cpp/api/
+          cp -r doxydocs/html/. gh-pages/st2cpp/api/
 
           echo "Copied files:"
           ls gh-pages/st2cpp/api/ | head -20
