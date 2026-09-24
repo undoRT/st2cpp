@@ -1508,6 +1508,52 @@ TEST_F(BodyVisitorTest, TypedLiteralResolvedCorrectly) {
     EXPECT_NE(realTypeId, 0u);
 }
 
+TEST_F(BodyVisitorTest, TimeLiteralResolvesToTimeType) {
+    std::string st = R"(
+        FUNCTION_BLOCK Test
+            VAR
+                A : TIME;
+            END_VAR
+            A := T#5s;
+            A := TIME#100ms;
+            A := T#1d2h3m4s5ms;
+            A := T#2.5s;
+        END_FUNCTION_BLOCK
+    )";
+
+    auto info = analyze(st);
+
+    EXPECT_FALSE(info.diagnostics.hasErrors()) << "Diagnostics: " << info.diagnostics.errorCount() << " errors";
+
+    const SymbolTable& symTab = *info.symbolTable;
+    TypeId timeTypeId = symTab.getTypeIdByName("TIME");
+    EXPECT_NE(timeTypeId, 0u);
+}
+
+TEST_F(BodyVisitorTest, InvalidTimeLiteralReportsError) {
+    std::string st = R"(
+        FUNCTION_BLOCK Test
+            VAR
+                A : TIME;
+            END_VAR
+            A := T#garbage;
+            A := T#5x;
+            A := T#;
+        END_FUNCTION_BLOCK
+    )";
+
+    auto info = analyze(st);
+
+    EXPECT_TRUE(info.diagnostics.hasErrors());
+    int count = 0;
+    for (const auto& d : info.diagnostics.all()) {
+        if (d.code == DiagnosticCode::InvalidTimeLiteral) {
+            ++count;
+        }
+    }
+    EXPECT_EQ(count, 3);
+}
+
 TEST_F(BodyVisitorTest, ExpressionTraversalComplete) {
     std::string st = R"(
         FUNCTION_BLOCK Test
@@ -1569,7 +1615,7 @@ TEST_F(BodyVisitorTest, BoolLiteralResolvedToBool) {
 }
 
 // ============================================================================
-// Sprint 2C Tests — Expression Type Inference
+// Expression Type Inference
 // ============================================================================
 
 TEST_F(BodyVisitorTest, TypeInferenceIdentifier) {
@@ -1849,7 +1895,7 @@ TEST_F(BodyVisitorTest, UnaryOperatorInvalidOperand) {
 }
 
 // ============================================================================
-// Sprint 2D Tests — Statement / Call Checking
+// Statement / Call Checking
 // ============================================================================
 
 TEST_F(BodyVisitorTest, IfConditionNotBool) {
@@ -2081,7 +2127,7 @@ TEST_F(BodyVisitorTest, BooleanConditionValid) {
 
 
 // ============================================================================
-// Sprint 2 Final Hardening — ExprStmt Verification
+// ExprStmt Verification
 // ============================================================================
 
 TEST_F(BodyVisitorTest, ExprStmtWithCallExpr) {
@@ -2147,7 +2193,7 @@ TEST_F(BodyVisitorTest, ExprStmtWithBinaryExpression) {
 }
 
 // ============================================================================
-// Sprint 2 Final Hardening — Source Location Verification
+// Source Location Verification
 // ============================================================================
 
 TEST_F(BodyVisitorTest, SourceLocationAssignmentError) {
@@ -2203,25 +2249,25 @@ TEST_F(BodyVisitorTest, SourceLocationForTypeError) {
 }
 
 // ============================================================================
-// Sprint 2 Final Hardening — MemberExpr and IndexExpr Verification
+// MemberExpr and IndexExpr Verification
 // ============================================================================
 
 TEST_F(BodyVisitorTest, MemberExprVisitsObject) {
-    // MemberExpr is deferred to Sprint 3.
+    // MemberExpr is deferred.
     // This test verifies that MemberExpr object is visited without crash.
-    // Since MemberExpr resolution requires struct type info (Sprint 3),
+    // Since MemberExpr resolution requires struct type info,
     // we verify that the expression is visited without error.
 }
 
 TEST_F(BodyVisitorTest, IndexExprVisitsIndices) {
-    // IndexExpr is deferred to Sprint 3.
+    // IndexExpr is deferred.
     // This test verifies that IndexExpr indices are visited without crash.
-    // Since IndexExpr bounds checking requires array type info (Sprint 3),
+    // Since IndexExpr bounds checking requires array type info,
     // we verify that the expression is visited without error.
 }
 
 // ============================================================================
-// Sprint 2 Final Hardening — TypeSystem Rules Verification
+// TypeSystem Rules Verification
 // ============================================================================
 
 TEST_F(BodyVisitorTest, NumericWideningINTtoREAL) {
@@ -2378,7 +2424,7 @@ TEST_F(BodyVisitorTest, ArithmeticOperatorMixedNumeric) {
 }
 
 // ============================================================================
-// Sprint 3 — Full Type Checking
+// Full Type Checking
 // ============================================================================
 
 TEST_F(BodyVisitorTest, MemberExprValid) {
@@ -2511,7 +2557,7 @@ TEST_F(BodyVisitorTest, IndexExprInvalidIndexType) {
     EXPECT_TRUE(found);
 }
 
-// Fase 2 (Sprint 6): IEC conversion alignment.
+// Fase 2: IEC conversion alignment.
 // REAL operands are rejected for bitwise operators and MOD because the C++
 // target emits '&'/'|'/'^' and '%' which do not compile on floating point.
 
@@ -3149,7 +3195,7 @@ TEST_F(BodyVisitorTest, MixedComparisonBoolInt) {
 }
 
 // ============================================================================
-// Sprint 4 — RETURN Semantics
+// RETURN Semantics
 // ============================================================================
 
 TEST_F(BodyVisitorTest, ReturnValidInFunction) {
@@ -3253,7 +3299,7 @@ TEST_F(BodyVisitorTest, ReturnExpressionTypePropagation) {
 }
 
 // ============================================================================
-// Sprint 4 — EXIT and CONTINUE
+// EXIT and CONTINUE
 // ============================================================================
 
 TEST_F(BodyVisitorTest, ExitInForLoop) {
@@ -3364,7 +3410,7 @@ TEST_F(BodyVisitorTest, NestedLoopsExit) {
 }
 
 // ============================================================================
-// Sprint 4 — Pointer/Reference Types
+// Pointer/Reference Types
 // ============================================================================
 
 TEST_F(BodyVisitorTest, PointerTypeDeclaration) {
@@ -3458,7 +3504,7 @@ TEST_F(BodyVisitorTest, PointerIncompatibleType) {
 }
 
 // ============================================================================
-// Sprint 4 — Array Semantics Advanced
+// Array Semantics Advanced
 // ============================================================================
 
 TEST_F(BodyVisitorTest, ArrayIndexOutOfBounds) {
@@ -3507,7 +3553,7 @@ TEST_F(BodyVisitorTest, ArrayMultiIndex) {
 }
 
 // ============================================================================
-// Sprint 4 — Struct/FB/Member Advanced
+// Struct/FB/Member Advanced
 // ============================================================================
 
 TEST_F(BodyVisitorTest, NestedMemberAccess) {
@@ -3669,7 +3715,7 @@ TEST_F(BodyVisitorTest, ArrayAssignmentIncompatible) {
 
 
 // ============================================================================
-// Sprint 4 — Expression Semantics Advanced
+// Expression Semantics Advanced
 // ============================================================================
 
 TEST_F(BodyVisitorTest, PointerArithmeticExpression) {
@@ -3879,4 +3925,60 @@ TEST_F(BodyVisitorTest, BuiltinConversionFunctionResolution) {
 
     auto info = analyze(st);
     EXPECT_FALSE(info.diagnostics.hasErrors()) << "Diagnostics: " << info.diagnostics.errorCount() << " errors";
+}
+
+// ============================================================================
+// T33 — Unknown identifiers report a precise line:column
+// ============================================================================
+TEST_F(BodyVisitorTest, UnknownIdentifierReportsPreciseColumn) {
+    const std::string st = "FUNCTION_BLOCK T\n"
+                           "VAR\n"
+                           "    a : INT;\n"
+                           "END_VAR\n"
+                           "    a := missing_sym;\n"
+                           "END_FUNCTION_BLOCK\n";
+
+    auto tu = TestHelper::parseST(st, "body.st");
+    analyzer_->setSourceName("body.st");
+    auto info = analyzer_->analyze(tu);
+
+    bool found = false;
+    for (const auto& d : info.diagnostics.all()) {
+        if (d.code != DiagnosticCode::UndeclaredIdentifier) {
+            continue;
+        }
+        found = true;
+        EXPECT_EQ(d.location.fileName, "body.st");
+        EXPECT_EQ(d.location.line, 5u);
+        // 'missing_sym' starts at column 10 (1-based) on line 5
+        EXPECT_EQ(d.location.column, 10u);
+    }
+    EXPECT_TRUE(found) << "expected UndeclaredIdentifier diagnostic";
+}
+
+// ============================================================================
+// T34 — A non-BOOL IF condition is reported at the condition's column
+// ============================================================================
+TEST_F(BodyVisitorTest, NonBooleanConditionReportsPreciseColumn) {
+    const std::string st = "FUNCTION_BLOCK T\n"
+                           "VAR\n"
+                           "    i : INT;\n"
+                           "END_VAR\n"
+                           "    IF i THEN\n"
+                           "        i := 0;\n"
+                           "    END_IF;\n"
+                           "END_FUNCTION_BLOCK\n";
+
+    auto info = analyze(st);
+
+    bool found = false;
+    for (const auto& d : info.diagnostics.all()) {
+        if (d.code != DiagnosticCode::NonBooleanCondition) {
+            continue;
+        }
+        found = true;
+        EXPECT_EQ(d.location.line, 5u);
+        EXPECT_EQ(d.location.column, 8u); // 'i' of 'IF i THEN' (4 spaces + "IF ")
+    }
+    EXPECT_TRUE(found) << "expected NonBooleanCondition diagnostic";
 }

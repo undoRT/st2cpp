@@ -1,0 +1,10 @@
+{
+  "$schemaVersion": "1.0",
+  "name": "SingleLib",
+  "libraries": [
+    {
+      "id": "corelib",
+      "path": "../../library/data/corelib.json"
+    }
+  ]
+}

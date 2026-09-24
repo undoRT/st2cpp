@@ -103,6 +103,43 @@ GeneratedCode TestHelper::generateFromSTWithSemantics(const std::string& stCode,
     }
 }
 
+GeneratedCode TestHelper::generateFromSTWithLibraries(const std::string& stCode,
+                                                      const st2cpp::library::LibraryRegistry& registry,
+                                                      const std::string& headerName,
+                                                      const std::string& namespaceName,
+                                                      bool caseSensitive)
+{
+    try {
+       Lexer lexer(stCode, "<test>");
+       auto tokens = lexer.tokenize();
+       Parser parser(std::move(tokens));
+       Parser::clearParsedInterfaces();
+       auto tu = parser.parseTranslationUnit();
+
+       st2cpp::semantic::SemanticAnalyzer analyzer;
+       auto semanticInfo = analyzer.analyze(tu, registry,
+           st2cpp::semantic::SemanticAnalyzer::Strictness::Permissive);
+
+       CodeGenerator gen;
+       gen.setNamespace(namespaceName);
+       gen.setRuntimeHeader("undoCore/types.hpp");
+       gen.setCaseSensitive(caseSensitive);
+
+       ProcessImageConfig piConfig;
+       piConfig.inputBytes = 1024;
+       piConfig.outputBytes = 1024;
+       piConfig.markerBytes = 1024;
+       gen.setProcessImageConfig(piConfig);
+       gen.setSemanticInfo(&semanticInfo);
+
+       auto result = gen.generate(tu, headerName, namespaceName, "undoCore/types.hpp", caseSensitive);
+
+       return {result.headerCode, result.sourceCode};
+    } catch (const std::exception& e) {
+       throw std::runtime_error(std::string("Generation failed: ") + e.what());
+    }
+}
+
 TranslationUnit TestHelper::parseST(const std::string& stCode, const std::string& filename)
 {
     Lexer lexer(stCode, filename);
@@ -110,6 +147,37 @@ TranslationUnit TestHelper::parseST(const std::string& stCode, const std::string
     Parser parser(std::move(tokens));
     Parser::clearParsedInterfaces();
     return parser.parseTranslationUnit();
+}
+
+st2cpp::semantic::LibraryExportResult TestHelper::buildDescriptorFromST(
+    const std::string& stCode,
+    const st2cpp::semantic::LibraryExportOptions& options)
+{
+    Lexer lexer(stCode, "<test>");
+    auto tokens = lexer.tokenize();
+    Parser parser(std::move(tokens));
+    Parser::clearParsedInterfaces();
+    auto tu = parser.parseTranslationUnit();
+
+    st2cpp::semantic::SemanticAnalyzer analyzer;
+    auto semanticInfo = analyzer.analyze(tu, st2cpp::semantic::SemanticAnalyzer::Strictness::Permissive);
+    return st2cpp::semantic::LibraryDescriptorBuilder::build(tu, semanticInfo, options);
+}
+
+st2cpp::semantic::LibraryExportResult TestHelper::buildDescriptorFromST(
+    const std::string& stCode,
+    const st2cpp::semantic::LibraryExportOptions& options,
+    const st2cpp::library::LibraryRegistry& registry)
+{
+    Lexer lexer(stCode, "<test>");
+    auto tokens = lexer.tokenize();
+    Parser parser(std::move(tokens));
+    Parser::clearParsedInterfaces();
+    auto tu = parser.parseTranslationUnit();
+
+    st2cpp::semantic::SemanticAnalyzer analyzer;
+    auto semanticInfo = analyzer.analyze(tu, registry, st2cpp::semantic::SemanticAnalyzer::Strictness::Permissive);
+    return st2cpp::semantic::LibraryDescriptorBuilder::build(tu, semanticInfo, options);
 }
 
 /**

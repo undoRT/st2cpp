@@ -91,6 +91,8 @@ struct StructMember
    std::string name;
    TypeRef type;
    std::shared_ptr<Expr> initialValue; // optional
+   uint32_t line = 0;
+   uint32_t col = 0;
 };
 
 /**
@@ -101,6 +103,8 @@ struct StructType
 {
    std::string name;
    std::vector<StructMember> members;
+   uint32_t line = 0;
+   uint32_t col = 0;
 };
 
 /**
@@ -111,6 +115,8 @@ struct EnumEnumerator
 {
    std::string name;
    std::shared_ptr<Expr> value; // optional
+   uint32_t line = 0;
+   uint32_t col = 0;
 };
 
 /**
@@ -121,6 +127,26 @@ struct EnumType
 {
    std::string name;
    std::vector<EnumEnumerator> enumerators;
+   uint32_t line = 0;
+   uint32_t col = 0;
+};
+
+/**
+ * @struct TypeAlias
+ * @brief Represents a named type alias or a named array type
+ *
+ * Covers `TYPE Name : <TypeRef>; END_TYPE` blocks, where the underlying type
+ * may be an elementary type (alias), another user type or an array:
+ *   - TYPE MyInt : INT; END_TYPE
+ *   - TYPE MyArr : ARRAY[0..9] OF REAL; END_TYPE
+ * The TypeRef holds the full underlying type (including array dimensions).
+ */
+struct TypeAlias
+{
+   std::string name;
+   TypeRef type;
+   uint32_t line = 0;
+   uint32_t col = 0;
 };
 
 enum class VarKind {
@@ -163,6 +189,7 @@ struct Method
    std::vector<VarDecl> localVars; // VAR and VAR_TEMP
    std::vector<std::shared_ptr<Stmt>> body;
    uint32_t line = 0;
+   uint32_t col = 0;
    bool isOverride = false;
    bool isFinal = false;
    bool isAbstract = false;
@@ -182,6 +209,7 @@ struct VarDecl
    bool isRetain = false;
    std::string atAddress; // AT %... address string
    uint32_t line = 0;
+   uint32_t col = 0;
    SymbolId symbolId = 0; // Semantic analysis: link to symbol table
 };
 
@@ -317,7 +345,8 @@ struct Interface
 {
    std::string name;
    std::vector<Method> methods;
-   uint32_t line;
+   uint32_t line = 0;
+   uint32_t col = 0;
 };
 
 struct AdrExpr
@@ -374,11 +403,12 @@ struct Expr
 {
    ExprVariant node;
    uint32_t line = 0;
+   uint32_t col = 0;
    TypeId resolvedTypeId = 0; // Semantic analysis: inferred type
    SymbolId symbolId = 0;     // Semantic analysis: for IdentExpr, MemberExpr, CallExpr
 
    template<typename T>
-   explicit Expr(T&& v, uint32_t ln = 0) : node(std::forward<T>(v)), line(ln)
+   explicit Expr(T&& v, uint32_t ln = 0, uint32_t cl = 0) : node(std::forward<T>(v)), line(ln), col(cl)
    {}
 };
 
@@ -459,9 +489,10 @@ struct Stmt
 {
    StmtVariant node;
    uint32_t line = 0;
+   uint32_t col = 0;
 
    template<typename T>
-   explicit Stmt(T&& v, uint32_t ln = 0) : node(std::forward<T>(v)), line(ln)
+   explicit Stmt(T&& v, uint32_t ln = 0, uint32_t cl = 0) : node(std::forward<T>(v)), line(ln), col(cl)
    {}
 };
 
@@ -480,6 +511,7 @@ struct POU
    std::vector<std::shared_ptr<Stmt>> body;
    std::vector<Method> methods;
    uint32_t line = 0;
+   uint32_t col = 0;
    std::string extends;
    std::vector<std::string> implements;
    bool isAbstract = false;
@@ -497,4 +529,5 @@ struct TranslationUnit
    std::vector<EnumType> enums;
    std::vector<VarSection> globals;
    std::vector<Interface> interfaces;
+   std::vector<TypeAlias> typeAliases;
 };

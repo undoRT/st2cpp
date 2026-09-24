@@ -1,0 +1,21 @@
+{
+  "$schemaVersion": "1.0",
+  "name": "CollisionLibs",
+  "libraries": [
+    {
+      "id": "corelib",
+      "version": "^1.0.0",
+      "path": "../../library/data/corelib.json"
+    },
+    {
+      "id": "duallib",
+      "version": "^1.0.0",
+      "path": "../../library/data/duallib.json"
+    },
+    {
+      "id": "examplelib",
+      "version": "^1.0.0",
+      "path": "../../library/data/examplelib.json"
+    }
+  ]
+}

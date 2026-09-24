@@ -304,11 +304,11 @@ public:
    void setProcessImageConfig(const ProcessImageConfig& config) { m_piConfig = config; }
    void setProcessImageGlobal(bool isGlobal) { m_piConfig.useGlobalPI = isGlobal; }
 
-   /// Attach the output of the semantic analysis (optional).
-   /// When present, the generator consumes the decorated AST (Expr::resolvedTypeId,
-   /// Expr::symbolId, CallExpr::calleeSymbolId) and the SymbolTable instead of
-   /// re-inferring names, types and signatures from the syntax.
-   void setSemanticInfo(const st2cpp::semantic::SemanticInfo* info) { m_semanticInfo = info; }
+/// Attach the output of the semantic analysis (optional).
+    /// When present, the generator consumes the decorated AST (Expr::resolvedTypeId,
+    /// Expr::symbolId, CallExpr::calleeSymbolId) and the SymbolTable instead of
+    /// re-inferring names, types and signatures from the syntax.
+    void setSemanticInfo(st2cpp::semantic::SemanticInfo* info) { m_semanticInfo = info; }
 
 private:
    std::string m_namespace;     // Namespace per il codice generato
@@ -324,9 +324,10 @@ private:
    // Handler for variables scope
    ScopeManager m_scope;
 
-   // Optional semantic analysis output consumed by the generator.
-   // Keep this FIRST so it is cleared on re-entry along with the other state.
-   const st2cpp::semantic::SemanticInfo* m_semanticInfo = nullptr;
+// Optional semantic analysis output consumed by the generator.
+    // Keep this FIRST so it is cleared on re-entry along with the other state.
+    // Non-const so the generator may append binding warnings to the diagnostics.
+    st2cpp::semantic::SemanticInfo* m_semanticInfo = nullptr;
 
    std::unordered_map<std::string, FunctionSignature> m_signatures;
    std::unordered_map<std::string, std::unordered_set<std::string>> m_enumValues; // enum name -> set of enumerators
@@ -334,6 +335,7 @@ private:
    std::unordered_map<std::string, FunctionSignature> m_methodSignatures;
    std::unordered_map<std::string, bool> m_enumTypes; // enum name -> isScoped
    std::unordered_set<std::string> m_structTypes;
+   std::unordered_map<std::string, TypeRef> m_aliasTypes; // alias (uppercase) -> underlying TypeRef
    std::unordered_map<std::string, std::vector<std::string>> m_structMembers; // struct name -> ordered members list
    std::string m_currentFunctionReturnType;                                   // Empty if void, otherwise the return type
    ProjectStyle m_projectStyle = ProjectStyle::FLAT;                          // Current mode
@@ -385,6 +387,8 @@ private:
    void generateStructsInOrder(const std::vector<StructType>& structs, std::ostringstream* out = nullptr);
    BuildStructDepType buildStructDependenciesForStructs(const std::vector<StructType>& structs);
    void genEnum(const EnumType& et);
+   void registerTypeAliases(const std::vector<TypeAlias>& aliases);
+   std::string resolveAliasLegacy(const std::string& name) const;
 
    // ============================================================================
    //  GLOBALS generation
@@ -428,11 +432,44 @@ private:
    bool isSemanticBoolType(st2cpp::semantic::TypeId typeId) const;
    /// True if the resolved type is an ENUM (member access uses '::' not '.').
    bool isSemanticEnumType(st2cpp::semantic::TypeId typeId) const;
-   /// Qualified enum name for an enumerator symbol (semantic replacement of m_enumeratorToEnum).
-   std::string semanticEnumNameForEnumerator(st2cpp::semantic::SymbolId enumeratorId) const;
-   /// Function/method signature rebuilt from calleeSymbolId + SymbolTable::params
-   /// (semantic replacement of collectSignature's m_signatures for call emission).
-   std::optional<FunctionSignature> semanticSignatureForCall(const CallExpr& call) const;
+/// Qualified enum name for an enumerator symbol (semantic replacement of m_enumeratorToEnum).
+    std::string semanticEnumNameForEnumerator(st2cpp::semantic::SymbolId enumeratorId) const;
+    /// C++ name of an external enum member (verbatim descriptor spelling when the
+    /// enum belongs to an external library, else the normalized ST spelling).
+    std::string semanticEnumeratorCppName(st2cpp::semantic::TypeId enumTypeId, const std::string& stMemberName) const;
+    /// Qualified C++ name of a semantic struct/enum/FB type, or the fallback
+    /// (normalized ST name) when the type is local or the binding is absent.
+    std::string semanticTypeCppName(st2cpp::semantic::TypeId typeId, const std::string& fallback) const;
+    /// C++ binding of an external function callee ("" when not bindable).
+    std::string semanticCallTargetName(const CallExpr& call) const;
+    /// C++ binding of an external global/constant variable ("" when not bound).
+    std::string semanticVariableBinding(const st2cpp::semantic::Symbol& sym) const;
+    /// External FB step info for an FB invocation statement (isFb set only for
+    /// external-library FB calls, step = cppBinding.call of the descriptor).
+    struct ExternalFbCallInfo {
+        bool isFb = false;
+        std::string step;
+    };
+    ExternalFbCallInfo semanticFbCallInfo(const CallExpr& call) const;
+    /// Append a clear warning to the attached diagnostics for an incomplete binding.
+    void reportBindingIncomplete(const std::string& entity, const std::string& what) const;
+    /// Pre-scan the TU and compute the sorted, deduplicated library include lines.
+    void computeLibraryIncludeLines(const TranslationUnit& tu);
+    /// Include block for the libraries used by the TU ("" when none).
+    std::string libraryIncludeBlock() const;
+    void collectUsedLibrariesFromExpr(const Expr& expr, std::unordered_set<std::string>& used) const;
+    void collectUsedLibrariesFromStmt(const Stmt& stmt, std::unordered_set<std::string>& used) const;
+    void collectUsedLibrariesFromTypeRef(const TypeRef& tr, std::unordered_set<std::string>& used) const;
+    void recordUsedLibraryForSymbol(const st2cpp::semantic::Symbol& sym, std::unordered_set<std::string>& used) const;
+    void recordUsedLibraryForTypeId(st2cpp::semantic::TypeId typeId, std::unordered_set<std::string>& used) const;
+    std::vector<std::string> m_libraryIncludeLines;
+/// Function/method signature rebuilt from calleeSymbolId + SymbolTable::params
+    /// (semantic replacement of collectSignature's m_signatures for call emission).
+    std::optional<FunctionSignature> semanticSignatureForCall(const CallExpr& call) const;
+    /// Library descriptor owning an external symbol (single source of truth of
+    /// the C++ bindings), resolved from Symbol::externalLibraryId. Null when the
+    /// symbol is local or no registry is attached to the SemanticInfo.
+    const st2cpp::library::LibraryDescriptor* semanticDescriptorFor(const st2cpp::semantic::Symbol& sym) const;
    /// Emit a static_cast when the semantic types of lhs/rhs differ (assignment/RETURN).
    std::string applySemanticAssignmentCast(const Expr& lhs, const Expr& rhs, const std::string& rhsCode) const;
    /// FB symbol id resolved from the semantic symbol table by name (0 when

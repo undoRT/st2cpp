@@ -1,6 +1,6 @@
 /**
  * @file SemanticAnalyzer.cpp
- * @brief Semantic analyzer implementation (Sprint 2B - DeclVisitor + BodyVisitor integration)
+ * @brief Semantic analyzer implementation (DeclVisitor + BodyVisitor integration)
  * @author Salvatore Bamundo
  * @date 2026
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -12,6 +12,7 @@
 #include "semantic/Diagnostics.h"
 #include "semantic/DeclVisitor.h"
 #include "semantic/BodyVisitor.h"
+#include "semantic/LibrarySymbolImporter.h"
 #include "semantic/SemanticInfo.h"
 #include <cctype>
 #include <string>
@@ -37,6 +38,13 @@ std::string upper(const std::string& s) {
 } // namespace
 
 /**
+ * @brief Run the semantic pipeline over a translation unit assuming the
+ * symbol table and diagnostics have already been reset.
+ * @param tu The translation unit to analyze
+ * @param strictness The strictness mode controlling IEC compliance checks
+ * @return The populated SemanticInfo for the translation unit
+ */
+/**
  * @brief Run the full semantic analysis pipeline over a translation unit.
  * @details Executes the header-registration pass (DeclVisitor) followed by the
  * body-visiting pass (BodyVisitor), then assembles the SemanticInfo result.
@@ -51,8 +59,43 @@ std::string upper(const std::string& s) {
 SemanticInfo SemanticAnalyzer::analyze(const TranslationUnit& tu, Strictness strictness) {
     // Reset diagnostics and symbol table for this analysis
     diagnostics_ = Diagnostics{};
+    diagnostics_.setSourceName(sourceName_);
     symTab_ = SymbolTable{};
-    
+    return analyzeCore(tu, strictness);
+}
+
+/**
+ * @brief Analyze a translation unit with external library symbols imported.
+ * @details Imports every registered library into the symbol table's external
+ * scope (deterministic order; project-local declarations still win) and then
+ * runs the regular semantic pipeline.
+ * @param tu The translation unit to analyze
+ * @param registry The library registry whose symbols become resolvable
+ * @param strictness The strictness mode controlling IEC compliance checks
+ * @return The populated SemanticInfo for the translation unit
+ */
+SemanticInfo SemanticAnalyzer::analyze(const TranslationUnit& tu,
+    const st2cpp::library::LibraryRegistry& registry, Strictness strictness) {
+    // Reset diagnostics and symbol table for this analysis
+    diagnostics_ = Diagnostics{};
+    diagnostics_.setSourceName(sourceName_);
+    symTab_ = SymbolTable{};
+
+    // Phase 0: import external library symbols before any project declaration.
+    // Colliding imports become warnings (ExternalSymbolCollision), never errors.
+    LibrarySymbolImporter importer(symTab_, diagnostics_);
+    importer.import(registry);
+
+    SemanticInfo info = analyzeCore(tu, strictness);
+    // Transport the registry (single source of truth of the C++ bindings) to
+    // the CodeGenerator. It references the same descriptors the importer read,
+    // so external symbols (decorated with externalLibraryId) can be resolved
+    // back to their LibraryDescriptor by the generator.
+    info.libraryRegistry = &registry;
+    return info;
+}
+
+SemanticInfo SemanticAnalyzer::analyzeCore(const TranslationUnit& tu, Strictness strictness) {
     // Phase 1: Run declaration visitor
     DeclVisitor declVisitor(symTab_, diagnostics_);
     declVisitor.visitTranslationUnit(tu);

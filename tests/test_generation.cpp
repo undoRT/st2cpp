@@ -387,10 +387,69 @@ TEST_F(GenerationTest, ForLoop)
    auto result = generate(st);
 
    // More flexible regex to handle different spacing
+   // The loop control variable is declared (VAR i : INT), so the code must NOT
+   // re-declare it with 'auto': it is assigned directly.
    expectRegex(result.source,
-               R"(for\s*\(\s*auto\s+I\s*=\s*0\s*;\s*I\s*<=\s*10\s*;\s*I\s*\+=\s*2\s*\))",
+               R"(for\s*\(\s*I\s*=\s*0\s*;\s*I\s*<=\s*10\s*;\s*I\s*\+=\s*2\s*\))",
                "FOR loop with step 2 not correctly generated");
    expectRegex(result.source, R"(SUM\s*=\s*SUM\s*\+\s*I)", "Loop body not correctly generated");
+}
+
+/**
+ * @brief Test that FOR loop with an UNDECLARED control variable still gets `auto`
+ *
+ * An implicit (undeclared) control variable has no declaration to reuse, so the
+ * generated C++ must declare it with `auto` exactly as before the fix.
+ */
+TEST_F(GenerationTest, ForLoopImplicitControlVariableStillUsesAuto)
+{
+   std::string st = R"(
+        PROGRAM Test
+            VAR
+                sum : INT;
+            END_VAR
+            sum := 0;
+            FOR i := 0 TO 10 DO
+                sum := sum + i;
+            END_FOR
+        END_PROGRAM
+    )";
+
+   auto result = generate(st);
+
+   expectRegex(result.source,
+               R"(for\s*\(\s*auto\s+I\s*=\s*0\s*;\s*I\s*<=\s*10\s*;\s*I\s*\+=)");
+   expectRegex(result.source, R"(SUM\s*=\s*SUM\s*\+\s*I)", "Loop body not correctly generated");
+}
+
+/**
+ * @brief Test that TYPE aliases and array TYPE aliases resolve in the LEGACY
+ * (no-SemanticInfo) generation path: the alias name must be replaced by the
+ * underlying C++ type instead of being emitted verbatim.
+ */
+TEST_F(GenerationTest, TypeAliasAndArrayAliasLegacy)
+{
+   std::string st = R"(
+        TYPE MyInt : INT; END_TYPE
+        TYPE MyCounter : ARRAY[0..9] OF INT; END_TYPE
+        TYPE Sensor : STRUCT
+            id : MyInt;
+        END_STRUCT END_TYPE
+        VAR_GLOBAL
+            a : MyInt := 42;
+            b : MyCounter;
+            s : Sensor;
+        END_VAR
+    )";
+
+   auto result = generate(st);
+
+   expectRegex(result.header, R"(STArray<Int16,\s*0,\s*9>\s+B)");
+   expectRegex(result.header, R"(struct\s+SENSOR)");
+   expectRegex(result.header, R"(SENSOR\s+S)");
+   // The alias spelling must never leak into the output.
+   EXPECT_EQ(result.header.find("MYCOUNTER"), std::string::npos)
+       << "alias name must be resolved in legacy codegen:\n" << result.header;
 }
 
 /**
@@ -756,6 +815,39 @@ TEST_F(GenerationTest, TypedIntegerLiteralGeneration)
    expectRegex(result.source, R"(X\s*=\s*123\s*;)");
    expectRegex(result.source, R"(Y\s*=\s*456\s*;)");
    expectRegex(result.source, R"(Z\s*=\s*789\s*;)");
+}
+
+/**
+ * @brief Test that IEC TIME literals are folded to milliseconds in the generated C++
+ * @details The runtime represents TIME as UInt32 milliseconds, so T#5s must
+ * generate 5000u (not a runtime IEC_TIME_LITERAL(...) call), covering simple,
+ * decimal and combined unit forms.
+ */
+TEST_F(GenerationTest, IecTimeLiteralGeneration)
+{
+   std::string st = R"(
+         FUNCTION Test : TIME
+             VAR
+                 a : TIME;
+                 b : TIME;
+                 c : TIME;
+                 d : TIME;
+             END_VAR
+             a := T#5s;
+             b := TIME#100ms;
+             c := T#1d2h;
+             d := T#2.5s;
+             Test := a + b + c + d;
+         END_FUNCTION
+     )";
+
+   auto result = generate(st);
+
+   expectRegex(result.source, R"(A\s*=\s*5000u\s*;)");
+   expectRegex(result.source, R"(B\s*=\s*100u\s*;)");
+   expectRegex(result.source, R"(C\s*=\s*93600000u\s*;)");
+   expectRegex(result.source, R"(D\s*=\s*2500u\s*;)");
+   EXPECT_EQ(result.source.find("IEC_TIME_LITERAL"), std::string::npos);
 }
 
 /**

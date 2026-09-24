@@ -1,0 +1,16 @@
+{
+  "$schemaVersion": "1.0",
+  "name": "TwoLibs",
+  "libraries": [
+    {
+      "id": "corelib",
+      "version": "^1.0.0",
+      "path": "../../library/data/corelib.json"
+    },
+    {
+      "id": "examplelib",
+      "version": "^1.0.0",
+      "path": "../../library/data/examplelib.json"
+    }
+  ]
+}

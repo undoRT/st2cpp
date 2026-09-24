@@ -10,6 +10,10 @@
 
 #include <gtest/gtest.h>
 #include "helpers/TestHelper.h"
+#include "project/ProjectConfigLoader.h"
+#include "project/ProjectLoader.h"
+#include "semantic/SemanticAnalyzer.h"
+#include "codegen/CodeGenerator.h"
 #include <filesystem>
 #include <cstdlib>
 #include <iostream>
@@ -456,6 +460,64 @@ protected:
             std::cout << "  " << entry.path().string() << std::endl;
          }
       }
+   }
+
+   /**
+    * @brief Write minimal mock headers for the external library fixtures
+    *
+    * The generated C++ references the bound library symbols directly (e.g.
+    * `examplelib::Channel`, `clamp(...)`, `TON.process()`). These small headers
+    * declare exactly those symbols so the generated code can be compiled
+    * against them, mirroring the descriptor cppBinding of the fixtures.
+    */
+   void writeMockLibraryHeaders()
+   {
+      const std::string corelib = R"(
+            #pragma once
+            namespace corelib {
+            struct Range {
+                float MIN;
+                float MAX;
+            };
+            }
+        )";
+
+      const std::string examplelib = R"(
+            #pragma once
+            #include "corelib/corelib.hpp"
+            namespace examplelib {
+            enum class State { RUNNING, IDLE, FAULT };
+            struct Channel {
+                float VALUE;
+                corelib::Range LIMITS;
+                int16_t COUNT;
+            };
+            struct TonInstance {
+                void set_IN(bool v) { m_in = v; }
+                void set_PT(uint32_t v) { m_pt = v; }
+                void process() { m_done = m_in; }
+                bool get_Q() const { return m_done; }
+                uint32_t get_ET() const { return m_elapsed; }
+                bool m_in = false;
+                bool m_done = false;
+                uint32_t m_pt = 0u;
+                uint32_t m_elapsed = 0u;
+            };
+            }
+            // cppBinding freeFunction/constant/global are emitted verbatim
+            // (no namespace prefix): the library header must expose them at
+            // global scope for the generated code to compile.
+            inline float clamp(float v, float lo, float hi) {
+                return v < lo ? lo : (v > hi ? hi : v);
+            }
+            inline const int16_t kMaxChannels = 8;
+            inline examplelib::State g_system_state = examplelib::State::IDLE;
+        )";
+
+      fs::create_directories(m_tempDir / "corelib");
+      fs::create_directories(m_tempDir / "examplelib");
+      TestHelper::writeFile((m_tempDir / "corelib" / "corelib.hpp").string(), corelib);
+      TestHelper::writeFile((m_tempDir / "examplelib" / "examplelib.hpp").string(), examplelib);
    }
 
    fs::path m_tempDir;
@@ -1545,4 +1607,35 @@ TEST_F(CompilationTest, CompileAllTypedLiterals)
    auto result = TestHelper::generateFromST(st);
    int exitCode = compileGenerated(result.header, result.source);
    EXPECT_EQ(exitCode, 0) << "Compilation failed for all typed literal types";
+}
+
+/**
+ * @brief Test that code bound to external libraries compiles against the
+ *        library headers (cppBinding from the descriptor)
+ */
+TEST_F(CompilationTest, CompileExternalLibraryBindings)
+{
+   writeMockLibraryHeaders();
+
+   const auto cfg = st2cpp::project::ProjectConfigLoader::fromFile("tests/project/data/two_lib_config.json");
+   ASSERT_TRUE(cfg.config.has_value());
+   const auto loaded = st2cpp::project::ProjectLoader::load(cfg.config.value());
+   ASSERT_FALSE(loaded.registry.size() == 0);
+
+   const std::string st = TestHelper::readFile("tests/st_samples/library_usage.st");
+   auto tu = TestHelper::parseST(st);
+
+   st2cpp::semantic::SemanticAnalyzer analyzer;
+   auto info = analyzer.analyze(tu, loaded.registry, st2cpp::semantic::SemanticAnalyzer::Strictness::Permissive);
+
+   CodeGenerator gen;
+   gen.setSemanticInfo(&info);
+   auto code = gen.generate(tu, "test.hpp");
+
+   int exitCode = compileGenerated(code.headerCode, code.sourceCode);
+   EXPECT_EQ(exitCode, 0)
+       << "Generated code bound to external libraries did not compile:\n"
+       << "--- header ---\n"
+       << code.headerCode << "\n--- source ---\n"
+       << code.sourceCode;
 }

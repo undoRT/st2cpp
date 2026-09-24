@@ -1,0 +1,13 @@
+{
+  "$schemaVersion": "1.0",
+  "libraries": [
+    {
+      "id": "corelib",
+      "path": "../../library/data/corelib.json"
+    },
+    {
+      "id": "CORElib",
+      "path": "../../library/data/corelib.json"
+    }
+  ]
+}

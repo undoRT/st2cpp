@@ -72,6 +72,14 @@ struct Symbol {
     // and whether it carries an initial value (default).
     ParamDir paramDir = ParamDir::None;
     bool hasDefaultValue = false;
+    // True when the symbol was imported from an external library descriptor
+    // (lives in the external scope, never in the project global scope).
+    bool isExternal = false;
+    // Id of the owning library descriptor (isExternal == true), verbatim from
+    // the LibraryDescriptor. Empty for project-local symbols. Lets the
+    // CodeGenerator recover the C++ binding single source of truth without
+    // re-resolving the symbol by name (which would be ambiguous on collisions).
+    std::string externalLibraryId;
 };
 
 struct Scope {
@@ -113,6 +121,15 @@ public:
         currentScopeId_ = 1;
         registerBuiltins();
         registerIecConversionFunctions();
+        // External library symbols (imported from LibraryDescriptor objects) live
+        // in a dedicated scope that is never consulted by the project-local
+        // lookups: it is reached explicitly as the final resolution fallback.
+        Scope externalScope;
+        externalScope.id = static_cast<ScopeId>(scopes_.size());
+        externalScope.parentId = 0;
+        externalScope.name = "external";
+        scopes_.push_back(std::move(externalScope));
+        externalScopeId_ = externalScope.id;
     }
 
     // ===== Scope Management =====
@@ -170,6 +187,78 @@ public:
         if (!scope) return 0;
         auto it = scope->symbols.find(normalizeKey(name));
         return (it != scope->symbols.end()) ? it->second : 0;
+    }
+    /**
+     * @brief Id of the external scope that holds library-imported symbols.
+     * @details The external scope is never part of the local/global lookup
+     * chain; it is consulted explicitly as the final fallback so that
+     * project-local symbols always shadow external ones.
+     */
+    ScopeId externalScope() const { return externalScopeId_; }
+    /**
+     * @brief Declare a symbol in the external (library) scope.
+     * @details Used by the library-symbol importer. The symbol is flagged
+     * isExternal and never shadows a project-local declaration (local lookups
+     * do not reach this scope). Returns 0 when the name is already present
+     * (two libraries exporting the same symbol), leaving the existing entry
+     * untouched.
+     * @param name The symbol name
+     * @param kind The symbol kind
+     * @param typeId The symbol type
+     * @param libraryId The id of the owning library descriptor
+     * @return The new SymbolId, or 0 on duplicate
+     */
+    SymbolId declareExternal(const std::string& name, SymbolKind kind, TypeId typeId = 0,
+        const std::string& libraryId = "") {
+        Scope* scope = getScope(externalScopeId_);
+        if (!scope) return 0;
+        const std::string key = normalizeKey(name);
+        if (scope->symbols.find(key) != scope->symbols.end()) {
+            return 0;
+        }
+        SymbolId newId = static_cast<SymbolId>(symbols_.size());
+        Symbol sym;
+        sym.id = newId;
+        sym.name = name;
+        sym.kind = kind;
+        sym.typeId = typeId;
+        sym.scopeId = externalScopeId_;
+        sym.parentScopeId = 0;
+        sym.isExternal = true;
+        sym.externalLibraryId = libraryId;
+        scope->symbols[key] = newId;
+        symbols_.push_back(std::move(sym));
+        return newId;
+    }
+    /**
+     * @brief Look up a name in the external (library) scope only.
+     * @return The resolved SymbolId, or 0 when not found
+     */
+    SymbolId lookupExternal(const std::string& name) const {
+        const Scope* scope = getScope(externalScopeId_);
+        if (!scope) return 0;
+        auto it = scope->symbols.find(normalizeKey(name));
+        return (it != scope->symbols.end()) ? it->second : 0;
+    }
+    /**
+     * @brief Open a child scope of the external scope (STRUCT_<n>, FUNC_<n>,
+     * FB_<n>) where the current scope is saved and restored by exitScope().
+     * @details Mirrors enterScope semantics: the caller must balance it with
+     * exitScope(). Members and parameters declared inside such scopes are not
+     * reachable from flat lookups, only through their owning symbol.
+     * @param name The scope name
+     * @return The new ScopeId
+     */
+    ScopeId pushExternalScope(const std::string& name) {
+        ScopeId newId = static_cast<ScopeId>(scopes_.size());
+        Scope scope;
+        scope.id = newId;
+        scope.parentId = externalScopeId_;
+        scope.name = name;
+        scopes_.push_back(std::move(scope));
+        scopeStack_.push_back(currentScopeId_);
+        currentScopeId_ = newId;
+        return newId;
     }
     ScopeId currentScope() const { return currentScopeId_; }
     ScopeId globalScope() const { return globalScopeId_; }
@@ -256,6 +345,21 @@ public:
         types_.push_back(std::move(t));
         typeNameToId_[normalizeKey(types_.back().name)] = id;
         return id;
+    }
+    /**
+     * @brief Register a named type alias (TYPE Name : <type>; END_TYPE).
+     * @details An alias is not a type of its own: its name resolves to the SAME
+     * canonical TypeId of the underlying type, so every semantic check and the
+     * code generator treat `Name` exactly as the aliased type. Duplicate alias
+     * names simply overwrite this lookup (the duplicate declaration itself is
+     * reported by the caller); keep this in sync with the alias Symbol.
+     * @param name The alias name
+     * @param typeId The canonical TypeId it resolves to
+     * @return the aliased TypeId
+     */
+    TypeId registerTypeAlias(const std::string& name, TypeId typeId) {
+        typeNameToId_[normalizeKey(name)] = typeId;
+        return typeId;
     }
     const Symbol* get(SymbolId id) const {
         if (id == 0 || id >= symbols_.size()) return nullptr;
@@ -348,6 +452,7 @@ private:
     std::unordered_map<std::string, TypeId> typeNameToId_;
     ScopeId globalScopeId_ = 1;
     ScopeId currentScopeId_ = 1;
+    ScopeId externalScopeId_ = 2;
 };
 
 } // namespace st2cpp::semantic

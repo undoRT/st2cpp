@@ -35,7 +35,6 @@ CTestTestfile.cmake
 compile_commands.json
 
 # Documentation
-docs/
 *.docset
 
 # OS files
@@ -71,6 +70,7 @@ tests/CMakeCache.txt
 tests/Makefile
 examples/test_output/
 examples/*/test_output/
+simple_program_2/
 !examples/*/main.cpp
 *.notrac
 clearBeforePush.sh

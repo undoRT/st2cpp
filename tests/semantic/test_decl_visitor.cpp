@@ -769,7 +769,7 @@ TEST_F(DeclVisitorTest, SemanticInfoCompleteness) {
 }
 
 // ============================================================================
-// Sprint 6 — Array bounds are captured from the AST (no placeholders)
+// Array bounds are captured from the AST (no placeholders)
 // ============================================================================
 TEST_F(DeclVisitorTest, ArrayBoundsFromAst) {
     std::string st = R"(
@@ -821,7 +821,132 @@ TEST_F(DeclVisitorTest, ArrayBoundsFromAst) {
 }
 
 // ============================================================================
-// TEST 22 — FB composition ordering (Fase 3, Sprint 6)
+// Array bounds must be constant integer literals (Bug: variable bounds accepted)
+// ============================================================================
+TEST_F(DeclVisitorTest, ArrayBoundsVariableRejected) {
+    std::string st = R"(
+        VAR_GLOBAL
+            n : INT := 5;
+            A : ARRAY[n..10] OF INT;
+        END_VAR
+    )";
+
+    auto info = analyze(st);
+
+    bool found = false;
+    for (const auto& d : info.diagnostics.all()) {
+        if (d.code == DiagnosticCode::ArrayBoundsNotConstant) {
+            found = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found) << "expected ArrayBoundsNotConstant diagnostic";
+}
+
+// ============================================================================
+// Named type aliases (TYPE Name : <type>; END_TYPE)
+// ============================================================================
+TEST_F(DeclVisitorTest, TypeAliasToScalar) {
+    std::string st = R"(
+        TYPE MyInt : INT; END_TYPE
+        VAR_GLOBAL
+            A : MyInt := 42;
+        END_VAR
+    )";
+
+    auto info = analyze(st);
+    EXPECT_FALSE(info.diagnostics.hasErrors()) << "Diagnostics: " << info.diagnostics.errorCount() << " errors";
+
+    const SymbolTable& symTab = *info.symbolTable;
+
+    // The alias name resolves to the canonical INT type id.
+    TypeId aliasId = symTab.getTypeIdByName("MyInt");
+    ASSERT_NE(aliasId, 0u);
+    const TypeInfo* aliasType = symTab.getType(aliasId);
+    ASSERT_NE(aliasType, nullptr);
+    EXPECT_TRUE(aliasType->isNumeric);
+    EXPECT_EQ(aliasType->baseType, BaseType::INT);
+
+    // A variable using the alias carries the canonical type.
+    SymbolId varId = symTab.lookupRecursive("A");
+    ASSERT_NE(varId, 0u);
+    EXPECT_EQ(symTab.get(varId)->typeId, aliasId);
+}
+
+TEST_F(DeclVisitorTest, TypeAliasArray) {
+    std::string st = R"(
+        TYPE MyCounter : ARRAY[0..9] OF INT; END_TYPE
+        VAR_GLOBAL
+            B : MyCounter;
+        END_VAR
+    )";
+
+    auto info = analyze(st);
+    EXPECT_FALSE(info.diagnostics.hasErrors()) << "Diagnostics: " << info.diagnostics.errorCount() << " errors";
+
+    const SymbolTable& symTab = *info.symbolTable;
+
+    TypeId aliasId = symTab.getTypeIdByName("MyCounter");
+    ASSERT_NE(aliasId, 0u);
+    const TypeInfo* aliasType = symTab.getType(aliasId);
+    ASSERT_NE(aliasType, nullptr);
+    EXPECT_EQ(aliasType->kind, TypeKind::Array);
+    ASSERT_EQ(aliasType->dimensions.size(), size_t(1));
+    EXPECT_EQ(aliasType->dimensions[0].low, 0);
+    EXPECT_EQ(aliasType->dimensions[0].high, 9);
+    EXPECT_EQ(aliasType->elementTypeId, symTab.getTypeIdByName("INT"));
+
+    SymbolId varId = symTab.lookupRecursive("B");
+    ASSERT_NE(varId, 0u);
+    EXPECT_EQ(symTab.get(varId)->typeId, aliasId);
+}
+
+TEST_F(DeclVisitorTest, TypeAliasToStructAndAliasChain) {
+    std::string st = R"(
+        TYPE Point : STRUCT
+            x : INT;
+            y : INT;
+        END_STRUCT END_TYPE
+        TYPE MyPoint : Point; END_TYPE
+        TYPE MyPoint2 : MyPoint; END_TYPE
+        VAR_GLOBAL
+            P : MyPoint2;
+        END_VAR
+    )";
+
+    auto info = analyze(st);
+    EXPECT_FALSE(info.diagnostics.hasErrors()) << "Diagnostics: " << info.diagnostics.errorCount() << " errors";
+
+    const SymbolTable& symTab = *info.symbolTable;
+
+    // The whole chain resolves to the single canonical Point struct.
+    TypeId pointId = symTab.getTypeIdByName("Point");
+    ASSERT_NE(pointId, 0u);
+    EXPECT_EQ(symTab.getTypeIdByName("MyPoint"), pointId);
+    EXPECT_EQ(symTab.getTypeIdByName("MyPoint2"), pointId);
+    EXPECT_EQ(symTab.get(symTab.lookupRecursive("P"))->typeId, pointId);
+}
+
+TEST_F(DeclVisitorTest, TypeAliasUnknownTargetRejected) {
+    std::string st = R"(
+        TYPE Bad : NoSuchType; END_TYPE
+    )";
+
+    auto info = analyze(st);
+    EXPECT_TRUE(info.diagnostics.hasErrors());
+
+    bool found = false;
+    for (const auto& d : info.diagnostics.all()) {
+        if (d.code == DiagnosticCode::InvalidTypeName) {
+            found = true;
+            break;
+        }
+    }
+    EXPECT_TRUE(found) << "expected InvalidTypeName diagnostic for unknown alias target";
+}
+
+// ============================================================================
+// TEST 22 — FB composition ordering
 // ============================================================================
 TEST_F(DeclVisitorTest, FbTopoOrderIncludesComposition) {
     // FB_Outer uses FB_Inner as a member but is declared FIRST in source.
@@ -1400,4 +1525,55 @@ TEST_F(DeclVisitorTest, WorkspaceMergeOrderIndependent) {
     EXPECT_EQ(infoAB.diagnostics.errorCount(), infoBA.diagnostics.errorCount());
     EXPECT_EQ(orderNames(infoAB, infoAB.fbTopoOrder), orderNames(infoBA, infoBA.fbTopoOrder));
     EXPECT_EQ(orderNames(infoAB, infoAB.structTopoOrder), orderNames(infoBA, infoBA.structTopoOrder));
+}
+
+// ============================================================================
+// Diagnostics carry the real source file name and a precise column
+// ============================================================================
+TEST_F(DeclVisitorTest, DiagnosticsCarryRealFileNameAndColumn) {
+    std::string st = "VAR_GLOBAL\n"
+                     "    n : INT := 5;\n"
+                     "    A : ARRAY[n..2] OF INT;\n"
+                     "END_VAR\n";
+
+    auto tu = TestHelper::parseST(st, "my_source.st");
+    analyzer_->setSourceName("my_source.st");
+    auto info = analyzer_->analyze(tu);
+
+    bool found = false;
+    for (const auto& d : info.diagnostics.all()) {
+        if (d.code != DiagnosticCode::ArrayBoundsNotConstant) {
+            continue;
+        }
+        found = true;
+        EXPECT_EQ(d.location.fileName, "my_source.st");
+        EXPECT_GT(d.location.line, 0u);
+        EXPECT_GT(d.location.column, 0u);
+        // Column must point at the declaration start on the array line
+        EXPECT_NE(d.location.toString().find("my_source.st"), std::string::npos);
+    }
+    EXPECT_TRUE(found) << "expected ArrayBoundsNotConstant diagnostic";
+}
+
+// ============================================================================
+// A duplicate variable declaration is located at its own column
+// ============================================================================
+TEST_F(DeclVisitorTest, DuplicateVariableLocatedAtItsOwnColumn) {
+    std::string st = "FUNCTION_BLOCK D\n"
+                     "VAR\n"
+                     "    a : INT;\n"
+                     "    a : REAL;\n"
+                     "END_VAR\n"
+                     "END_FUNCTION_BLOCK\n";
+
+    auto info = analyze(st);
+
+    for (const auto& d : info.diagnostics.all()) {
+        if (d.code != DiagnosticCode::DuplicateDeclaration) {
+            continue;
+        }
+        // The second 'a' starts at line 4, column 5 (1-based)
+        EXPECT_EQ(d.location.line, 4u);
+        EXPECT_EQ(d.location.column, 5u);
+    }
 }

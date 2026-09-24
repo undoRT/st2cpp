@@ -10,6 +10,7 @@
 #pragma once
 #include "semantic/SymbolTable.h"
 #include "semantic/Diagnostics.h"
+#include "library/LibraryRegistry.h"
 #include <vector>
 #include <unordered_map>
 #include <memory>
@@ -83,6 +84,14 @@ struct SemanticInfo {
 
     // Fase 6: strictness used and evidence that the semantic model was preserved
     PreservedSemantics preservedSemantics;
+
+    // Library registry used by the analysis (nullable). Set by the analyzer
+    // overload that accepts a registry; kept as a non-owning pointer to the
+    // single source of truth of the C++ bindings, so the CodeGenerator can
+    // resolve external symbols (Symbol::externalLibraryId) back to their
+    // LibraryDescriptor without duplicating any binding data. The caller must
+    // keep the registry alive while consuming the SemanticInfo.
+    const st2cpp::library::LibraryRegistry* libraryRegistry = nullptr;
     
     bool empty() const { return symbolTable == nullptr; }
 };

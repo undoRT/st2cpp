@@ -1,0 +1,47 @@
+{
+  "$schemaVersion": "1.0",
+
+  "id": "corelib",
+  "name": "CoreLib",
+  "version": "1.0.0",
+  "description": "Libreria di base: definisce il tipo Range usato come dipendenza da examplelib.",
+
+  "cppBinding": {
+    "include": "corelib/corelib.hpp",
+    "namespace": "corelib"
+  },
+
+  "types": [
+    {
+      "name": "Range",
+      "kind": "struct",
+
+      "fields": [
+        {
+          "name": "Min",
+          "type": {
+            "kind": "primitive",
+            "name": "REAL"
+          },
+          "initValue": {
+            "kind": "scalar",
+            "value": 0.0
+          }
+        },
+        {
+          "name": "Max",
+          "type": {
+            "kind": "primitive",
+            "name": "REAL"
+          },
+          "initValue": {
+            "kind": "scalar",
+            "value": 100.0
+          }
+        }
+      ],
+
+      "documentation": "Intervallo minimo/massimo con estremi reali."
+    }
+  ]
+}

@@ -18,7 +18,7 @@
 namespace st2cpp::semantic {
 
 /**
- * @brief Visitor for declaration phase (Sprint 2)
+ * @brief Visitor for declaration phase
  * 
  * First pass: registers all declarations in symbol table.
  * Handles: user-defined types, interfaces, POU, variables, methods.
@@ -63,6 +63,7 @@ private:
     void registerEnumType(const EnumType& et);
     void registerStructHeader(const StructType& st);
     void registerStructBody(const StructType& st);
+    void registerTypeAlias(const TypeAlias& alias);
     
     // --- Interface Registration (two-pass: header then body) ---
     void registerInterfaceHeader(const Interface& iface);
@@ -82,10 +83,11 @@ private:
     void registerMethods(const std::vector<Method>& methods, SymbolId fbScopeId);
     void registerMethod(const Method& method, SymbolId fbScopeId, SymbolId fbSymbolId);
     
-    // --- Inheritance Resolution ---
+// --- Inheritance Resolution ---
     void resolveInheritance();
-    SymbolId resolveTypeName(const std::string& name);
+    TypeId resolveTypeName(const std::string& name);
     bool wouldCreateCycle(SymbolId derived, SymbolId base);
+    TypeId resolveNamedTypeSilent(const std::string& name);
     
 // --- Topological Sorting ---
     void computeTopoOrders();
@@ -98,7 +100,7 @@ private:
     SymbolId valuePayloadSymbol(TypeId typeId) const;
     
     // --- Type Resolution ---
-    TypeId resolveTypeRef(const TypeRef& typeRef, uint32_t line = 0);
+    TypeId resolveTypeRef(const TypeRef& typeRef, uint32_t line = 0, uint32_t col = 0);
     TypeId resolveBaseType(BaseType baseType);
     std::string baseTypeName(BaseType baseType);
     TypeId resolveNamedType(const std::string& name, uint32_t line = 0);

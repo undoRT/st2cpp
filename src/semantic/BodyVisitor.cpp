@@ -11,6 +11,7 @@
 #include "semantic/SymbolTable.h"
 #include "semantic/Diagnostics.h"
 #include "semantic/TypeSystem.h"
+#include "semantic/IecTime.h"
 using namespace st2cpp::semantic::TypeChecker;
 #include "ast/AST.h"
 #include <algorithm>
@@ -231,14 +232,14 @@ void BodyVisitor::visitStatementList(const std::vector<std::shared_ptr<Stmt>>& s
  */
 void BodyVisitor::visitStatement(const Stmt& stmt)
 {
-   if (auto p = std::get_if<AssignStmt>(&stmt.node)) {
-      visitAssignStmt(*p, stmt.line);
-   } else if (auto p = std::get_if<ExprStmt>(&stmt.node)) {
+if (auto p = std::get_if<AssignStmt>(&stmt.node)) {
+      visitAssignStmt(*p, stmt.line, stmt.col);
+    } else if (auto p = std::get_if<ExprStmt>(&stmt.node)) {
       visitExprStmt(*p);
-   } else if (auto p = std::get_if<IfStmt>(&stmt.node)) {
+    } else if (auto p = std::get_if<IfStmt>(&stmt.node)) {
       visitIfStmt(*p);
-   } else if (auto p = std::get_if<ForStmt>(&stmt.node)) {
-      visitForStmt(*p, stmt.line);
+    } else if (auto p = std::get_if<ForStmt>(&stmt.node)) {
+      visitForStmt(*p, stmt.line, stmt.col);
    } else if (auto p = std::get_if<WhileStmt>(&stmt.node)) {
       visitWhileStmt(*p);
    } else if (auto p = std::get_if<RepeatStmt>(&stmt.node)) {
@@ -264,7 +265,7 @@ void BodyVisitor::visitStatement(const Stmt& stmt)
  * @param stmt The assignment statement to visit
  * @param line The source line of the assignment
  */
-void BodyVisitor::visitAssignStmt(const AssignStmt& stmt, uint32_t line)
+void BodyVisitor::visitAssignStmt(const AssignStmt& stmt, uint32_t line, uint32_t col)
 {
    visitExpression(*stmt.lhs);
    visitExpression(*stmt.rhs);
@@ -275,7 +276,7 @@ void BodyVisitor::visitAssignStmt(const AssignStmt& stmt, uint32_t line)
    const TypeInfo* rhsType = symTab_.getType(rhsId);
 
    if (lhsType && rhsType) {
-      bool legacyOk = TypeChecker::checkAssignment(lhsType, rhsType, makeLocation(line), diag_);
+      bool legacyOk = TypeChecker::checkAssignment(lhsType, rhsType, makeLocation(line, col), diag_);
 
       // IEEE 61131-3 Strict compliance (Fase 6): report IEC implicit-conversion
       // violations as their OWN diagnostic ONLY when (a) strict mode is on AND
@@ -286,7 +287,7 @@ void BodyVisitor::visitAssignStmt(const AssignStmt& stmt, uint32_t line)
          diag_.addError(DiagnosticCode::InvalidAssignment,
                         "strict IEC: " + rhsType->name + " is not implicitly convertible to " + lhsType->name
                            + " (value-losing or cross-family implicit assignment)",
-                        makeLocation(line));
+                        makeLocation(line, col));
       }
    }
 }
@@ -316,7 +317,7 @@ void BodyVisitor::visitIfStmt(const IfStmt& stmt)
          if (condType && !condType->isBitType) {
             diag_.addError(DiagnosticCode::NonBooleanCondition,
                            "IF condition must be BOOL, got " + condType->name,
-                           makeLocation(branch.condition->line));
+                           makeLocation(branch.condition->line, branch.condition->col));
          }
       }
       visitStatementList(branch.body);
@@ -331,7 +332,7 @@ void BodyVisitor::visitIfStmt(const IfStmt& stmt)
  * @param stmt The FOR statement to visit
  * @param line The source line of the FOR statement
  */
-void BodyVisitor::visitForStmt(const ForStmt& stmt, uint32_t line)
+void BodyVisitor::visitForStmt(const ForStmt& stmt, uint32_t line, uint32_t col)
 {
    Context& ctx = contextStack_.back();
    int prevDepth = ctx.loopDepth;
@@ -359,13 +360,13 @@ void BodyVisitor::visitForStmt(const ForStmt& stmt, uint32_t line)
                diag_.addError(DiagnosticCode::InvalidForControlVariable,
                               "FOR control variable '" + stmt.var + "' type " + varType->name + " is not compatible with FROM expression "
                                  + fromType->name,
-                              makeLocation(line));
+                              makeLocation(line, col));
             }
             if (toType && varType && !varType->isAssignableFrom(toType)) {
                diag_.addError(DiagnosticCode::ForBoundsTypeMismatch,
                               "FOR control variable '" + stmt.var + "' type " + varType->name + " is not compatible with TO expression "
                                  + toType->name,
-                              makeLocation(line));
+                              makeLocation(line, col));
             }
             if (stmt.by) {
                TypeId byId = stmt.by->resolvedTypeId;
@@ -373,7 +374,7 @@ void BodyVisitor::visitForStmt(const ForStmt& stmt, uint32_t line)
                if (byType && varType && !varType->isAssignableFrom(byType)) {
                   diag_.addError(DiagnosticCode::ForBoundsTypeMismatch,
                                  "FOR step expression type " + byType->name + " is not compatible with control variable " + varType->name,
-                                 makeLocation(line));
+                                 makeLocation(line, col));
                }
             }
          }
@@ -404,7 +405,7 @@ void BodyVisitor::visitWhileStmt(const WhileStmt& stmt)
    if (condType && !condType->isBitType) {
       diag_.addError(DiagnosticCode::NonBooleanCondition,
                      "WHILE condition must be BOOL, got " + condType->name,
-                     makeLocation(stmt.condition->line));
+                     makeLocation(stmt.condition->line, stmt.condition->col));
    }
    visitStatementList(stmt.body);
 
@@ -432,7 +433,7 @@ void BodyVisitor::visitRepeatStmt(const RepeatStmt& stmt)
    if (condType && !condType->isBitType) {
       diag_.addError(DiagnosticCode::NonBooleanCondition,
                      "REPEAT condition must be BOOL, got " + condType->name,
-                     makeLocation(stmt.condition->line));
+                     makeLocation(stmt.condition->line, stmt.condition->col));
    }
 
    ctx.loopDepth = prevDepth;
@@ -463,7 +464,7 @@ void BodyVisitor::visitCaseStmt(const CaseStmt& stmt)
             if (selType && lowType && !selType->isCompatibleWith(lowType, CompatContext::Comparison)) {
                diag_.addError(DiagnosticCode::CaseSelectorTypeMismatch,
                               "CASE label type " + lowType->name + " is not compatible with selector " + selType->name,
-                              makeLocation(val.low->line));
+                              makeLocation(val.low->line, val.low->col));
             }
          }
          if (val.high) {
@@ -473,7 +474,7 @@ void BodyVisitor::visitCaseStmt(const CaseStmt& stmt)
             if (selType && highType && !selType->isCompatibleWith(highType, CompatContext::Comparison)) {
                diag_.addError(DiagnosticCode::CaseSelectorTypeMismatch,
                               "CASE label type " + highType->name + " is not compatible with selector " + selType->name,
-                              makeLocation(val.high->line));
+                              makeLocation(val.high->line, val.high->col));
             }
          }
       }
@@ -503,21 +504,21 @@ void BodyVisitor::visitReturnStmt(const ReturnStmt& stmt)
       if (!ctx.inFunctionBody && ctx.returnTypeId == 0) {
          diag_.addError(DiagnosticCode::InvalidReturnType,
                         "RETURN with value in procedure/FB without return type",
-                        makeLocation(stmt.expr->line));
+                        makeLocation(stmt.expr->line, stmt.expr->col));
       } else if (ctx.returnTypeId != 0 && exprType) {
          const TypeInfo* returnType = symTab_.getType(ctx.returnTypeId);
          if (returnType && exprType) {
             if (!returnType->isAssignableFrom(exprType)) {
                diag_.addError(DiagnosticCode::InvalidReturnType,
                               "RETURN type " + exprType->name + " is not compatible with function return type " + returnType->name,
-                              makeLocation(stmt.expr->line));
+                              makeLocation(stmt.expr->line, stmt.expr->col));
             } else if (strict_ && !returnType->isImplicitlyConvertibleFrom(exprType)) {
                // Fase 6 IEC strictness: permissive-OK but non-implicit
                // (narrowing/cross-family) return conversions.
                diag_.addError(DiagnosticCode::InvalidReturnType,
                               "strict IEC: " + exprType->name + " is not implicitly convertible to function return type "
                                  + returnType->name,
-                              makeLocation(stmt.expr->line));
+                              makeLocation(stmt.expr->line, stmt.expr->col));
             }
          }
       }
@@ -591,13 +592,20 @@ void BodyVisitor::visitExpression(Expr& expr)
          }
       } else {
          unresolvedCount_++;
-         reportError(DiagnosticCode::UndeclaredIdentifier, "unknown identifier '" + p->name + "'", makeLocation(expr.line));
+         reportError(DiagnosticCode::UndeclaredIdentifier, "unknown identifier '" + p->name + "'", makeLocation(expr.line, expr.col));
       }
    } else if (auto p = std::get_if<LiteralExpr>(&expr.node)) {
       TypeId typeId = resolveLiteralType(*p);
       expr.resolvedTypeId = typeId;
       if (typeId != 0) {
          resolvedCount_++;
+      }
+      if (p->suffix == "TIME") {
+         if (!iecTimeLiteralToMilliseconds(p->value)) {
+            reportError(DiagnosticCode::InvalidTimeLiteral,
+                        "invalid TIME literal '" + p->value + "' (expected e.g. T#5s, T#100ms, T#1d2h)",
+                        makeLocation(expr.line, expr.col));
+         }
       }
    } else if (auto p = std::get_if<BoolLitExpr>(&expr.node)) {
       TypeId boolTypeId = symTab_.getTypeIdByName("BOOL");
@@ -686,7 +694,7 @@ void BodyVisitor::visitMemberExpr(Expr& expr)
    TypeId objTypeId = member.object->resolvedTypeId;
    const TypeInfo* objType = symTab_.getType(objTypeId);
    if (objType) {
-      SourceLocation loc = makeLocation(expr.line);
+      SourceLocation loc = makeLocation(expr.line, expr.col);
       MemberResult result = TypeChecker::checkMemberAccess(*objType, member.member, symTab_, diag_, loc);
       if (result.symbolId != 0) {
          member.symbolId = result.symbolId;
@@ -716,7 +724,7 @@ void BodyVisitor::visitIndexExpr(Expr& expr)
       visitExpression(*idx);
    }
 
-   SourceLocation loc = makeLocation(expr.line);
+   SourceLocation loc = makeLocation(expr.line, expr.col);
    TypeId curTypeId = index.array->resolvedTypeId;
    const TypeInfo* curType = symTab_.getType(curTypeId);
 
@@ -829,7 +837,7 @@ void BodyVisitor::visitBinaryExpr(Expr& expr)
    const TypeInfo* rightType = symTab_.getType(rightId);
 
    if (leftType && rightType) {
-      TypeId resultType = TypeChecker::checkBinaryOp(bin.op, leftType, rightType, makeLocation(expr.line), diag_, symTab_);
+      TypeId resultType = TypeChecker::checkBinaryOp(bin.op, leftType, rightType, makeLocation(expr.line, expr.col), diag_, symTab_);
       expr.resolvedTypeId = resultType;
 
       // Fase 6 IEC strictness: operands of an operator must be implicitly
@@ -843,7 +851,7 @@ void BodyVisitor::visitBinaryExpr(Expr& expr)
          diag_.addError(DiagnosticCode::InvalidBinaryOperands,
                         "strict IEC: operands " + leftType->name + " and " + rightType->name + " of '" + bin.op
                            + "' are not implicitly convertible to each other",
-                        makeLocation(expr.line));
+                        makeLocation(expr.line, expr.col));
       }
    }
 }
@@ -863,7 +871,7 @@ void BodyVisitor::visitUnaryExpr(Expr& expr)
    const TypeInfo* operandType = symTab_.getType(operandId);
 
    if (operandType) {
-      TypeId resultType = TypeChecker::checkUnaryOp(un.op, operandType, makeLocation(expr.line), diag_, symTab_);
+      TypeId resultType = TypeChecker::checkUnaryOp(un.op, operandType, makeLocation(expr.line, expr.col), diag_, symTab_);
       expr.resolvedTypeId = resultType;
    }
 }
@@ -914,7 +922,7 @@ void BodyVisitor::visitCallExpr(Expr& expr)
             diag_.addError(DiagnosticCode::WrongArgumentCount,
                            "type conversion '" + calleeSym->name + "' requires exactly 1 argument, got "
                               + std::to_string(call.args.size()),
-                           makeLocation(expr.line));
+                           makeLocation(expr.line, expr.col));
          } else {
             expr.resolvedTypeId = calleeSym->typeId;
          }
@@ -929,7 +937,7 @@ void BodyVisitor::visitCallExpr(Expr& expr)
       for (SymbolId paramId : calleeSym->params) {
          paramSymbols.push_back(paramId);
       }
-      SourceLocation loc = makeLocation(expr.line);
+      SourceLocation loc = makeLocation(expr.line, expr.col);
       bool callOk = TypeChecker::checkCallArguments(paramSymbols, call.args, loc, diag_, symTab_, isFbCall);
 
       // Fase 6 IEC strictness: report permissive-OK arguments that are not
@@ -1089,14 +1097,17 @@ SymbolId BodyVisitor::resolveIdentifier(const std::string& name)
  * @brief Look up an identifier through the context scope chain and the global scope.
  * @details Walks the innermost-to-outermost contexts and their parent scopes,
  * then the base-class chain of the enclosing FB, and finally falls back to a
- * recursive symbol table lookup.
+ * recursive symbol table lookup followed by the external (library) scope.
+ * Project-local identifiers always win over external library symbols, which are
+ * only reachable when no local/global declaration exists.
  * @param name The identifier name to look up
  * @return The resolved SymbolId, or 0 when not found
  */
 SymbolId BodyVisitor::lookupInScopeChain(const std::string& name) const
 {
    if (contextStack_.empty()) {
-      return symTab_.lookupRecursive(name);
+      SymbolId result = symTab_.lookupRecursive(name);
+      return (result != 0) ? result : symTab_.lookupExternal(name);
    }
 
    for (auto it = contextStack_.rbegin(); it != contextStack_.rend(); ++it) {
@@ -1155,7 +1166,10 @@ SymbolId BodyVisitor::lookupInScopeChain(const std::string& name) const
       }
    }
 
-   return symTab_.lookupRecursive(name);
+   // Last resort: recursive lookup, then the external (library) scope so that
+   // library functions/FBs/variables resolve only when nothing local matches.
+   SymbolId result = symTab_.lookupRecursive(name);
+   return (result != 0) ? result : symTab_.lookupExternal(name);
 }
 
 // --- Literal Type Resolution ---
@@ -1233,7 +1247,7 @@ SourceLocation BodyVisitor::makeLocation(uint32_t line, uint32_t col) const
    SourceLocation loc;
    loc.line = line;
    loc.column = col;
-   loc.fileName = "<input>";
+   loc.fileName = diag_.sourceFileName();
    return loc;
 }
 

@@ -1,0 +1,9 @@
+{
+  "$schemaVersion": "1.0",
+  "libraries": [
+    {
+      "id": "myLib",
+      "path": "../../library/data/does_not_exist.json"
+    }
+  ]
+}

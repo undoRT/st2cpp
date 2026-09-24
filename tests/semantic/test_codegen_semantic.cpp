@@ -903,3 +903,85 @@ auto files = gen.generateModularProject(tu, "/tmp/st2cpp_struct_fb_later");
    EXPECT_NE(structPos, std::string::npos);
    EXPECT_LT(fbPos, structPos) << "FB_COUNTER must be defined before S_REPORT:\n" << all;
 }
+
+// ============================================================================
+// Named type aliases and array type aliases must lower to the canonical C++
+// type in the semantic-driven codegen (Issue: alias names were emitted verbatim).
+// ============================================================================
+TEST_F(CodegenSemanticTest, TypeAliasAndArrayAliasLowerToCanonicalType)
+{
+   const std::string st = R"(
+      TYPE MyInt : INT; END_TYPE
+      TYPE MyReal : REAL; END_TYPE
+      TYPE MyCounter : ARRAY[0..9] OF INT; END_TYPE
+      TYPE MyGrid : ARRAY[1..3, 1..4] OF REAL; END_TYPE
+      TYPE Sensor : STRUCT
+         id : MyInt;
+         value : MyReal;
+      END_STRUCT END_TYPE
+      TYPE SensorArr : ARRAY[0..5] OF Sensor; END_TYPE
+
+      PROGRAM Test
+         VAR
+            a : MyInt := 42;
+            b : MyCounter;
+            g : MyGrid;
+            sa : SensorArr;
+            s : Sensor;
+         END_VAR
+         b[0] := a;
+         g[2, 3] := 1.5;
+         sa[0].id := a;
+         s.id := a;
+      END_PROGRAM
+   )";
+
+   auto code = TestHelper::generateFromSTWithSemantics(st);
+
+   // Program variables are emitted in the header in the semantic path.
+   // Array alias of a scalar -> STArray<Int16, 0, 9>.
+   expectSource(code.header, R"(STArray<Int16, 0, 9>\s+B)");
+   // 2D array alias -> nested STArray.
+   expectSource(code.header, R"(STArray<STArray<Float, 1, 4>, 1, 3>\s+G)");
+   // Array of struct alias -> STArray<SENSOR, 0, 5>.
+   expectSource(code.header, R"(STArray<SENSOR, 0, 5>\s+SA)");
+   // Alias-to-scalar member inside the struct keeps the canonical type.
+   expectSource(code.header, R"(Int16\s+ID)");
+   // Struct member accesses through the alias and the real struct.
+   expectSource(code.source, R"(B\[0\]\s*=\s*A)");
+   expectSource(code.source, R"(SA\[0\]\.ID\s*=\s*A)");
+   expectSource(code.source, R"(S\.ID\s*=\s*A)");
+
+   // No alias spelling must leak into the generated code.
+   EXPECT_EQ(code.source.find("MYCOUNTER"), std::string::npos)
+       << "array alias name must not be emitted verbatim";
+   EXPECT_EQ(code.header.find("MYCOUNTER"), std::string::npos)
+       << "array alias name must not be emitted verbatim";
+}
+
+// ============================================================================
+// FOR loops reusing a declared control variable must NOT declare it again with
+// `auto`, keeping the existing variable; undeclared counters still get `auto`.
+// ============================================================================
+TEST_F(CodegenSemanticTest, ForLoopReusesDeclaredControlVariable)
+{
+   const std::string st = R"(
+      PROGRAM Test
+         VAR
+            i : INT;
+            sum : INT := 0;
+         END_VAR
+         sum := 0;
+         FOR i := 0 TO 10 BY 2 DO
+            sum := sum + i;
+         END_FOR
+      END_PROGRAM
+   )";
+
+   auto code = TestHelper::generateFromSTWithSemantics(st);
+
+   // Declared control variable: no `auto` (would shadow the IEC variable).
+   expectSource(code.source, R"(for\s*\(\s*I\s*=\s*0\s*;\s*I\s*<=\s*10\s*;\s*I\s*\+=\s*2\s*\))");
+   EXPECT_EQ(code.source.find("for (auto I"), std::string::npos)
+       << "declared control variable must not be redeclared with auto";
+}

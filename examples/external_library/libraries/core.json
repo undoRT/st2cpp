@@ -1,0 +1,51 @@
+{
+  "$schemaVersion": "1.0",
+
+  "id": "core",
+  "name": "CoreLib",
+  "version": "1.0.0",
+  "description": "Biblioteca core: tipi elementari di supporto condivisi tra le librerie di progetto.",
+
+  "cppBinding": {
+    "include": "core/core.hpp",
+    "namespace": "core"
+  },
+
+  "types": [
+    {
+      "name": "Range",
+      "kind": "struct",
+
+      "cppBinding": {
+        "symbol": "Range"
+      },
+
+      "fields": [
+        {
+          "name": "Min",
+          "type": {
+            "kind": "primitive",
+            "name": "REAL"
+          },
+          "initValue": {
+            "kind": "scalar",
+            "value": 0.0
+          }
+        },
+        {
+          "name": "Max",
+          "type": {
+            "kind": "primitive",
+            "name": "REAL"
+          },
+          "initValue": {
+            "kind": "scalar",
+            "value": 100.0
+          }
+        }
+      ],
+
+      "documentation": "Intervallo minimo/massimo di un segnale."
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "$schemaVersion": "1.0",
+  "libraries": [
+    {
+      "id": "corelib",
+      "version": "not-a-version",
+      "path": "../../library/data/corelib.json"
+    }
+  ]
+}

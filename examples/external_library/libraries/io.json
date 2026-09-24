@@ -1,0 +1,269 @@
+{
+  "$schemaVersion": "1.0",
+
+  "id": "io",
+  "name": "AnalogIOLib",
+  "version": "1.0.0",
+  "description": "Libreria di acquisizione/elaborazione ingressi analogici. Dipende da ../../core::Range.",
+
+  "dependencies": [
+    {
+      "id": "core",
+      "version": "^1.0.0"
+    }
+  ],
+
+  "cppBinding": {
+    "include": "io/io.hpp",
+    "namespace": "io"
+  },
+
+  "constants": [
+    {
+      "name": "MAX_AI_CHANNELS",
+      "type": {
+        "kind": "primitive",
+        "name": "INT"
+      },
+      "value": 16,
+      "cppBinding": {
+        "symbol": "kMaxAiChannels"
+      },
+      "documentation": "Numero di ingressi analogici supportati dalla libreria."
+    }
+  ],
+
+  "enums": [
+    {
+      "name": "AlarmClass",
+
+      "cppBinding": {
+        "symbol": "AlarmClass"
+      },
+
+      "baseType": {
+        "kind": "primitive",
+        "name": "INT"
+      },
+
+      "members": [
+        { "name": "NONE", "value": 0 },
+        { "name": "WARNING", "value": 1 },
+        { "name": "FAULT", "value": 2 }
+      ],
+
+      "initValue": {
+        "kind": "scalar",
+        "value": "NONE"
+      },
+
+      "documentation": "Classe di allarme di un canale analogico."
+    }
+  ],
+
+  "types": [
+    {
+      "name": "AnalogChannel",
+      "kind": "struct",
+
+      "cppBinding": {
+        "symbol": "AnalogChannel"
+      },
+
+      "fields": [
+        {
+          "name": "Value",
+          "type": {
+            "kind": "primitive",
+            "name": "REAL"
+          },
+          "initValue": {
+            "kind": "scalar",
+            "value": 0.0
+          }
+        },
+        {
+          "name": "Enabled",
+          "type": {
+            "kind": "primitive",
+            "name": "BOOL"
+          },
+          "initValue": {
+            "kind": "scalar",
+            "value": false
+          }
+        },
+        {
+          "name": "Range",
+          "type": {
+            "kind": "named",
+            "library": "core",
+            "name": "Range"
+          },
+          "documentation": "Tipo definito dalla libreria 'core' (dipendenza dichiarata)."
+        }
+      ],
+
+      "documentation": "Rappresenta un singolo ingresso analogico acquisito."
+    }
+  ],
+
+  "globalVariables": [
+    {
+      "name": "gAlarm",
+      "type": {
+        "kind": "named",
+        "name": "AlarmClass"
+      },
+      "scope": "global",
+      "constant": false,
+
+      "cppBinding": {
+        "symbol": "g_alarm"
+      },
+
+      "initValue": {
+        "kind": "scalar",
+        "value": "NONE"
+      },
+
+      "documentation": "Allarme attivo correntemente."
+    }
+  ],
+
+  "functions": [
+    {
+      "name": "ScaleAnalog",
+
+      "cppBinding": {
+        "symbol": "scale_analog",
+        "kind": "freeFunction"
+      },
+
+      "returnType": {
+        "kind": "primitive",
+        "name": "REAL"
+      },
+
+      "parameters": [
+        {
+          "name": "Value",
+          "type": {
+            "kind": "primitive",
+            "name": "REAL"
+          },
+          "direction": "IN"
+        },
+        {
+          "name": "Min",
+          "type": {
+            "kind": "primitive",
+            "name": "REAL"
+          },
+          "direction": "IN",
+          "initValue": {
+            "kind": "scalar",
+            "value": 0.0
+          }
+        },
+        {
+          "name": "Max",
+          "type": {
+            "kind": "primitive",
+            "name": "REAL"
+          },
+          "direction": "IN",
+          "initValue": {
+            "kind": "scalar",
+            "value": 100.0
+          }
+        }
+      ],
+
+      "documentation": "Limita Value all'intervallo Min..Max."
+    },
+    {
+      "name": "NormalizeRange",
+
+      "cppBinding": {
+        "symbol": "normalize",
+        "kind": "staticMethod",
+        "owner": "io::MathUtils"
+      },
+
+      "returnType": {
+        "kind": "primitive",
+        "name": "REAL"
+      },
+
+      "parameters": [
+        {
+          "name": "Value",
+          "type": {
+            "kind": "primitive",
+            "name": "REAL"
+          },
+          "direction": "IN"
+        }
+      ],
+
+      "documentation": "Normalizza un valore nell'intervallo 0..1 (metodo statico C++)."
+    }
+  ],
+
+  "functionBlocks": [
+    {
+      "name": "Averager",
+
+      "cppBinding": {
+        "instanceType": "io::AveragerInstance",
+        "call": "process"
+      },
+
+      "parameters": [
+        {
+          "name": "Enable",
+          "type": {
+            "kind": "primitive",
+            "name": "BOOL"
+          },
+          "direction": "IN",
+          "initValue": {
+            "kind": "scalar",
+            "value": false
+          }
+        },
+        {
+          "name": "Sample",
+          "type": {
+            "kind": "primitive",
+            "name": "REAL"
+          },
+          "direction": "IN",
+          "initValue": {
+            "kind": "scalar",
+            "value": 0.0
+          }
+        },
+        {
+          "name": "Avg",
+          "type": {
+            "kind": "primitive",
+            "name": "REAL"
+          },
+          "direction": "OUT"
+        },
+        {
+          "name": "Valid",
+          "type": {
+            "kind": "primitive",
+            "name": "BOOL"
+          },
+          "direction": "OUT"
+        }
+      ],
+
+      "documentation": "Media mobile dell'ultimo campione acquisito."
+    }
+  ]
+}

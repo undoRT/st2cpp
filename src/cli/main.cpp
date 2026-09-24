@@ -17,6 +17,8 @@
 #include "codegen/CodeGenerator.h"
 #include "semantic/SemanticAnalyzer.h"
 #include "semantic/SemanticInfo.h"
+#include "project/ProjectConfigLoader.h"
+#include "project/ProjectLoader.h"
 #include "version.hpp"
 #include <iostream>
 #include <fstream>
@@ -40,14 +42,25 @@ static bool strictMode = false;
  * inference. Only `--strict` (explicitly requested) enables generation blocking
  * on semantic errors, in which case the diagnostics are printed.
  */
-static st2cpp::semantic::SemanticInfo runSemanticAnalysis(const TranslationUnit& tu)
+static st2cpp::semantic::SemanticInfo runSemanticAnalysis(
+   const TranslationUnit& tu, const st2cpp::library::LibraryRegistry* registry = nullptr,
+   const std::string& sourceName = "", const std::string& sourceText = "")
 {
    auto strictness = strictMode ? st2cpp::semantic::SemanticAnalyzer::Strictness::Strict
                                 : st2cpp::semantic::SemanticAnalyzer::Strictness::Permissive;
    st2cpp::semantic::SemanticAnalyzer analyzer;
-   auto info = analyzer.analyze(tu, strictness);
+   if (!sourceName.empty()) {
+      analyzer.setSourceName(sourceName);
+   }
+   st2cpp::semantic::SemanticInfo info;
+   if (registry != nullptr && registry->size() > 0) {
+      info = analyzer.analyze(tu, *registry, strictness);
+   } else {
+      info = analyzer.analyze(tu, strictness);
+   }
    if (verbose || strictMode) {
       if (info.diagnostics.totalCount() > 0) {
+         info.diagnostics.setSourceText(sourceText);
          info.diagnostics.print(std::cerr);
       }
       std::cerr << "Semantic analysis: " << info.diagnostics.errorCount() << " errors, " << info.diagnostics.warningCount()
@@ -199,6 +212,7 @@ static void printUsage(const char* prog)
                 "                      (default: permissive, errors never block generation)\n"
                 "  --caseSensitive      Preserve original case (default: convert to uppercase)\n"
                 "  --workspace <path>   Process all .st files in workspace (recursive)\n"
+                "  --ext-libs <file>    Project JSON listing the external libraries to load\n"
                 "  --project-style      Generate modular project structure (separate files for each FB)\n"
                 "  --output-dir <dir>   Output directory (default: generated)\n"
                 "  --pi-auto            Auto-detect Process Image sizes (default)\n"
@@ -519,6 +533,7 @@ int main(int argc, char* argv[])
    size_t piInputBytes = 1024;
    size_t piOutputBytes = 1024;
    size_t piMarkerBytes = 1024;
+   std::string extLibsConfig;
 
    for (int i = 1; i < argc; ++i) {
       if (std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "--help") == 0) {
@@ -550,6 +565,8 @@ int main(int argc, char* argv[])
       } else if (std::strcmp(argv[i], "--workspace") == 0 && i + 1 < argc) {
          workspaceMode = true;
          workspacePath = argv[++i];
+      } else if (std::strcmp(argv[i], "--ext-libs") == 0 && i + 1 < argc) {
+         extLibsConfig = argv[++i];
       } else if (std::strcmp(argv[i], "--project-style") == 0) {
          projectStyle = true;
       } else if (std::strcmp(argv[i], "--output-dir") == 0 && i + 1 < argc) {
@@ -572,6 +589,38 @@ int main(int argc, char* argv[])
          std::cerr << "Unknown option: " << argv[i] << "\n";
          printUsage(argv[0]);
          return 1;
+      }
+   }
+
+   // ========================================================================
+   // EXTERNAL LIBRARIES (--ext-libs <project.json>)
+   // Loads the project JSON, resolves every declared library descriptor and
+   // builds a LibraryRegistry that semantic analysis feeds into the codegen.
+   // ========================================================================
+   st2cpp::library::LibraryRegistry libraryRegistry;
+   if (!extLibsConfig.empty()) {
+      auto cfgRes = st2cpp::project::ProjectConfigLoader::fromFile(extLibsConfig);
+      if (!cfgRes.ok()) {
+         std::cerr << "Error: invalid project JSON for --ext-libs: " << extLibsConfig << "\n";
+         for (const auto& err : cfgRes.errors) {
+            std::cerr << "  - " << err.toString() << "\n";
+         }
+         return 1;
+      }
+      auto loaded = st2cpp::project::ProjectLoader::load(*cfgRes.config);
+      if (!loaded.ok()) {
+         std::cerr << "Error: cannot load the libraries declared by " << extLibsConfig << "\n";
+         for (const auto& err : loaded.errors) {
+            std::cerr << "  - " << err.toString() << "\n";
+         }
+         return 1;
+      }
+      libraryRegistry = std::move(loaded.registry);
+      if (verbose) {
+         std::cout << "External libraries loaded from " << extLibsConfig << ":\n";
+         for (const auto& id : libraryRegistry.ids()) {
+            std::cout << "  - " << id << "\n";
+         }
       }
    }
 
@@ -669,7 +718,7 @@ int main(int argc, char* argv[])
 
       // Generate modular project
       try {
-         auto semanticInfo = runSemanticAnalysis(mergedTu);
+         auto semanticInfo = runSemanticAnalysis(mergedTu, &libraryRegistry, workspacePath);
 
          if (strictBlocksGeneration(semanticInfo)) {
             std::cerr << "Strict mode: " << semanticInfo.diagnostics.errorCount() << " semantic error(s) block generation.\n";
@@ -766,7 +815,7 @@ int main(int argc, char* argv[])
             std::string headerFilename = baseName + ".hpp";
             std::string sourceFilename = baseName + ".cpp";
 
-            auto semanticInfo = runSemanticAnalysis(tu);
+auto semanticInfo = runSemanticAnalysis(tu, &libraryRegistry, file, readFile(file));
 
             if (strictBlocksGeneration(semanticInfo)) {
                std::cerr << "Strict mode: " << semanticInfo.diagnostics.errorCount() << " semantic error(s) block generation.\n";
@@ -862,7 +911,7 @@ int main(int argc, char* argv[])
       }
       piConfig.autoDetect = autoDetectPI;
 
-      auto semanticInfo = runSemanticAnalysis(tu);
+      auto semanticInfo = runSemanticAnalysis(tu, &libraryRegistry, inputPath, readFile(inputPath));
 
       if (strictBlocksGeneration(semanticInfo)) {
          std::cerr << "Strict mode: " << semanticInfo.diagnostics.errorCount() << " semantic error(s) block generation.\n";

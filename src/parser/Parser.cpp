@@ -146,30 +146,44 @@ TranslationUnit Parser::parseTranslationUnit()
          // Save current position to backtrack if needed
          size_t savedPos = m_pos;
 
-         // Read type name
-         if (!check(TokenType::IDENTIFIER)) {
-            throw error("Expected type name after TYPE");
-         }
-         std::string typeName = peek().text;
-         advance(); // consume type name
+// Read type name
+          if (!check(TokenType::IDENTIFIER)) {
+             throw error("Expected type name after TYPE");
+          }
+          uint32_t aliasLine = peek().line;
+          uint32_t aliasCol = peek().col;
+          std::string typeName = peek().text;
+          advance(); // consume type name
 
-         // Look ahead to determine if it's a STRUCT or ENUM
-         if (check(TokenType::COLON)) {
-            advance(); // consume ':'
-            if (check(TokenType::KW_STRUCT)) {
-               // It is a struct - backtrack and parse as struct
-               m_pos = savedPos;
-               tu.structs.push_back(parseStructType());
-            } else if (check(TokenType::LPAREN)) {
-               // It is an ENUM - backtrack and parse as enum
-               m_pos = savedPos;
-               tu.enums.push_back(parseEnumType());
-            } else {
-               throw error("Expected STRUCT or '(' after TYPE name");
-            }
-         } else {
-            throw error("Expected ':' after type name");
-         }
+// Look ahead to determine if it's a STRUCT or ENUM
+          if (check(TokenType::COLON)) {
+             advance(); // consume ':'
+             if (check(TokenType::KW_STRUCT)) {
+                // It is a struct - backtrack and parse as struct
+                m_pos = savedPos;
+                tu.structs.push_back(parseStructType());
+             } else if (check(TokenType::LPAREN)) {
+                // It is an ENUM - backtrack and parse as enum
+                m_pos = savedPos;
+                tu.enums.push_back(parseEnumType());
+             } else {
+                // Named type alias / named array type:
+                //   TYPE Name : <TypeRef>; END_TYPE
+                // The name and ':' were already consumed; the underlying type
+                // reference (elementary, user type or ARRAY[...]) is parsed
+                // here and stored as a TypeAlias.
+TypeAlias alias;
+                 alias.name = typeName;
+                 alias.line = aliasLine;
+                 alias.col = aliasCol;
+                 alias.type = parseTypeRef();
+                expect(TokenType::SEMICOLON, "Expected ';' at the end of the type alias");
+                expect(TokenType::KW_END_TYPE, "Expected END_TYPE after type alias");
+                tu.typeAliases.push_back(std::move(alias));
+             }
+          } else {
+             throw error("Expected ':' after type name");
+          }
       } else {
          tu.pous.push_back(parsePOU());
       }
@@ -190,6 +204,7 @@ POU Parser::parsePOU()
 {
    POU pou;
    pou.line = peek().line;
+   pou.col = peek().col;
 
    if (match(TokenType::KW_FUNCTION_BLOCK)) {
       pou.kind = POUKind::FUNCTION_BLOCK;
@@ -294,6 +309,8 @@ POU Parser::parsePOU()
 StructType Parser::parseStructType()
 {
    StructType st;
+   st.line = peek().line;
+   st.col = peek().col;
    st.name = expect(TokenType::IDENTIFIER, "Expected type name after TYPE").text;
 
    expect(TokenType::COLON, "Expected ':' after type name");
@@ -301,7 +318,8 @@ StructType Parser::parseStructType()
 
    while (!check(TokenType::KW_END_STRUCT) && !atEnd()) {
       std::vector<std::string> names;
-      names.push_back(expect(TokenType::IDENTIFIER, "Expected member name").text);
+      Token memberTok = expect(TokenType::IDENTIFIER, "Expected member name");
+      names.push_back(memberTok.text);
       while (match(TokenType::COMMA)) {
          names.push_back(expect(TokenType::IDENTIFIER, "Expected member name").text);
       }
@@ -317,7 +335,10 @@ StructType Parser::parseStructType()
       expect(TokenType::SEMICOLON, "Expected ';' after member declaration");
 
       for (const auto& name : names) {
-         st.members.push_back({name, ty, init});
+         StructMember m{name, ty, init};
+         m.line = memberTok.line;
+         m.col = memberTok.col;
+         st.members.push_back(m);
       }
    }
 
@@ -343,6 +364,8 @@ StructType Parser::parseStructType()
 EnumType Parser::parseEnumType()
 {
    EnumType et;
+   et.line = peek().line;
+   et.col = peek().col;
    et.name = expect(TokenType::IDENTIFIER, "Expected type name after TYPE").text;
 
    expect(TokenType::COLON, "Expected ':' after type name");
@@ -351,7 +374,10 @@ EnumType Parser::parseEnumType()
    if (!check(TokenType::RPAREN)) {
       do {
          EnumEnumerator enumerator;
-         enumerator.name = expect(TokenType::IDENTIFIER, "Expected enumerator name").text;
+         Token enumTok = expect(TokenType::IDENTIFIER, "Expected enumerator name");
+         enumerator.name = enumTok.text;
+         enumerator.line = enumTok.line;
+         enumerator.col = enumTok.col;
          if (match(TokenType::OP_ASSIGN)) {
             enumerator.value = parseExpr();
          }
@@ -385,6 +411,7 @@ Method Parser::parseMethod()
 {
    Method method;
    method.line = peek().line;
+   method.col = peek().col;
 
    expect(TokenType::KW_METHOD, "Expected METHOD");
 
@@ -495,6 +522,7 @@ Interface Parser::parseInterface()
 {
    Interface iface;
    iface.line = peek().line;
+   iface.col = peek().col;
 
    expect(TokenType::KW_INTERFACE, "Expected INTERFACE");
    iface.name = expect(TokenType::IDENTIFIER, "Expected interface name").text;
@@ -537,6 +565,7 @@ VarSection Parser::parseMethodVarSection(VarKind kind)
       std::vector<std::string> names;
       Token nameTok = expect(TokenType::IDENTIFIER, "Expected variable name");
       uint32_t declLine = nameTok.line;
+      uint32_t declCol = nameTok.col;
       names.push_back(nameTok.text);
       while (match(TokenType::COMMA)) {
          names.push_back(expect(TokenType::IDENTIFIER, "Expected variable name").text);
@@ -557,6 +586,7 @@ VarSection Parser::parseMethodVarSection(VarKind kind)
          d.type = ty;
          d.initialValue = init;
          d.line = declLine;
+         d.col = declCol;
          sec.decls.push_back(std::move(d));
       }
    }
@@ -621,14 +651,15 @@ VarSection Parser::parseVarSection(VarKind kind)
    sec.kind = kind;
 
    // Consume optional CONSTANT / RETAIN modifier
-   match(TokenType::KW_CONSTANT);
-   match(TokenType::KW_RETAIN);
+   const bool isConstant = match(TokenType::KW_CONSTANT);
+   const bool isRetain = match(TokenType::KW_RETAIN);
 
    while (!check(TokenType::KW_END_VAR) && !atEnd()) {
       // Parse one or more names
       std::vector<std::string> names;
       Token nameTok = expect(TokenType::IDENTIFIER, "Expected variable name");
       uint32_t declLine = nameTok.line;
+      uint32_t declCol = nameTok.col;
       names.push_back(nameTok.text);
       while (match(TokenType::COMMA)) {
          names.push_back(expect(TokenType::IDENTIFIER, "Expected variable name").text);
@@ -668,8 +699,11 @@ VarSection Parser::parseVarSection(VarKind kind)
          d.name = nm;
          d.type = ty;
          d.initialValue = init;
+         d.isConstant = isConstant;
+         d.isRetain = isRetain;
          d.atAddress = atAddr;
          d.line = declLine;
+         d.col = declCol;
          sec.decls.push_back(std::move(d));
       }
    }
@@ -695,14 +729,15 @@ VarSection Parser::parseGlobalVarSection()
    expect(TokenType::KW_VAR_GLOBAL, "Expected VAR_GLOBAL");
 
    // Optional modifiers
-   match(TokenType::KW_CONSTANT);
-   match(TokenType::KW_RETAIN);
+   const bool isConstant = match(TokenType::KW_CONSTANT);
+   const bool isRetain = match(TokenType::KW_RETAIN);
 
    while (!check(TokenType::KW_END_VAR) && !atEnd()) {
       // Parse variable names
       std::vector<std::string> names;
       Token nameTok = expect(TokenType::IDENTIFIER, "Expected variable name");
       uint32_t declLine = nameTok.line;
+      uint32_t declCol = nameTok.col;
       names.push_back(nameTok.text);
       while (match(TokenType::COMMA)) {
          names.push_back(expect(TokenType::IDENTIFIER, "Expected variable name").text);
@@ -742,8 +777,11 @@ VarSection Parser::parseGlobalVarSection()
          d.name = nm;
          d.type = ty;
          d.initialValue = init;
+         d.isConstant = isConstant;
+         d.isRetain = isRetain;
          d.atAddress = atAddr;
          d.line = declLine;
+         d.col = declCol;
          sec.decls.push_back(std::move(d));
       }
    }
@@ -991,7 +1029,7 @@ TypeRef Parser::parseBaseTypeRef()
  */
 std::shared_ptr<Expr> Parser::parseArrayInitializer()
 {
-   uint32_t ln = peek().line;
+   uint32_t ln = peek().line; uint32_t col = peek().col;
    expect(TokenType::LBRACKET, "Expected '[' for array initializer");
 
    std::vector<std::shared_ptr<Expr>> elements;
@@ -1010,5 +1048,5 @@ std::shared_ptr<Expr> Parser::parseArrayInitializer()
 
    expect(TokenType::RBRACKET, "Expected ']' after array initializer");
 
-   return std::make_shared<Expr>(ArrayInitExpr{elements}, ln);
+   return std::make_shared<Expr>(ArrayInitExpr{elements}, ln, col);
 }

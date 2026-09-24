@@ -55,10 +55,11 @@ std::vector<std::shared_ptr<Stmt>> Parser::parseStatementList(std::initializer_l
 std::shared_ptr<Stmt> Parser::parseStatement()
 {
    uint32_t ln = peek().line;
+   uint32_t col = peek().col;
 
    // Empty statement
    if (match(TokenType::SEMICOLON)) {
-      return std::make_shared<Stmt>(EmptyStmt{}, ln);
+      return std::make_shared<Stmt>(EmptyStmt{}, ln, col);
    }
 
    if (check(TokenType::KW_IF)) {
@@ -85,7 +86,7 @@ std::shared_ptr<Stmt> Parser::parseStatement()
       } else {
          match(TokenType::SEMICOLON);
       }
-      return std::make_shared<Stmt>(ret, ln);
+      return std::make_shared<Stmt>(ret, ln, col);
    }
    if (match(TokenType::KW_EXIT)) {
       ExitStmt ex;
@@ -97,11 +98,11 @@ std::shared_ptr<Stmt> Parser::parseStatement()
       } else {
          match(TokenType::SEMICOLON);
       }
-      return std::make_shared<Stmt>(ex, ln);
+      return std::make_shared<Stmt>(ex, ln, col);
    }
    if (match(TokenType::KW_CONTINUE)) {
       match(TokenType::SEMICOLON);
-      return std::make_shared<Stmt>(ContinueStmt{}, ln);
+      return std::make_shared<Stmt>(ContinueStmt{}, ln, col);
    }
 
    // Assignment or function call expression statement
@@ -110,11 +111,11 @@ std::shared_ptr<Stmt> Parser::parseStatement()
    if (match(TokenType::OP_ASSIGN)) {
       auto rhs = parseExpr();
       match(TokenType::SEMICOLON);
-      return std::make_shared<Stmt>(AssignStmt{lhs, rhs}, ln);
+      return std::make_shared<Stmt>(AssignStmt{lhs, rhs}, ln, col);
    }
    // Expression statement (FB call)
    match(TokenType::SEMICOLON);
-   return std::make_shared<Stmt>(ExprStmt{lhs}, ln);
+   return std::make_shared<Stmt>(ExprStmt{lhs}, ln, col);
 }
 
 // ============================================================================
@@ -128,6 +129,7 @@ std::shared_ptr<Stmt> Parser::parseStatement()
 std::shared_ptr<Stmt> Parser::parseIfStmt()
 {
    uint32_t ln = peek().line;
+   uint32_t col = peek().col;
    expect(TokenType::KW_IF, "Expected IF");
    IfStmt stmt;
 
@@ -148,7 +150,7 @@ std::shared_ptr<Stmt> Parser::parseIfStmt()
    }
    expect(TokenType::KW_END_IF, "Expected END_IF");
    match(TokenType::SEMICOLON);
-   return std::make_shared<Stmt>(std::move(stmt), ln);
+   return std::make_shared<Stmt>(std::move(stmt), ln, col);
 }
 
 /**
@@ -158,6 +160,7 @@ std::shared_ptr<Stmt> Parser::parseIfStmt()
 std::shared_ptr<Stmt> Parser::parseForStmt()
 {
    uint32_t ln = peek().line;
+   uint32_t col = peek().col;
    expect(TokenType::KW_FOR, "Expected FOR");
    ForStmt stmt;
    stmt.var = expect(TokenType::IDENTIFIER, "Expected loop variable").text;
@@ -172,7 +175,7 @@ std::shared_ptr<Stmt> Parser::parseForStmt()
    stmt.body = parseStatementList({TokenType::KW_END_FOR});
    expect(TokenType::KW_END_FOR, "Expected END_FOR");
    match(TokenType::SEMICOLON);
-   return std::make_shared<Stmt>(std::move(stmt), ln);
+   return std::make_shared<Stmt>(std::move(stmt), ln, col);
 }
 
 /**
@@ -182,6 +185,7 @@ std::shared_ptr<Stmt> Parser::parseForStmt()
 std::shared_ptr<Stmt> Parser::parseWhileStmt()
 {
    uint32_t ln = peek().line;
+   uint32_t col = peek().col;
    expect(TokenType::KW_WHILE, "Expected WHILE");
    WhileStmt stmt;
    stmt.condition = parseExpr();
@@ -189,7 +193,7 @@ std::shared_ptr<Stmt> Parser::parseWhileStmt()
    stmt.body = parseStatementList({TokenType::KW_END_WHILE});
    expect(TokenType::KW_END_WHILE, "Expected END_WHILE");
    match(TokenType::SEMICOLON);
-   return std::make_shared<Stmt>(std::move(stmt), ln);
+   return std::make_shared<Stmt>(std::move(stmt), ln, col);
 }
 
 /**
@@ -208,6 +212,7 @@ std::shared_ptr<Stmt> Parser::parseWhileStmt()
 std::shared_ptr<Stmt> Parser::parseRepeatStmt()
 {
    uint32_t ln = peek().line;
+   uint32_t col = peek().col;
    expect(TokenType::KW_REPEAT, "Expected REPEAT");
 
    RepeatStmt stmt;
@@ -231,7 +236,7 @@ std::shared_ptr<Stmt> Parser::parseRepeatStmt()
    expect(TokenType::KW_END_REPEAT, "Expected END_REPEAT");
    match(TokenType::SEMICOLON); // ; optional!
 
-   return std::make_shared<Stmt>(std::move(stmt), ln);
+   return std::make_shared<Stmt>(std::move(stmt), ln, col);
 }
 
 /**
@@ -245,6 +250,7 @@ std::shared_ptr<Stmt> Parser::parseRepeatStmt()
 std::shared_ptr<Stmt> Parser::parseCaseStmt()
 {
    uint32_t ln = peek().line;
+   uint32_t col = peek().col;
    expect(TokenType::KW_CASE, "Expected CASE");
    CaseStmt stmt;
    stmt.selector = parseExpr();
@@ -281,7 +287,7 @@ std::shared_ptr<Stmt> Parser::parseCaseStmt()
    }
    expect(TokenType::KW_END_CASE, "Expected END_CASE");
    match(TokenType::SEMICOLON);
-   return std::make_shared<Stmt>(std::move(stmt), ln);
+   return std::make_shared<Stmt>(std::move(stmt), ln, col);
 }
 
 /**
@@ -374,9 +380,10 @@ std::shared_ptr<Expr> Parser::parseExpr(int minPrec)
       }
       std::string op = peek().text;
       uint32_t ln = peek().line;
+      uint32_t col = peek().col;
       advance();
       auto right = parseExpr(prec + 1);
-      left = std::make_shared<Expr>(BinaryExpr{op, left, right}, ln);
+      left = std::make_shared<Expr>(BinaryExpr{op, left, right}, ln, col);
    }
    return left;
 }
@@ -388,13 +395,14 @@ std::shared_ptr<Expr> Parser::parseExpr(int minPrec)
 std::shared_ptr<Expr> Parser::parseUnary()
 {
    uint32_t ln = peek().line;
+   uint32_t col = peek().col;
    if (check(TokenType::KW_NOT)) {
       advance();
-      return std::make_shared<Expr>(UnaryExpr{"NOT", parseUnary()}, ln);
+      return std::make_shared<Expr>(UnaryExpr{"NOT", parseUnary()}, ln, col);
    }
    if (check(TokenType::OP_MINUS)) {
       advance();
-      return std::make_shared<Expr>(UnaryExpr{"-", parseUnary()}, ln);
+      return std::make_shared<Expr>(UnaryExpr{"-", parseUnary()}, ln, col);
    }
    if (check(TokenType::OP_PLUS)) {
       advance();
@@ -414,13 +422,14 @@ std::shared_ptr<Expr> Parser::parseUnary()
 std::shared_ptr<Expr> Parser::parsePrimary()
 {
    uint32_t ln = peek().line;
+   uint32_t col = peek().col;
 
    // TRUE / FALSE
    if (match(TokenType::KW_TRUE)) {
-      return std::make_shared<Expr>(BoolLitExpr{true}, ln);
+      return std::make_shared<Expr>(BoolLitExpr{true}, ln, col);
    }
    if (match(TokenType::KW_FALSE)) {
-      return std::make_shared<Expr>(BoolLitExpr{false}, ln);
+      return std::make_shared<Expr>(BoolLitExpr{false}, ln, col);
    }
 
    // ADR(expr)
@@ -428,7 +437,7 @@ std::shared_ptr<Expr> Parser::parsePrimary()
       expect(TokenType::LPAREN, "Expected '(' after ADR");
       auto op = parseExpr();
       expect(TokenType::RPAREN, "Expected ')'");
-      return std::make_shared<Expr>(AdrExpr{op}, ln);
+      return std::make_shared<Expr>(AdrExpr{op}, ln, col);
    }
 
    // SIZEOF(type) or SIZEOF(expression)
@@ -448,7 +457,7 @@ std::shared_ptr<Expr> Parser::parsePrimary()
       try {
          TypeRef ty = parseTypeRef();
          expect(TokenType::RPAREN, "Expected ')'");
-         return std::make_shared<Expr>(SizeofExpr{ty, nullptr, true}, ln);
+         return std::make_shared<Expr>(SizeofExpr{ty, nullptr, true}, ln, col);
       } catch (const ParseError& e) {
          // Not a type - parse as expression
          m_pos = savedPos;
@@ -456,22 +465,22 @@ std::shared_ptr<Expr> Parser::parsePrimary()
          expect(TokenType::RPAREN, "Expected ')'");
          TypeRef dummy;
          dummy.base = BaseType::VOID;
-         return std::make_shared<Expr>(SizeofExpr{dummy, expr, false}, ln);
+         return std::make_shared<Expr>(SizeofExpr{dummy, expr, false}, ln, col);
       }
    }
 
    // Literals
    if (check(TokenType::INT_LITERAL) || check(TokenType::REAL_LITERAL)) {
       auto tok = advance();
-      return std::make_shared<Expr>(LiteralExpr{tok.text, ""}, ln);
+      return std::make_shared<Expr>(LiteralExpr{tok.text, ""}, ln, col);
    }
    if (check(TokenType::STRING_LITERAL)) {
       auto tok = advance();
-      return std::make_shared<Expr>(LiteralExpr{tok.text, ""}, ln);
+      return std::make_shared<Expr>(LiteralExpr{tok.text, ""}, ln, col);
    }
    if (check(TokenType::TIME_LITERAL)) {
       auto tok = advance();
-      return std::make_shared<Expr>(LiteralExpr{tok.text, "TIME"}, ln);
+      return std::make_shared<Expr>(LiteralExpr{tok.text, "TIME"}, ln, col);
    }
 
    // Parenthesized expression
@@ -479,7 +488,7 @@ std::shared_ptr<Expr> Parser::parsePrimary()
       // Struct initialization: (member := value, ...)
       if (check(TokenType::IDENTIFIER) && peek(1).type == TokenType::OP_ASSIGN) {
          StructInitExpr init = parseStructInitBody();
-         return std::make_shared<Expr>(std::move(init), ln);
+         return std::make_shared<Expr>(std::move(init), ln, col);
       } else {
          auto e = parseExpr();
          expect(TokenType::RPAREN, "Expected ')'");
@@ -500,14 +509,14 @@ std::shared_ptr<Expr> Parser::parsePrimary()
          } while (match(TokenType::COMMA));
       }
       expect(TokenType::RPAREN, "Expected ')'");
-      return std::make_shared<Expr>(SuperCallExpr{methodName, std::move(args)}, ln);
+      return std::make_shared<Expr>(SuperCallExpr{methodName, std::move(args)}, ln, col);
    }
 
    // Identifier - consume it and let parsePostfix handle postfix operators
    if (check(TokenType::IDENTIFIER) || isTypeKeyword(peek().type)) {
       std::string name = peek().text;
       advance();
-      auto expr = std::make_shared<Expr>(IdentExpr{name}, ln);
+      auto expr = std::make_shared<Expr>(IdentExpr{name}, ln, col);
       return parsePostfix(expr);
    }
 
@@ -538,10 +547,11 @@ std::shared_ptr<Expr> Parser::parsePrimary()
 std::shared_ptr<Expr> Parser::parsePostfix(std::shared_ptr<Expr> base)
 {
    uint32_t ln = peek().line;
+   uint32_t col = peek().col;
    while (true) {
       if (match(TokenType::DOT)) {
          std::string member = expect(TokenType::IDENTIFIER, "Expected member name").text;
-         base = std::make_shared<Expr>(MemberExpr{base, member}, ln);
+         base = std::make_shared<Expr>(MemberExpr{base, member}, ln, col);
       } else if (match(TokenType::LBRACKET)) {
          std::vector<std::shared_ptr<Expr>> indices;
          indices.push_back(parseExpr());
@@ -549,9 +559,9 @@ std::shared_ptr<Expr> Parser::parsePostfix(std::shared_ptr<Expr> base)
             indices.push_back(parseExpr());
          }
          expect(TokenType::RBRACKET, "Expected ']'");
-         base = std::make_shared<Expr>(IndexExpr{base, std::move(indices)}, ln);
+         base = std::make_shared<Expr>(IndexExpr{base, std::move(indices)}, ln, col);
       } else if (match(TokenType::OP_DEREF)) {
-         base = std::make_shared<Expr>(DerefExpr{base}, ln);
+         base = std::make_shared<Expr>(DerefExpr{base}, ln, col);
       } else if (match(TokenType::LPAREN)) {
          CallExpr call;
          call.callee = base;
@@ -580,7 +590,7 @@ std::shared_ptr<Expr> Parser::parsePostfix(std::shared_ptr<Expr> base)
             }
          }
          call.isStructInit = isStructInit;
-         base = std::make_shared<Expr>(std::move(call), ln);
+         base = std::make_shared<Expr>(std::move(call), ln, col);
       } else {
          break;
       }
@@ -678,7 +688,7 @@ std::shared_ptr<Expr> Parser::parseAddressExpression(const Token& tok)
       addr.qualifierInferred = true;
       addr.byteOffset = 0;
       addr.bitOffset = -1;
-      return std::make_shared<Expr>(addr, tok.line);
+      return std::make_shared<Expr>(addr, tok.line, tok.col);
    }
 
    // Determine qualifier (X, B, W, D, L, P)
@@ -741,7 +751,7 @@ std::shared_ptr<Expr> Parser::parseAddressExpression(const Token& tok)
       }
    }
 
-   return std::make_shared<Expr>(addr, tok.line);
+   return std::make_shared<Expr>(addr, tok.line, tok.col);
 }
 
 /**
@@ -755,6 +765,7 @@ std::shared_ptr<Expr> Parser::parseAddressExpression(const Token& tok)
 std::shared_ptr<Expr> Parser::parseSizeof()
 {
    uint32_t ln = peek().line;
+   uint32_t col = peek().col;
    expect(TokenType::KW_SIZEOF, "Expected SIZEOF");
    expect(TokenType::LPAREN, "Expected '(' after SIZEOF");
 
@@ -764,7 +775,7 @@ std::shared_ptr<Expr> Parser::parseSizeof()
    try {
       TypeRef ty = parseTypeRef();
       expect(TokenType::RPAREN, "Expected ')'");
-      return std::make_shared<Expr>(SizeofExpr{ty, nullptr, true}, ln);
+      return std::make_shared<Expr>(SizeofExpr{ty, nullptr, true}, ln, col);
    } catch (const ParseError& e) {
       // Not a type - parse as expression (extension)
       m_pos = savedPos;
@@ -772,6 +783,6 @@ std::shared_ptr<Expr> Parser::parseSizeof()
       expect(TokenType::RPAREN, "Expected ')'");
       TypeRef dummy;
       dummy.base = BaseType::VOID;
-      return std::make_shared<Expr>(SizeofExpr{dummy, expr, false}, ln);
+      return std::make_shared<Expr>(SizeofExpr{dummy, expr, false}, ln, col);
    }
 }

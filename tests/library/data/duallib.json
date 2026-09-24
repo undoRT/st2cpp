@@ -1,0 +1,99 @@
+{
+  "$schemaVersion": "1.0",
+
+  "id": "duallib",
+  "name": "DualLib",
+  "version": "1.0.0",
+  "description": "Libreria dei test di collisione: esporta simboli con lo stesso nome di examplelib (Channel, Clamp).",
+
+  "cppBinding": {
+    "include": "duallib/duallib.hpp",
+    "namespace": "duallib"
+  },
+
+  "constants": [
+    {
+      "name": "D_ENABLED",
+      "type": {
+        "kind": "primitive",
+        "name": "BOOL"
+      },
+      "value": true,
+      "documentation": "Costante univoca di duallib."
+    }
+  ],
+
+  "enums": [
+    {
+      "name": "Level",
+
+      "baseType": {
+        "kind": "primitive",
+        "name": "INT"
+      },
+
+      "members": [
+        { "name": "LOW", "value": 0 },
+        { "name": "HIGH", "value": 1 }
+      ],
+
+      "documentation": "Livello binario."
+    }
+  ],
+
+  "types": [
+    {
+      "name": "Channel",
+      "kind": "struct",
+
+      "fields": [
+        {
+          "name": "Sample",
+          "type": {
+            "kind": "primitive",
+            "name": "INT"
+          }
+        }
+      ],
+
+      "documentation": "Collide con examplelib.Channel (ordine alfabetico: duallib < examplelib, vince duallib)."
+    }
+  ],
+
+  "functions": [
+    {
+      "name": "Clamp",
+
+      "cppBinding": {
+        "symbol": "clamp",
+        "kind": "freeFunction"
+      },
+
+      "returnType": {
+        "kind": "primitive",
+        "name": "REAL"
+      },
+
+      "parameters": [
+        {
+          "name": "Value",
+          "type": {
+            "kind": "primitive",
+            "name": "REAL"
+          },
+          "direction": "IN"
+        },
+        {
+          "name": "Floor",
+          "type": {
+            "kind": "primitive",
+            "name": "REAL"
+          },
+          "direction": "IN"
+        }
+      ],
+
+      "documentation": "Collide con examplelib.Clamp e ha una firma diversa (2 parametri)."
+    }
+  ]
+}

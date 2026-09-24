@@ -13,6 +13,7 @@
  */
 
 #include "codegen/CodeGenerator.h"
+#include "semantic/IecTime.h"
 #include <stdexcept>
 #include <algorithm>
 #include <queue>
@@ -689,10 +690,14 @@ CodegenResult CodeGenerator::generate(const TranslationUnit& tu,
                                       const std::string& runtimeHeader,
                                       bool caseSensitive)
 {
-   m_hdrName = headerName;
-   m_namespace = namespaceName;
-   m_runtimeHeader = runtimeHeader;
-   m_caseSensitive = caseSensitive;
+m_hdrName = headerName;
+    m_namespace = namespaceName;
+    m_runtimeHeader = runtimeHeader;
+    m_caseSensitive = caseSensitive;
+
+    // Pre-scan the TU for the libraries actually used (types + symbol refs)
+    // so their descriptor includes can be emitted right after the runtime header.
+    computeLibraryIncludeLines(tu);
 
    // Build header guard from filename
    std::string guard = headerName;
@@ -839,6 +844,14 @@ CodegenResult CodeGenerator::generate(const TranslationUnit& tu,
       m_hdr << "#include \"" << m_runtimeHeader << "\"\n\n";
    }
 
+   // External library descriptor includes (sorted, deduplicated, only the
+   // libraries the TU actually uses). Emitted outside the namespace on purpose:
+   // the loaded headers own their scoping rules.
+   if (!m_libraryIncludeLines.empty()) {
+      m_hdr << libraryIncludeBlock();
+      m_hdr << "\n";
+   }
+
    // print comment about auto-generated code
    m_src << generateHeaderComment();
    // Open namespace if specified
@@ -857,8 +870,11 @@ CodegenResult CodeGenerator::generate(const TranslationUnit& tu,
             << m_piConfig.instanceName << ";\n\n";
    }
 
-   // Initialize the global scope
-   m_scope.pushScope();
+// Resolve TYPE aliases before any variable type is mapped.
+    registerTypeAliases(tu.typeAliases);
+
+    // Initialize the global scope
+    m_scope.pushScope();
 
    // Register global variables in the global scope
    for (const auto& sec : tu.globals) {
@@ -1085,6 +1101,9 @@ std::vector<GeneratedFile> CodeGenerator::generateModularProject(const Translati
    m_fbMap.clear();
    m_isFB.clear();
    m_resolvedATAddresses.clear();
+
+   // Pre-scan the TU so the modular headers can include the libraries used.
+   computeLibraryIncludeLines(tu);
 
    return generateModular(tu, outputDir);
 }
@@ -2294,12 +2313,35 @@ std::string CodeGenerator::getArrayType(const std::string& baseType, const TypeR
  */
 std::string CodeGenerator::mapType(const TypeRef& tr) const
 {
-   std::string base;
-   if (tr.base == BaseType::NAMED) {
-      base = normalizeType(tr.name);
-   } else {
-      base = mapBaseType(tr.base);
-   }
+    std::string base;
+    if (tr.base == BaseType::NAMED) {
+       base = normalizeType(tr.name);
+       // Semantic: resolve a project/symbol-table type to its C++ spelling.
+       // External structs/enums/FBs resolve through their descriptor binding
+       // (e.g. examplelib::Channel); local and primitive names are unchanged.
+       if (const auto* st = semanticSymTab()) {
+          const st2cpp::semantic::TypeId tid = st->getTypeIdByName(tr.name);
+          if (tid != 0) {
+             const st2cpp::semantic::TypeInfo* t = st->getType(tid);
+             // Named alias (TYPE Name : <type>; END_TYPE): the name resolves to
+             // a canonical type carrying a DIFFERENT name. Encode the canonical
+             // C++ type instead of the alias spelling, so aliases of arrays,
+             // pointers and scalars all emit the correct C++ declaration.
+             if (t != nullptr && st->normalizeKey(t->name) != st->normalizeKey(tr.name)) {
+                return mapTypeId(tid);
+             }
+             base = semanticTypeCppName(tid, base);
+          }
+       }
+       // Legacy alias resolution (no SemanticInfo attached): chase the alias
+       // chain in m_aliasTypes when the loop above could not help.
+       const std::string aliased = resolveAliasLegacy(base);
+       if (!aliased.empty()) {
+          base = aliased;
+       }
+    } else {
+       base = mapBaseType(tr.base);
+    }
 
    if (tr.isPointer) {
       return base + "*";
@@ -2445,7 +2487,11 @@ std::string CodeGenerator::mapTypeId(st2cpp::semantic::TypeId typeId) const
    }
    case st2cpp::semantic::TypeKind::Struct:
    case st2cpp::semantic::TypeKind::Enum:
-   case st2cpp::semantic::TypeKind::FunctionBlock:
+   case st2cpp::semantic::TypeKind::FunctionBlock: {
+      // External-library types resolve to their descriptor C++ binding
+      // (e.g. examplelib::State); local types keep the ST spelling.
+      return semanticTypeCppName(typeId, normalizeType(t->name));
+   }
    case st2cpp::semantic::TypeKind::Interface:
       return normalizeType(t->name);
    case st2cpp::semantic::TypeKind::Void:
@@ -2457,6 +2503,60 @@ std::string CodeGenerator::mapTypeId(st2cpp::semantic::TypeId typeId) const
       }
       return normalizeType(t->name);
    }
+}
+
+/**
+ * @brief Register named type aliases so mapType can resolve them.
+ * @details This is the legacy (no-SemanticInfo) path: each alias is recorded
+ * with its underlying TypeRef. Aliases that map to another alias are chased
+ * lazily by resolveAliasLegacy on a per-use basis, so declaration order and
+ * in-order chains both work from the caller's perspective.
+ * @param aliases The TYPE aliases declared in the translation unit
+ */
+void CodeGenerator::registerTypeAliases(const std::vector<TypeAlias>& aliases)
+{
+   m_aliasTypes.clear();
+   for (const auto& alias : aliases) {
+      m_aliasTypes[normalizeType(alias.name)] = alias.type;
+   }
+}
+
+/**
+ * @brief Resolve an alias name to its underlying C++ type (legacy mapType path).
+ * @details Follows alias-of-alias chains through m_aliasTypes with a cycle
+ * guard; a chain target that is itself an alias keeps the lookup alive, and
+ * anything else is handed to mapType. Returns "" when the name is not a known
+ * alias, so callers can fall back to the plain name.
+ * @param name The (normalized) alias name to resolve
+ * @return The resolved C++ type, or "" when not an alias / cyclic / broken
+ */
+std::string CodeGenerator::resolveAliasLegacy(const std::string& name) const
+{
+   std::unordered_set<std::string> guard;
+   std::string cur = name;
+
+   for (int depth = 0; depth < 64; ++depth) {
+      auto it = m_aliasTypes.find(cur);
+      if (it == m_aliasTypes.end()) {
+         return "";
+      }
+      if (!guard.insert(cur).second) {
+         return ""; // cycle
+      }
+      const TypeRef& underlying = it->second;
+      if (underlying.base == BaseType::NAMED && underlying.arrayDims.empty() &&
+          !underlying.isPointer && !underlying.isRefTo) {
+         // Alias of another name → chase the chain.
+         const std::string next = normalizeType(underlying.name);
+         if (next == cur || m_aliasTypes.find(next) == m_aliasTypes.end()) {
+            return mapType(underlying); // target is a real type, not an alias
+         }
+         cur = next;
+         continue;
+      }
+      return mapType(underlying);
+   }
+   return "";
 }
 
 /**
@@ -2488,6 +2588,307 @@ bool CodeGenerator::isSemanticEnumType(st2cpp::semantic::TypeId typeId) const
 }
 
 /**
+ * @brief Library descriptor owning an external symbol, when resolvable.
+ *
+ * The generator never re-parses bindings: it walks back from the canonical
+ * Symbol::externalLibraryId to the descriptor inside the SemanticInfo's
+ * LibraryRegistry (the single source of truth of the C++ bindings).
+ *
+ * @param sym Semantic symbol to locate
+ * @return Owning descriptor, or nullptr when local / semantics unavailable
+ */
+const st2cpp::library::LibraryDescriptor* CodeGenerator::semanticDescriptorFor(const st2cpp::semantic::Symbol& sym) const
+{
+   if (!semanticAvailable() || !m_semanticInfo->libraryRegistry) {
+      return nullptr;
+   }
+   if (!sym.isExternal || sym.externalLibraryId.empty()) {
+      return nullptr;
+   }
+   return m_semanticInfo->libraryRegistry->get(sym.externalLibraryId);
+}
+
+/**
+ * @brief C++ name of an external enum member.
+ *
+ * The descriptor spelling (verbatim, reserved for fully-qualified bindings)
+ * is authoritative; membership is matched case-insensitively against the
+ * descriptor so the ST spelling and the C++ spelling may differ.
+ *
+ * @param enumTypeId   Resolved type of the ENUM
+ * @param stMemberName ST spelling of the member
+ * @return Descriptor member name, or the normalized ST spelling as fallback
+ */
+std::string CodeGenerator::semanticEnumeratorCppName(st2cpp::semantic::TypeId enumTypeId, const std::string& stMemberName) const
+{
+   const auto* st = semanticSymTab();
+   if (!st) {
+      return normalizeIdent(stMemberName);
+   }
+   const st2cpp::semantic::TypeInfo* t = st->getType(enumTypeId);
+   if (!t || t->kind != st2cpp::semantic::TypeKind::Enum) {
+      return normalizeIdent(stMemberName);
+   }
+   const st2cpp::semantic::Symbol* sym = t->symbolId ? st->get(t->symbolId) : nullptr;
+   if (!sym || !sym->isExternal) {
+      return normalizeIdent(stMemberName);
+   }
+   const st2cpp::library::LibraryDescriptor* lib = semanticDescriptorFor(*sym);
+   if (!lib) {
+      return normalizeIdent(stMemberName);
+   }
+   const st2cpp::library::EnumTypeDef* def = lib->findEnum(sym->name);
+   if (!def) {
+      return normalizeIdent(stMemberName);
+   }
+   for (const auto& member : def->members) {
+      if (st2cpp::library::LibraryDescriptor::makeKey(member.name) ==
+          st2cpp::library::LibraryDescriptor::makeKey(stMemberName)) {
+         return member.name;
+      }
+   }
+   return normalizeIdent(stMemberName);
+}
+
+/**
+ * @brief Qualified C++ name of a semantic struct/enum/FB type.
+ *
+ * External types resolve through their owning library descriptor; project-local
+ * types keep the normalized ST spelling. Binding rules, in order:
+ *  - struct/enum: descriptor symbol when cppBinding.symbol is set, else the
+ *    verbatim descriptor name; prefixed with the library namespace when one is
+ *    declared (unless the symbol is already qualified);
+ *  - FB: instanceType (already qualified); empty instanceType is a warning.
+ *
+ * @param typeId   Canonical type id
+ * @param fallback C++ spelling used for local types / unsolvable bindings
+ * @return C++ type name
+ */
+std::string CodeGenerator::semanticTypeCppName(st2cpp::semantic::TypeId typeId, const std::string& fallback) const
+{
+   const auto* st = semanticSymTab();
+   if (!st) {
+      return fallback;
+   }
+   const st2cpp::semantic::TypeInfo* t = st->getType(typeId);
+   if (!t) {
+      return fallback;
+   }
+   const st2cpp::semantic::Symbol* sym = t->symbolId ? st->get(t->symbolId) : nullptr;
+   if (!sym || !sym->isExternal) {
+      return fallback;
+   }
+   const st2cpp::library::LibraryDescriptor* lib = semanticDescriptorFor(*sym);
+   if (!lib) {
+      return fallback;
+   }
+
+   if (t->kind == st2cpp::semantic::TypeKind::FunctionBlock) {
+      const st2cpp::library::FunctionBlockDef* fb = lib->findFunctionBlock(sym->name);
+      if (!fb) {
+         reportBindingIncomplete(sym->name, "functionBlocks");
+         return fallback;
+      }
+      if (!fb->cppBinding.instanceType.empty()) {
+         return fb->cppBinding.instanceType;
+      }
+      reportBindingIncomplete(sym->name, "instanceType");
+      return fallback;
+   }
+
+   std::string symbol;
+   if (t->kind == st2cpp::semantic::TypeKind::Struct) {
+      const st2cpp::library::StructTypeDef* s = lib->findStruct(sym->name);
+      if (!s) {
+         reportBindingIncomplete(sym->name, "structs");
+         return fallback;
+      }
+      symbol = (s->hasCppBinding && !s->cppBinding.symbol.empty()) ? s->cppBinding.symbol : s->name;
+   } else if (t->kind == st2cpp::semantic::TypeKind::Enum) {
+      const st2cpp::library::EnumTypeDef* e = lib->findEnum(sym->name);
+      if (!e) {
+         reportBindingIncomplete(sym->name, "enums");
+         return fallback;
+      }
+      symbol = (e->hasCppBinding && !e->cppBinding.symbol.empty()) ? e->cppBinding.symbol : e->name;
+   } else {
+      return fallback;
+   }
+
+   // Namespace prefix from the descriptor, unless the symbol is free of it.
+   if (symbol.find("::") != std::string::npos || lib->cppBinding.ns.empty()) {
+      return symbol;
+   }
+   return lib->cppBinding.ns + "::" + symbol;
+}
+
+/**
+ * @brief C++ binding of an external function callee.
+ *
+ * freeFunction binds to cppBinding.symbol verbatim (no namespace prefix,
+ * per descriptor spec); staticMethod binds to owner::symbol.
+ *
+ * @param call Call expression to generate
+ * @return C++ call target, or "" when not bindable (caller keeps ST spelling)
+ */
+std::string CodeGenerator::semanticCallTargetName(const CallExpr& call) const
+{
+   const auto* st = semanticSymTab();
+   if (!st || call.calleeSymbolId == 0) {
+      return "";
+   }
+   const st2cpp::semantic::Symbol* callee = st->get(call.calleeSymbolId);
+   if (!callee || callee->kind != st2cpp::semantic::SymbolKind::Function || !callee->isExternal) {
+      return "";
+   }
+   const st2cpp::library::LibraryDescriptor* lib = semanticDescriptorFor(*callee);
+   if (!lib) {
+      return "";
+   }
+   const st2cpp::library::FunctionDef* def = lib->findFunction(callee->name);
+   if (!def) {
+      reportBindingIncomplete(callee->name, "functions");
+      return "";
+   }
+   switch (def->cppBinding.kind) {
+   case st2cpp::library::FunctionBindingKind::StaticMethod: {
+      if (def->cppBinding.owner.empty() || def->cppBinding.symbol.empty()) {
+         reportBindingIncomplete(callee->name, "cppBinding.owner/symbol");
+         break;
+      }
+      return def->cppBinding.owner + "::" + def->cppBinding.symbol;
+   }
+   case st2cpp::library::FunctionBindingKind::FreeFunction:
+   default:
+      if (def->cppBinding.symbol.empty()) {
+         reportBindingIncomplete(callee->name, "cppBinding.symbol");
+         break;
+      }
+      return def->cppBinding.symbol;
+   }
+   return "";
+}
+
+/**
+ * @brief C++ binding of an external global variable or constant.
+ *
+ * Optional binding: an unbound global keeps its ST spelling, so no warning is
+ * emitted and the empty string asks the caller to fall back.
+ *
+ * @param sym Referenced external symbol
+ * @return C++ name, or "" when optional binding is absent
+ */
+std::string CodeGenerator::semanticVariableBinding(const st2cpp::semantic::Symbol& sym) const
+{
+   const st2cpp::library::LibraryDescriptor* lib = semanticDescriptorFor(sym);
+   if (!lib) {
+      return "";
+   }
+   if (sym.isConstant) {
+      const st2cpp::library::Constant* c = lib->findConstant(sym.name);
+      if (c && c->hasCppBinding && !c->cppBinding.symbol.empty()) {
+         return c->cppBinding.symbol;
+      }
+      return "";
+   }
+   const st2cpp::library::GlobalVariable* g = lib->findGlobalVariable(sym.name);
+   if (g && g->hasCppBinding && !g->cppBinding.symbol.empty()) {
+      return g->cppBinding.symbol;
+   }
+   return "";
+}
+
+/**
+ * @brief External FB step info for an FB invocation statement.
+ *
+ * Detects an invocation of an external-library FB instance (the variable type
+ * resolves to an external FB symbol) and recovers the descriptor's
+ * cppBinding.call. Project-local FBs keep isFb=false so the legacy binary-style
+ * path (set_IN / get_Q / plain "callee()") applies unchanged.
+ *
+ * @param call FB invocation (callee may be an identifier or array element)
+ * @return ExternalFbCallInfo{isFb=false} unless an external FB is invoked
+ */
+CodeGenerator::ExternalFbCallInfo CodeGenerator::semanticFbCallInfo(const CallExpr& call) const
+{
+   const auto* st = semanticSymTab();
+   if (!st || !call.callee) {
+      return {};
+   }
+
+   // Resolve the invoked object to a semantic TypeId (instance variable).
+   st2cpp::semantic::TypeId typeId = 0;
+   const st2cpp::semantic::Symbol* varSym = nullptr;
+   const Expr* obj = call.callee.get();
+   if (const auto* ident = std::get_if<IdentExpr>(&obj->node)) {
+      varSym = ident->symbolId != 0 ? st->get(ident->symbolId) : nullptr;
+   } else if (const auto* idx = std::get_if<IndexExpr>(&obj->node)) {
+      if (const auto* arrIdent = std::get_if<IdentExpr>(&idx->array->node)) {
+         varSym = arrIdent->symbolId != 0 ? st->get(arrIdent->symbolId) : nullptr;
+      }
+      obj = idx->array.get();
+   }
+   if (varSym) {
+      typeId = varSym->typeId;
+   } else if (obj) {
+      typeId = obj->resolvedTypeId;
+   }
+
+   const st2cpp::semantic::TypeInfo* t = st->getType(typeId);
+   if (!t) {
+      return {};
+   }
+   if (t->kind == st2cpp::semantic::TypeKind::Array) {
+      t = st->getType(t->elementTypeId);
+   }
+   if (!t || t->kind != st2cpp::semantic::TypeKind::FunctionBlock) {
+      return {};
+   }
+   const st2cpp::semantic::Symbol* fbSym = t->symbolId ? st->get(t->symbolId) : nullptr;
+   if (!fbSym || !fbSym->isExternal) {
+      return {}; // project FB: binary call retained byte-for-byte
+   }
+
+   ExternalFbCallInfo info;
+   info.isFb = true;
+   const st2cpp::library::LibraryDescriptor* lib = semanticDescriptorFor(*fbSym);
+   if (!lib) {
+      return info;
+   }
+   const st2cpp::library::FunctionBlockDef* def = lib->findFunctionBlock(fbSym->name);
+   if (!def) {
+      reportBindingIncomplete(fbSym->name, "functionBlocks");
+      return info;
+   }
+   info.step = def->cppBinding.call;
+   if (info.step.empty()) {
+      reportBindingIncomplete(fbSym->name, "cppBinding.call");
+   }
+   return info;
+}
+
+/**
+ * @brief Append a clear warning to the attached diagnostics when a C++ binding
+ *        field is missing. The generator never aborts for this: callers emit a
+ *        controlled fallback (ST spelling) instead.
+ */
+void CodeGenerator::reportBindingIncomplete(const std::string& entity, const std::string& what) const
+{
+   if (!m_semanticInfo) {
+      return;
+   }
+   st2cpp::semantic::SourceLocation loc;
+   loc.fileName = "<library>";
+   loc.line = 0;
+   loc.column = 0;
+   m_semanticInfo->diagnostics.addWarning(
+       st2cpp::semantic::DiagnosticCode::ExternalBindingIncomplete,
+       "external symbol '" + entity + "': C++ binding field '" + what +
+           "' is missing or incomplete; falling back to the ST spelling",
+       loc);
+}
+
+/**
  * @brief Qualified enum name for an enumerator symbol
  *
  * Replaces the name-based m_enumeratorToEnum map: walks the system symbols
@@ -2513,6 +2914,277 @@ std::string CodeGenerator::semanticEnumNameForEnumerator(st2cpp::semantic::Symbo
       }
    }
    return "";
+}
+
+/**
+ * @brief Pre-scan of the translation unit that collects the include lines of
+ *        the libraries that are actually used.
+ *
+ * Libraries are only included when used, never on every configuration load.
+ * Usage means: any declaration whose type resolves to an external library type
+ * (globals, POUs, struct members, FB instances) or any expression that
+ * references an external symbol (function calls, FB invocations, globals,
+ * constants, enumerators). Includes are deduplicated and sorted for a
+ * deterministic header.
+ */
+void CodeGenerator::computeLibraryIncludeLines(const TranslationUnit& tu)
+{
+   m_libraryIncludeLines.clear();
+   if (!semanticAvailable() || !m_semanticInfo->libraryRegistry) {
+      return;
+   }
+   std::unordered_set<std::string> used;
+
+   // 1) All declared types across the TU (global sections + POUs).
+   for (const auto& sec : tu.globals) {
+      for (const auto& d : sec.decls) {
+         collectUsedLibrariesFromTypeRef(d.type, used);
+      }
+   }
+   for (const auto& pou : tu.pous) {
+      collectUsedLibrariesFromTypeRef(pou.returnType, used);
+      for (const auto& sec : pou.varSections) {
+         for (const auto& d : sec.decls) {
+            collectUsedLibrariesFromTypeRef(d.type, used);
+         }
+      }
+      for (const auto& m : pou.methods) {
+         collectUsedLibrariesFromTypeRef(m.returnType, used);
+         for (const auto& lv : m.localVars) {
+            collectUsedLibrariesFromTypeRef(lv.type, used);
+         }
+      }
+   }
+   for (const auto& sd : tu.structs) {
+      for (const auto& m : sd.members) {
+         collectUsedLibrariesFromTypeRef(m.type, used);
+      }
+   }
+   for (const auto& iface : tu.interfaces) {
+      for (const auto& m : iface.methods) {
+         collectUsedLibrariesFromTypeRef(m.returnType, used);
+         for (const auto& p : m.parameters) {
+            collectUsedLibrariesFromTypeRef(p.type, used);
+         }
+      }
+   }
+
+   // 2) Symbols referenced in expression bodies (function call targets, FB
+   //    invocations, globals/constants/enumerators).
+   for (const auto& pou : tu.pous) {
+      for (const auto& stmt : pou.body) {
+         collectUsedLibrariesFromStmt(*stmt, used);
+      }
+      for (const auto& m : pou.methods) {
+         for (const auto& stmt : m.body) {
+            collectUsedLibrariesFromStmt(*stmt, used);
+         }
+      }
+   }
+
+   // 3) Deterministic, deduplicated include list.
+   std::vector<std::string> lines(used.begin(), used.end());
+   std::sort(lines.begin(), lines.end());
+   for (const std::string& line : lines) {
+      m_libraryIncludeLines.push_back(line);
+   }
+}
+
+/**
+ * @brief Include code block for the pre-scanned libraries ("" when none).
+ */
+std::string CodeGenerator::libraryIncludeBlock() const
+{
+   if (m_libraryIncludeLines.empty()) {
+      return "";
+   }
+   std::string block;
+   for (const auto& line : m_libraryIncludeLines) {
+      block += "#include \"" + line + "\"\n";
+   }
+   return block;
+}
+
+void CodeGenerator::recordUsedLibraryForTypeId(st2cpp::semantic::TypeId typeId, std::unordered_set<std::string>& used) const
+{
+   const auto* st = semanticSymTab();
+   if (!st || typeId == 0) {
+      return;
+   }
+   const st2cpp::semantic::TypeInfo* t = st->getType(typeId);
+   if (!t) {
+      return;
+   }
+   if (t->kind == st2cpp::semantic::TypeKind::Array) {
+      recordUsedLibraryForTypeId(t->elementTypeId, used);
+      return;
+   }
+   if (t->kind == st2cpp::semantic::TypeKind::Pointer || t->kind == st2cpp::semantic::TypeKind::Reference) {
+      recordUsedLibraryForTypeId(t->pointedTypeId, used);
+      return;
+   }
+   if (t->kind != st2cpp::semantic::TypeKind::Struct && t->kind != st2cpp::semantic::TypeKind::Enum &&
+       t->kind != st2cpp::semantic::TypeKind::FunctionBlock) {
+      return;
+   }
+   const st2cpp::semantic::Symbol* sym = t->symbolId ? st->get(t->symbolId) : nullptr;
+   if (!sym) {
+      return;
+   }
+   recordUsedLibraryForSymbol(*sym, used);
+}
+
+void CodeGenerator::recordUsedLibraryForSymbol(const st2cpp::semantic::Symbol& sym, std::unordered_set<std::string>& used) const
+{
+   if (!sym.isExternal || sym.externalLibraryId.empty()) {
+      return;
+   }
+   const st2cpp::library::LibraryDescriptor* lib = m_semanticInfo->libraryRegistry->get(sym.externalLibraryId);
+   if (lib && !lib->cppBinding.include.empty()) {
+      used.insert(lib->cppBinding.include);
+   }
+   // External structs also require the libraries of their member types
+   // (e.g. examplelib::Channel has a Limits field of corelib::Range): the
+   // wrapper header for the struct references those types too.
+   const auto* st = semanticSymTab();
+   if (!st) {
+      return;
+   }
+   // Depth guard: struct graphs must be walked but never cycled (a malicious or
+   // pathological descriptor must not recurse indefinitely).
+   static thread_local size_t depth = 0;
+   if (++depth > 64) {
+      --depth;
+      return;
+   }
+   for (st2cpp::semantic::SymbolId memberId : sym.members) {
+      if (const st2cpp::semantic::Symbol* m = st->get(memberId)) {
+         recordUsedLibraryForTypeId(m->typeId, used);
+      }
+   }
+   --depth;
+}
+
+void CodeGenerator::collectUsedLibrariesFromTypeRef(const TypeRef& tr, std::unordered_set<std::string>& used) const
+{
+   const auto* st = semanticSymTab();
+   if (!st || tr.base != BaseType::NAMED || tr.name.empty()) {
+      return;
+   }
+   const st2cpp::semantic::TypeId tid = st->getTypeIdByName(tr.name);
+   if (tid != 0) {
+      recordUsedLibraryForTypeId(tid, used);
+   }
+}
+
+void CodeGenerator::collectUsedLibrariesFromExpr(const Expr& expr, std::unordered_set<std::string>& used) const
+{
+   std::visit(
+      [&](const auto& e) {
+         using T = std::decay_t<decltype(e)>;
+         const auto* st = semanticSymTab();
+
+         if constexpr (std::is_same_v<T, IdentExpr>) {
+            if (semanticAvailable() && e.symbolId != 0) {
+               if (const st2cpp::semantic::Symbol* sym = st->get(e.symbolId)) {
+                  recordUsedLibraryForSymbol(*sym, used);
+                  if (sym->kind == st2cpp::semantic::SymbolKind::Variable) {
+                     recordUsedLibraryForTypeId(sym->typeId, used);
+                  }
+               }
+            }
+         } else if constexpr (std::is_same_v<T, CallExpr>) {
+            if (semanticAvailable() && e.calleeSymbolId != 0) {
+               if (const st2cpp::semantic::Symbol* callee = st->get(e.calleeSymbolId)) {
+                  recordUsedLibraryForSymbol(*callee, used);
+               }
+            }
+            if (e.callee) {
+               collectUsedLibrariesFromExpr(*e.callee, used);
+            }
+            for (const auto& arg : e.args) {
+               if (arg.value) {
+                  collectUsedLibrariesFromExpr(*arg.value, used);
+               }
+            }
+         } else if constexpr (std::is_same_v<T, BinaryExpr>) {
+            if (e.left) collectUsedLibrariesFromExpr(*e.left, used);
+            if (e.right) collectUsedLibrariesFromExpr(*e.right, used);
+         } else if constexpr (std::is_same_v<T, UnaryExpr>) {
+            if (e.operand) collectUsedLibrariesFromExpr(*e.operand, used);
+         } else if constexpr (std::is_same_v<T, MemberExpr>) {
+            if (e.object) collectUsedLibrariesFromExpr(*e.object, used);
+         } else if constexpr (std::is_same_v<T, IndexExpr>) {
+            if (e.array) collectUsedLibrariesFromExpr(*e.array, used);
+            for (const auto& idx : e.indices) {
+               if (idx) collectUsedLibrariesFromExpr(*idx, used);
+            }
+         } else if constexpr (std::is_same_v<T, DerefExpr>) {
+            if (e.pointer) collectUsedLibrariesFromExpr(*e.pointer, used);
+         } else if constexpr (std::is_same_v<T, CastExpr>) {
+            collectUsedLibrariesFromTypeRef(e.targetType, used);
+            if (e.operand) collectUsedLibrariesFromExpr(*e.operand, used);
+         } else if constexpr (std::is_same_v<T, AdrExpr>) {
+            if (e.operand) collectUsedLibrariesFromExpr(*e.operand, used);
+         } else if constexpr (std::is_same_v<T, SizeofExpr>) {
+            if (e.isType) {
+               collectUsedLibrariesFromTypeRef(e.type, used);
+            } else if (e.expr) {
+               collectUsedLibrariesFromExpr(*e.expr, used);
+            }
+         } else if constexpr (std::is_same_v<T, ArrayInitExpr>) {
+            for (const auto& el : e.elements) {
+               if (el) collectUsedLibrariesFromExpr(*el, used);
+            }
+         } else if constexpr (std::is_same_v<T, StructInitExpr>) {
+            for (const auto& m : e.members) {
+               if (m.value) collectUsedLibrariesFromExpr(*m.value, used);
+            }
+         }
+      },
+      expr.node);
+}
+
+void CodeGenerator::collectUsedLibrariesFromStmt(const Stmt& stmt, std::unordered_set<std::string>& used) const
+{
+   std::visit(
+      [&](const auto& s) {
+         using T = std::decay_t<decltype(s)>;
+         if constexpr (std::is_same_v<T, AssignStmt>) {
+            if (s.lhs) collectUsedLibrariesFromExpr(*s.lhs, used);
+            if (s.rhs) collectUsedLibrariesFromExpr(*s.rhs, used);
+         } else if constexpr (std::is_same_v<T, ExprStmt>) {
+            if (s.expr) collectUsedLibrariesFromExpr(*s.expr, used);
+         } else if constexpr (std::is_same_v<T, ReturnStmt>) {
+            if (s.expr) collectUsedLibrariesFromExpr(*s.expr, used);
+         } else if constexpr (std::is_same_v<T, IfStmt>) {
+            for (const auto& b : s.branches) {
+               if (b.condition) collectUsedLibrariesFromExpr(*b.condition, used);
+               for (const auto& bs : b.body) collectUsedLibrariesFromStmt(*bs, used);
+            }
+         } else if constexpr (std::is_same_v<T, ForStmt>) {
+            if (s.from) collectUsedLibrariesFromExpr(*s.from, used);
+            if (s.to) collectUsedLibrariesFromExpr(*s.to, used);
+            if (s.by) collectUsedLibrariesFromExpr(*s.by, used);
+            for (const auto& b : s.body) collectUsedLibrariesFromStmt(*b, used);
+         } else if constexpr (std::is_same_v<T, CaseStmt>) {
+            if (s.selector) collectUsedLibrariesFromExpr(*s.selector, used);
+            for (const auto& cb : s.branches) {
+               for (const auto& v : cb.values) {
+                  if (v.low) collectUsedLibrariesFromExpr(*v.low, used);
+                  if (v.high) collectUsedLibrariesFromExpr(*v.high, used);
+               }
+               for (const auto& bs : cb.body) collectUsedLibrariesFromStmt(*bs, used);
+            }
+         } else if constexpr (std::is_same_v<T, WhileStmt>) {
+            if (s.condition) collectUsedLibrariesFromExpr(*s.condition, used);
+            for (const auto& b : s.body) collectUsedLibrariesFromStmt(*b, used);
+         } else if constexpr (std::is_same_v<T, RepeatStmt>) {
+            if (s.condition) collectUsedLibrariesFromExpr(*s.condition, used);
+            for (const auto& b : s.body) collectUsedLibrariesFromStmt(*b, used);
+         }
+      },
+      stmt.node);
 }
 
 /**
@@ -2542,11 +3214,27 @@ std::optional<FunctionSignature> CodeGenerator::semanticSignatureForCall(const C
    const st2cpp::semantic::Symbol* sigSym = callee;
    const st2cpp::semantic::TypeInfo* calleeType = st->getType(callee->typeId);
    if (calleeType && calleeType->kind == st2cpp::semantic::TypeKind::FunctionBlock) {
+      // Prefer the project-local FB symbol (project declarations always shadow
+      // external library symbols); fall back to the external FB when present.
+      const st2cpp::semantic::Symbol* localSym = nullptr;
+      const st2cpp::semantic::Symbol* externalSym = nullptr;
       for (const auto& sym : st->getSymbols()) {
-         if (sym.kind == st2cpp::semantic::SymbolKind::FunctionBlock && sym.name == calleeType->name) {
-            sigSym = &sym;
+         if (sym.kind != st2cpp::semantic::SymbolKind::FunctionBlock || sym.name != calleeType->name) {
+            continue;
+         }
+         if (sym.isExternal) {
+            if (externalSym == nullptr) {
+               externalSym = &sym;
+            }
+         } else {
+            localSym = &sym;
             break;
          }
+      }
+      if (localSym != nullptr) {
+         sigSym = localSym;
+      } else if (externalSym != nullptr) {
+         sigSym = externalSym;
       }
    }
 
@@ -2626,15 +3314,24 @@ st2cpp::semantic::SymbolId CodeGenerator::semanticFbSymbolId(const POU& pou) con
    if (!st) {
       return 0;
    }
+   // Prefer the project-local FB (POUs being generated are always project
+   // declarations); external library FBs act as a fallback only.
+   st2cpp::semantic::SymbolId externalId = 0;
    for (const auto& sym : st->getSymbols()) {
       if (sym.id == 0 || sym.kind != st2cpp::semantic::SymbolKind::FunctionBlock) {
          continue;
       }
-      if (normalizeType(sym.name) == normalizeType(pou.name)) {
+      if (normalizeType(sym.name) != normalizeType(pou.name)) {
+         continue;
+      }
+      if (!sym.isExternal) {
          return sym.id;
       }
+      if (externalId == 0) {
+         externalId = sym.id;
+      }
    }
-   return 0;
+   return externalId;
 }
 
 /**
@@ -2844,26 +3541,50 @@ void CodeGenerator::genStmt(const Stmt& stmt)
                // Check if this is a method call (contains dot) vs direct FB call
                bool isMethodCall = (std::get_if<MemberExpr>(&call->callee->node) != nullptr);
 
+               // External-library FB invocation: recover the descriptor binding
+               // (cppBinding.call). Project-local FBs return isFb=false so the
+               // legacy binary path (set_IN/get_Q/plain "callee()") is preserved.
+               ExternalFbCallInfo extFb;
+               if (!isFunctionBlock && !isMethodCall) {
+                  extFb = semanticFbCallInfo(*call);
+                  if (extFb.isFb) {
+                     isFunctionBlock = true;
+                  }
+               }
+
                // CASE 1: Direct Function Block call (e.g., myFB(10, false))
                if (isFunctionBlock && !call->args.empty() && !isMethodCall) {
                   // Get the base FB name (without array indices)
                   std::string baseFBName = getBaseFBName(calleeName);
 
+                  // FB signature: canonical from semantics when the external FB
+                  // has no collected project signature, else the collected one.
+                  const FunctionSignature* fbSig = (sigIt != m_signatures.end()) ? &sigIt->second : nullptr;
+                  std::optional<FunctionSignature> extFbSig;
+                  if (fbSig == nullptr && extFb.isFb) {
+                     extFbSig = semanticSignatureForCall(*call);
+                     if (extFbSig.has_value()) {
+                        fbSig = &*extFbSig;
+                     }
+                  }
+
                   // Handle positional arguments (inputs) -> setters
                   if (!call->args.empty() && !call->args[0].named) {
                      size_t idx = 0;
-                     for (const auto& param : sigIt->second.parameters) {
-                        if (param.isInput && idx < call->args.size()) {
-                           if (call->args[idx].name != "") {
-                              std::ostringstream oss;
-                              oss << "Error at line " << call->args[idx].line << ":" << call->args[idx].col
-                                  << ": Mixed reference and positional parameters in call to function block '" << calleeName << "'";
-                              throw std::runtime_error(oss.str());
+                     if (fbSig != nullptr) {
+                        for (const auto& param : fbSig->parameters) {
+                           if (param.isInput && idx < call->args.size()) {
+                              if (call->args[idx].name != "") {
+                                 std::ostringstream oss;
+                                 oss << "Error at line " << call->args[idx].line << ":" << call->args[idx].col
+                                     << ": Mixed reference and positional parameters in call to function block '" << calleeName << "'";
+                                 throw std::runtime_error(oss.str());
+                              }
+                              std::string value = genExpr(*call->args[idx].value);
+                              // Use calleeName (includes array index) for the actual call
+                              m_src << ind() << calleeName << ".set_" << normalizeIdent(param.name) << "(" << value << ");\n";
+                              idx++;
                            }
-                           std::string value = genExpr(*call->args[idx].value);
-                           // Use calleeName (includes array index) for the actual call
-                           m_src << ind() << calleeName << ".set_" << normalizeIdent(param.name) << "(" << value << ");\n";
-                           idx++;
                         }
                      }
                   }
@@ -2884,21 +3605,28 @@ void CodeGenerator::genStmt(const Stmt& stmt)
                      }
                   }
 
-                  // Execute the FB
-                  m_src << ind() << calleeName << "();\n";
+                  // Execute the FB: external FBs invoke the descriptor step
+                  // (cppBinding.call, e.g. "timer.process()"); local FBs stay binary.
+                  if (extFb.isFb && !extFb.step.empty()) {
+                     m_src << ind() << calleeName << "." << extFb.step << "();\n";
+                  } else {
+                     m_src << ind() << calleeName << "();\n";
+                  }
 
                   // Handle output bindings -> getters
                   if (!call->args.empty() && !call->args[0].named) {
                      size_t idx = 0;
-                     for (const auto& param : sigIt->second.parameters) {
-                        if (!param.isInput && idx < call->args.size()) {
-                           std::ostringstream oss;
-                           oss << "Error at line " << call->args[idx].line << ":" << call->args[idx].col
-                               << ": Called VAR_OUTPUT or VAR_IN_OUT parameter without naming it in call to function block '"
-                               << calleeName << "'";
-                           throw std::runtime_error(oss.str());
-                        } else if (param.isInput && idx < call->args.size()) {
-                           idx++;
+                     if (fbSig != nullptr) {
+                        for (const auto& param : fbSig->parameters) {
+                           if (!param.isInput && idx < call->args.size()) {
+                              std::ostringstream oss;
+                              oss << "Error at line " << call->args[idx].line << ":" << call->args[idx].col
+                                  << ": Called VAR_OUTPUT or VAR_IN_OUT parameter without naming it in call to function block '"
+                                  << calleeName << "'";
+                              throw std::runtime_error(oss.str());
+                           } else if (param.isInput && idx < call->args.size()) {
+                              idx++;
+                           }
                         }
                      }
                   } else {
@@ -2908,6 +3636,16 @@ void CodeGenerator::genStmt(const Stmt& stmt)
                            m_src << ind() << value << " = " << calleeName << ".get_" << normalizeIdent(arg.name) << "();\n";
                         }
                      }
+                  }
+                  return;
+               }
+
+               // CASE 1b: external FB invocation without arguments (no setters)
+               if (extFb.isFb && !isMethodCall) {
+                  if (extFb.step.empty()) {
+                     m_src << ind() << calleeName << "();\n";
+                  } else {
+                     m_src << ind() << calleeName << "." << extFb.step << "();\n";
                   }
                   return;
                }
@@ -2934,6 +3672,16 @@ void CodeGenerator::genStmt(const Stmt& stmt)
                            activeCalleeName = calleeName;
                         }
                      }
+                  }
+               }
+
+               // External-library FUNCTION: replace the callee with its C++
+               // binding (freeFunction verbatim / owner::symbol for static
+               // methods). Local functions and FBs are left untouched.
+               if (!isFunctionBlock && !isMethodCall) {
+                  const std::string bound = semanticCallTargetName(*call);
+                  if (!bound.empty()) {
+                     activeCalleeName = bound;
                   }
                }
 
@@ -3126,13 +3874,22 @@ void CodeGenerator::genFor(const ForStmt& s)
       }
    }
 
+   // The control variable must NOT be redeclared with `auto` when it is an
+   // already-declared ST variable: `for (auto i = ...)` would shadow the
+   // declared variable, leaving it untouched after the loop (IEC reads the
+   // control variable's final value) and giving the counter a C++ type that
+   // may differ from the declared one. Only undeclared (implicit) control
+   // variables get `auto` so the loop counter still has a C++ declaration.
+   const bool varDeclared = m_scope.lookupVariableInfo(normalizedVar).has_value();
+   const std::string loopVarDecl = varDeclared ? "" : "auto ";
+
    if (isNegativeStep) {
       // Negative step: loop while var >= to
-      m_src << ind() << "for (auto " << normalizedVar << " = " << fromExpr << "; " << normalizedVar << " >= " << toExpr << "; "
+      m_src << ind() << "for (" << loopVarDecl << normalizedVar << " = " << fromExpr << "; " << normalizedVar << " >= " << toExpr << "; "
             << normalizedVar << " += " << byExpr << ") {\n";
    } else {
       // Positive step: loop while var <= to
-      m_src << ind() << "for (auto " << normalizedVar << " = " << fromExpr << "; " << normalizedVar << " <= " << toExpr << "; "
+      m_src << ind() << "for (" << loopVarDecl << normalizedVar << " = " << fromExpr << "; " << normalizedVar << " <= " << toExpr << "; "
             << normalizedVar << " += " << byExpr << ") {\n";
    }
    push();
@@ -3325,9 +4082,12 @@ std::string CodeGenerator::genExpr(const Expr& expr)
          using T = std::decay_t<decltype(e)>;
 
          if constexpr (std::is_same_v<T, LiteralExpr>) {
-            // Time literals require special handling
+            // Time literals are folded to their value in milliseconds (Time = UInt32).
             if (e.suffix == "TIME") {
-               return "IEC_TIME_LITERAL(\"" + e.value + "\")";
+               if (auto ms = st2cpp::semantic::iecTimeLiteralToMilliseconds(e.value)) {
+                  return std::to_string(*ms) + "u";
+               }
+               return "0u"; // malformed literal; semantic analysis already reported it
             }
             std::string value = e.value;
 
@@ -3375,10 +4135,17 @@ std::string CodeGenerator::genExpr(const Expr& expr)
 
             // Semantic: the identifier resolved to an ENUMERATOR symbol.
             // This replaces the name-based m_enumeratorToEnum guesswork.
+            // External-library members keep the descriptor spelling (matched
+            // case-insensitively), e.g. examplelib::State::RUNNING.
             if (semanticAvailable() && e.symbolId != 0) {
-               const std::string enumName = semanticEnumNameForEnumerator(e.symbolId);
-               if (!enumName.empty()) {
-                  return enumName + "::" + varName;
+               if (const st2cpp::semantic::Symbol* sym = semanticSymTab()->get(e.symbolId)) {
+                  if (sym->kind == st2cpp::semantic::SymbolKind::Enumerator) {
+                     const st2cpp::semantic::TypeInfo* et = semanticSymTab()->getType(sym->typeId);
+                     const std::string enumCpp = semanticTypeCppName(sym->typeId, normalizeType(et ? et->name : ""));
+                     if (!enumCpp.empty()) {
+                        return enumCpp + "::" + semanticEnumeratorCppName(sym->typeId, sym->name);
+                     }
+                  }
                }
             }
 
@@ -3416,6 +4183,19 @@ std::string CodeGenerator::genExpr(const Expr& expr)
                }
                // Normal variable
                return varName;
+            }
+
+            // External library global/constant: bind the C++ name from the
+            // descriptor (project locals already matched above and win).
+            if (semanticAvailable() && e.symbolId != 0) {
+               if (const st2cpp::semantic::Symbol* sym = semanticSymTab()->get(e.symbolId)) {
+                  if (sym->isExternal && sym->kind == st2cpp::semantic::SymbolKind::Variable) {
+                     const std::string bound = semanticVariableBinding(*sym);
+                     if (!bound.empty()) {
+                        return bound;
+                     }
+                  }
+               }
             }
 
             // Fallback: use name directly (could be a function, constant, etc.)
@@ -3499,9 +4279,14 @@ std::string CodeGenerator::genExpr(const Expr& expr)
             std::string object = genExpr(*e.object);
             std::string member = normalizeIdent(e.member);
 
-            // Semantic: the object type is an ENUM -> use '::' instead of '.'
+            // Semantic: the object type is an ENUM -> use '::' instead of '.'.
+            // External enums qualify with the descriptor binding and member
+            // spelling (e.g. examplelib::State::RUNNING); local enums are
+            // unaffected (e.g. COLOR::GREEN).
             if (semanticAvailable() && e.object->resolvedTypeId != 0 && isSemanticEnumType(e.object->resolvedTypeId)) {
-               return object + "::" + member;
+               const st2cpp::semantic::TypeInfo* et = semanticSymTab()->getType(e.object->resolvedTypeId);
+               const std::string enumCpp = semanticTypeCppName(e.object->resolvedTypeId, normalizeType(et ? et->name : ""));
+               return enumCpp + "::" + semanticEnumeratorCppName(e.object->resolvedTypeId, e.member);
             }
 
             // Legacy fallback: enum member access via name-based maps (needs :: instead of .)
@@ -3549,6 +4334,14 @@ std::string CodeGenerator::genExpr(const Expr& expr)
                }
             }
             std::string calleeName = genExpr(*e.callee);
+            // External-library FUNCTION: bind the call target (freeFunction
+            // verbatim / owner::symbol). Legacy and local calls are unchanged.
+            if (semanticAvailable()) {
+               const std::string bound = semanticCallTargetName(e);
+               if (!bound.empty()) {
+                  calleeName = bound;
+               }
+            }
             std::string r = calleeName + "(";
             bool first = true;
 
@@ -4228,10 +5021,16 @@ std::vector<GeneratedFile> CodeGenerator::generateModular(const TranslationUnit&
    // Clear resolved addresses map
    m_resolvedATAddresses.clear();
 
-   // Step 1: Collect all signatures FIRST (before generating anything)
-   for (const auto& pou : tu.pous) {
-      collectSignature(pou);
-   }
+   // Pre-scan the TU so the modular headers can include the libraries used.
+   computeLibraryIncludeLines(tu);
+
+// Resolve TYPE aliases before any variable type is mapped.
+    registerTypeAliases(tu.typeAliases);
+
+    // Step 1: Collect all signatures FIRST (before generating anything)
+    for (const auto& pou : tu.pous) {
+       collectSignature(pou);
+    }
 
    // Step 2: Register enum types and their enumerators
    for (const auto& et : tu.enums) {
@@ -4595,6 +5394,11 @@ std::string CodeGenerator::generateSimpleGVLsHeader(const TranslationUnit& tu)
    out << "#define ST2CPP_RUNTIME_NAMESPACE " << m_namespace << "\n";
    out << "#include \"" << m_runtimeHeader << "\"\n\n";
 
+   if (!m_libraryIncludeLines.empty()) {
+      out << libraryIncludeBlock();
+      out << "\n";
+   }
+
    if (m_hasAddresses) {
       out << "#include \"ProcessImage.hpp\"\n";
    }
@@ -4816,6 +5620,11 @@ std::string CodeGenerator::generateGVLsHeader(const TranslationUnit& tu)
    out << "#define ST2CPP_RUNTIME_NAMESPACE " << m_namespace << "\n";
    out << "#include \"" << m_runtimeHeader << "\"\n";
 
+   if (!m_libraryIncludeLines.empty()) {
+      out << libraryIncludeBlock();
+      out << "\n";
+   }
+
    m_hasAddresses = false;
    for (const auto& sec : tu.globals) {
       for (const auto& d : sec.decls) {
@@ -5025,6 +5834,11 @@ std::string CodeGenerator::generateFBHeader(const POU& pou, const std::unordered
    out << "#pragma once\n";
    out << "#define ST2CPP_RUNTIME_NAMESPACE " << m_namespace << "\n";
    out << "#include \"" << m_runtimeHeader << "\"\n";
+
+   if (!m_libraryIncludeLines.empty()) {
+      out << libraryIncludeBlock();
+      out << "\n";
+   }
 
    // Store the base class for SUPER^ calls
    std::string baseClass = pou.extends.empty() ? "" : normalizeType(pou.extends);
@@ -5333,6 +6147,11 @@ std::string CodeGenerator::generateFunctionsHeader(const TranslationUnit& tu)
    out << "#define ST2CPP_RUNTIME_NAMESPACE " << m_namespace << "\n";
    out << "#include \"" << m_runtimeHeader << "\"\n";
 
+   if (!m_libraryIncludeLines.empty()) {
+      out << libraryIncludeBlock();
+      out << "\n";
+   }
+
    m_hasAddresses = false;
    for (const auto& pou : tu.pous) {
       if (pou.kind == POUKind::FUNCTION) {
@@ -5564,6 +6383,11 @@ std::string CodeGenerator::generateProgramHeader(const POU& pou)
    out << "#pragma once\n";
    out << "#define ST2CPP_RUNTIME_NAMESPACE " << m_namespace << "\n";
    out << "#include \"" << m_runtimeHeader << "\"\n";
+
+   if (!m_libraryIncludeLines.empty()) {
+      out << libraryIncludeBlock();
+      out << "\n";
+   }
 
    if (m_hasAddresses) {
       out << "#include \"ProcessImage.hpp\"\n";

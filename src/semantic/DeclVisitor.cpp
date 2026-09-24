@@ -55,6 +55,24 @@ bool extractArrayBoundValue(const std::shared_ptr<Expr>& bound, int& value)
    return false;
 }
 
+/**
+ * @brief Best-effort spelling of a non-constant array bound for diagnostics.
+ * @param bound Bound expression (may be null)
+ * @return The identifier text, or a generic placeholder
+ */
+std::string arrayBoundIdent(const std::shared_ptr<Expr>& bound)
+{
+   if (bound) {
+      if (const auto* ident = std::get_if<IdentExpr>(&bound->node)) {
+         return ident->name;
+      }
+      if (const auto* lit = std::get_if<LiteralExpr>(&bound->node)) {
+         return lit->value;
+      }
+   }
+   return "non-literal expression";
+}
+
 } // namespace
 
 /**
@@ -99,6 +117,11 @@ void DeclVisitor::visitTranslationUnit(const TranslationUnit& tu) {
     for (const auto& iface : tu.interfaces) {
         registerInterfaceBody(iface);
     }
+    // Named type aliases (TYPE Name : <type>; END_TYPE) resolve here so that
+    // POU bodies/globals declared later can reference them by name.
+    for (const auto& alias : tu.typeAliases) {
+        registerTypeAlias(alias);
+    }
     registerPouBodies(tu.pous);
 
     // Phase 4: Register global variables
@@ -126,7 +149,7 @@ void DeclVisitor::visitTranslationUnit(const TranslationUnit& tu) {
  * @param st The struct type to register
  */
 void DeclVisitor::registerStructHeader(const StructType& st) {
-    SourceLocation loc = makeLocation(0);
+    SourceLocation loc = makeLocation(st.line, st.col);
     
     // Check for duplicate in global scope
     SymbolId existing = symTab_.lookupGlobal(st.name);
@@ -188,7 +211,7 @@ void DeclVisitor::registerStructBody(const StructType& st) {
         SymbolId memberSymId = symTab_.declare(member.name, SymbolKind::StructMember, memberTypeId);
         if (memberSymId == 0) {
             reportError(DiagnosticCode::DuplicateDeclaration,
-                "duplicate struct member: " + member.name, makeLocation(0));
+                "duplicate struct member: " + member.name, makeLocation(member.line, member.col));
         } else {
             Symbol* memberSym = symTab_.get(memberSymId);
             if (memberSym) {
@@ -203,13 +226,71 @@ void DeclVisitor::registerStructBody(const StructType& st) {
 }
 
 /**
+ * @brief Register a named type alias (TYPE Name : <TypeRef>; END_TYPE).
+ * @details Resolves the underlying type reference and binds the alias name to
+ * its canonical TypeId: the alias gets a Type symbol (so variables may use it,
+ * including as an array element) and the SymbolTable name lookup registers the
+ * name against the canonical type. Alias-to-alias chains resolve when the
+ * referenced alias is declared earlier and already resolved; unknown or not
+ * yet resolvable targets are reported here (once).
+ * @param alias The alias to register
+ */
+void DeclVisitor::registerTypeAlias(const TypeAlias& alias) {
+    SourceLocation loc = makeLocation(alias.line, alias.col);
+
+    const SymbolId symId = symTab_.declare(alias.name, SymbolKind::Type);
+    if (symId == 0) {
+        reportError(DiagnosticCode::DuplicateDeclaration,
+            "duplicate type declaration: " + alias.name, loc);
+        return;
+    }
+    Symbol* aliasSym = symTab_.get(symId);
+    if (!aliasSym) {
+        return;
+    }
+
+    TypeId underlyingId = 0;
+    if (alias.type.arrayDims.empty() && !alias.type.isPointer && !alias.type.isRefTo &&
+        alias.type.base == BaseType::NAMED) {
+        // Plain named target (alias of a user type). Resolved silently so that
+        // an in-order alias chain Type B : A keeps working while an unknown or
+        // forward-alias target is reported exactly once below.
+        underlyingId = resolveNamedTypeSilent(alias.type.name);
+        if (underlyingId == 0) {
+            reportError(DiagnosticCode::InvalidTypeName,
+                "unknown type in alias '" + alias.name + "'", loc);
+            return;
+        }
+    } else if (!alias.type.arrayDims.empty() && alias.type.base == BaseType::NAMED) {
+        // Named array type: the element must already be resolvable (forward
+        // references to STRUCT/ENUM work: their TypeIds are set in Pass A).
+        if (resolveNamedTypeSilent(alias.type.name) == 0) {
+            reportError(DiagnosticCode::InvalidTypeName,
+                "unknown element type '" + alias.type.name + "' in array type alias '" + alias.name + "'", loc);
+            return;
+        }
+        underlyingId = resolveTypeRef(alias.type, alias.line, alias.col);
+    } else {
+        // Primitive/pointer/ref targets: resolveTypeRef reports unknown named
+        // targets itself, so nothing else is emitted when it fails here.
+        underlyingId = resolveTypeRef(alias.type, alias.line, alias.col);
+    }
+
+    if (underlyingId == 0) {
+        return;
+    }
+    aliasSym->typeId = underlyingId;
+    symTab_.registerTypeAlias(alias.name, underlyingId);
+}
+
+/**
  * @brief Register an enum type and its enumerators in the symbol table.
  * @details Registers the enum TypeInfo before its enumerators so each enumerator
  * is typed with the enum type, and reports duplicate enumerator names.
  * @param et The enum type to register
  */
 void DeclVisitor::registerEnumType(const EnumType& et) {
-    SourceLocation loc = makeLocation(0);
+    SourceLocation loc = makeLocation(et.line, et.col);
     
     // Check for duplicate in global scope
     SymbolId existing = symTab_.lookup(et.name);
@@ -250,7 +331,7 @@ void DeclVisitor::registerEnumType(const EnumType& et) {
         // Check for duplicate enumerator names
         if (seenEnumValues.find(enumVal.name) != seenEnumValues.end()) {
             reportError(DiagnosticCode::DuplicateEnumValue,
-                "duplicate enum value: " + enumVal.name, makeLocation(0));
+                "duplicate enum value: " + enumVal.name, makeLocation(enumVal.line, enumVal.col));
         }
         seenEnumValues.insert(enumVal.name);
 
@@ -283,7 +364,7 @@ void DeclVisitor::registerEnumType(const EnumType& et) {
  * @param iface The interface to register
  */
 void DeclVisitor::registerInterfaceHeader(const Interface& iface) {
-    SourceLocation loc = makeLocation(iface.line);
+    SourceLocation loc = makeLocation(iface.line, iface.col);
     
     // Check for duplicate in global scope
     SymbolId existing = symTab_.lookupGlobal(iface.name);
@@ -400,7 +481,7 @@ void DeclVisitor::registerInterfaceBody(const Interface& iface) {
  */
 void DeclVisitor::registerPouHeaders(const std::vector<POU>& pous) {
     for (const auto& pou : pous) {
-        SourceLocation loc = makeLocation(pou.line);
+        SourceLocation loc = makeLocation(pou.line, pou.col);
         
         // Check for duplicate in global scope
         SymbolId existing = symTab_.lookupGlobal(pou.name);
@@ -470,7 +551,7 @@ void DeclVisitor::registerPouBodies(const std::vector<POU>& pous) {
  * @param pou The POU to register
  */
 void DeclVisitor::registerPou(const POU& pou) {
-    SourceLocation loc = makeLocation(pou.line);
+    SourceLocation loc = makeLocation(pou.line, pou.col);
     
     // Find the symbol ID for this POU
     SymbolId pouSymId = symTab_.lookup(pou.name);
@@ -557,7 +638,7 @@ void DeclVisitor::registerVarSection(const VarSection& section, SymbolId scopeId
  * @param sectionKind The section kind of the declaring variable section
  */
 void DeclVisitor::registerVarDecl(const VarDecl& decl, SymbolId scopeId, SymbolKind varKind, VarKind sectionKind) {
-    SourceLocation loc = makeLocation(decl.line);
+    SourceLocation loc = makeLocation(decl.line, decl.col);
     
     // Check for duplicate in current scope
     SymbolId existing = symTab_.lookup(decl.name);
@@ -567,7 +648,7 @@ void DeclVisitor::registerVarDecl(const VarDecl& decl, SymbolId scopeId, SymbolK
         return;
     }
 
-    TypeId typeId = resolveTypeRef(decl.type, decl.line);
+    TypeId typeId = resolveTypeRef(decl.type, decl.line, decl.col);
     
     SymbolId varSymId = symTab_.declare(decl.name, varKind, typeId);
     if (varSymId == 0) {
@@ -630,7 +711,7 @@ void DeclVisitor::registerMethods(const std::vector<Method>& methods, SymbolId f
  * @param fbSymbolId The symbol of the containing function block
  */
 void DeclVisitor::registerMethod(const Method& method, SymbolId fbScopeId, SymbolId fbSymbolId) {
-    SourceLocation loc = makeLocation(method.line);
+    SourceLocation loc = makeLocation(method.line, method.col);
     
     SymbolId methodSymId = symTab_.declare(method.name, SymbolKind::Method);
     if (methodSymId == 0) {
@@ -875,6 +956,10 @@ void DeclVisitor::collectFbCompositionEdges(Symbol* fb, const std::vector<Symbol
         if (type->symbolId == 0) continue;
         SymbolId depFbId = type->symbolId;
         if (depFbId == fb->id) continue; // self-containment: never adds progress
+        // External (library-imported) FBs are pre-imported: they need no
+        // project emission order, so they impose no edge on their owner.
+        const Symbol* depFb = symTab_.get(depFbId);
+        if (depFb && depFb->isExternal) continue;
         auto& edges = graph[depFbId];
         if (std::find(edges.begin(), edges.end(), fb->id) == edges.end()) {
             edges.push_back(fb->id); // dependency FB -> owner FB
@@ -898,6 +983,9 @@ void DeclVisitor::detectValueCycles() {
     std::vector<SymbolId> nodes;
 
     for (const auto& sym : symTab_.getSymbols()) {
+        if (sym.isExternal) {
+            continue; // library types never participate in value-cycle checks
+        }
         if (sym.kind == SymbolKind::FunctionBlock) {
             nodes.push_back(sym.id);
             inDegree[sym.id] = 0;
@@ -913,6 +1001,10 @@ void DeclVisitor::detectValueCycles() {
 
     auto addEdge = [&](SymbolId payload, SymbolId container) {
         if (payload == 0) return;
+        const Symbol* payloadSym = symTab_.get(payload);
+        // External payloads are pre-imported: they add no ordering constraint
+        // and must not keep the container's in-degree from draining.
+        if (payloadSym && payloadSym->isExternal) return;
         auto& edges = graph[payload];
         if (std::find(edges.begin(), edges.end(), container) == edges.end()) {
             edges.push_back(container);
@@ -1045,7 +1137,9 @@ void DeclVisitor::topoSortFbs() {
     
     // Collect all FBs
     for (const auto& sym : symTab_.getSymbols()) {
-        if (sym.kind == SymbolKind::FunctionBlock) {
+        // External (library-imported) FBs are never emitted by the codegen and
+        // must not take part in the project topological ordering.
+        if (!sym.isExternal && sym.kind == SymbolKind::FunctionBlock) {
             allFbs.push_back(sym.id);
             inDegree[sym.id] = 0;
         }
@@ -1112,7 +1206,7 @@ void DeclVisitor::topoSortStructs() {
     
     // Collect all STRUCTs
     for (const auto& sym : symTab_.getSymbols()) {
-        if (sym.kind == SymbolKind::Type) {
+        if (sym.kind == SymbolKind::Type && !sym.isExternal) {
             // Check if this is a struct type by looking at its TypeInfo
             TypeInfo* typeInfo = symTab_.getType(sym.typeId);
             if (typeInfo && typeInfo->kind == TypeKind::Struct) {
@@ -1135,6 +1229,9 @@ void DeclVisitor::topoSortStructs() {
             TypeInfo* memberTypeInfo = symTab_.getType(memberSym->typeId);
             if (memberTypeInfo && memberTypeInfo->kind == TypeKind::Struct) {
                 SymbolId memberStructSymId = memberTypeInfo->symbolId;
+                const Symbol* memberStructSym = symTab_.get(memberStructSymId);
+                // External structs are pre-imported: they never impose ordering.
+                if (memberStructSym && memberStructSym->isExternal) continue;
                 if (memberStructSymId != 0 && memberStructSymId != structId) {
                     graph[memberStructSymId].push_back(structId); // member struct -> parent struct
                     inDegree[structId]++;
@@ -1183,7 +1280,7 @@ void DeclVisitor::topoSortStructs() {
  * @param line The source line of the referencing declaration (0 when unknown)
  * @return The resolved TypeId
  */
-TypeId DeclVisitor::resolveTypeRef(const TypeRef& typeRef, uint32_t line) {
+TypeId DeclVisitor::resolveTypeRef(const TypeRef& typeRef, uint32_t line, uint32_t col) {
     // Handle POINTER TO
     if (typeRef.isPointer) {
         TypeId pointedTypeId = 0;
@@ -1247,11 +1344,23 @@ TypeId DeclVisitor::resolveTypeRef(const TypeRef& typeRef, uint32_t line) {
         size_t elemCount = 1;
         for (const auto& dim : typeRef.arrayDims) {
             ArrayDimInfo dimInfo;
-            dimInfo.isConstant = true;
             int low = 0;
             int high = 9;
-            if (!extractArrayBoundValue(dim.low, low)) low = 0;
-            if (!extractArrayBoundValue(dim.high, high)) high = 9;
+            const bool lowOk = extractArrayBoundValue(dim.low, low);
+            const bool highOk = extractArrayBoundValue(dim.high, high);
+            dimInfo.isConstant = lowOk && highOk;
+            if (!lowOk) {
+                diag_.addError(DiagnosticCode::ArrayBoundsNotConstant,
+                    "array lower bound must be a constant integer literal (variable '" 
+                        + arrayBoundIdent(dim.low) + "' found)", makeLocation(line, col));
+                low = 0; // placeholder, keeps permissive generation going
+            }
+            if (!highOk) {
+                diag_.addError(DiagnosticCode::ArrayBoundsNotConstant,
+                    "array upper bound must be a constant integer literal (variable '" 
+                        + arrayBoundIdent(dim.high) + "' found)", makeLocation(line, col));
+                high = 9; // placeholder, keeps permissive generation going
+            }
             dimInfo.low = low;
             dimInfo.high = high;
             arrayType.dimensions.push_back(dimInfo);
@@ -1324,12 +1433,40 @@ std::string DeclVisitor::baseTypeName(BaseType baseType) {
  * symbols as valid type declarations; unknown names are reported as an
  * InvalidTypeName diagnostic, pointing at the declaration that referenced the
  * type when a line is available.
+ *
+ * When importer has loaded external libraries, a second step consults the
+ * external scope (library-provided enum/struct/FB types); project-local types
+ * always win, external ones are a pure fallback. External symbols are never
+ * reported as "unknown" errors here.
  * @param name The type name to resolve
  * @param line The source line of the referencing declaration (0 when unknown)
  * @return The resolved TypeId, or 0 when the type is unknown
  */
+TypeId DeclVisitor::resolveNamedTypeSilent(const std::string& name) {
+    // Same resolution as resolveNamedType but WITHOUT reporting: callers decide
+    // whether (and how often) an unresolved name should be surfaced.
+    SymbolId typeSymId = symTab_.lookupGlobal(name);
+    if (typeSymId != 0) {
+        Symbol* typeSym = symTab_.get(typeSymId);
+        if (typeSym && (typeSym->kind == SymbolKind::Type ||
+                        typeSym->kind == SymbolKind::FunctionBlock ||
+                        typeSym->kind == SymbolKind::Program ||
+                        typeSym->kind == SymbolKind::Interface)) {
+            return typeSym->typeId;
+        }
+    }
+    SymbolId externalSymId = symTab_.lookupExternal(name);
+    if (externalSymId != 0) {
+        const Symbol* externalSym = symTab_.get(externalSymId);
+        if (externalSym && (externalSym->kind == SymbolKind::Type ||
+                            externalSym->kind == SymbolKind::FunctionBlock)) {
+            return externalSym->typeId;
+        }
+    }
+    return 0;
+}
+
 TypeId DeclVisitor::resolveNamedType(const std::string& name, uint32_t line) {
-    // Try to find the type symbol in the global (type) namespace only
     SymbolId typeSymId = symTab_.lookupGlobal(name);
     if (typeSymId != 0) {
         Symbol* typeSym = symTab_.get(typeSymId);
@@ -1340,6 +1477,17 @@ TypeId DeclVisitor::resolveNamedType(const std::string& name, uint32_t line) {
                         typeSym->kind == SymbolKind::Program ||
                         typeSym->kind == SymbolKind::Interface)) {
             return typeSym->typeId;
+        }
+    }
+
+    // Fallback: external library types (the final naming step). A project-local
+    // declaration never reaches this point, so it can never be shadowed.
+    SymbolId externalSymId = symTab_.lookupExternal(name);
+    if (externalSymId != 0) {
+        const Symbol* externalSym = symTab_.get(externalSymId);
+        if (externalSym && (externalSym->kind == SymbolKind::Type ||
+                            externalSym->kind == SymbolKind::FunctionBlock)) {
+            return externalSym->typeId;
         }
     }
     
@@ -1362,7 +1510,7 @@ SourceLocation DeclVisitor::makeLocation(uint32_t line, uint32_t col) const {
     SourceLocation loc;
     loc.line = line;
     loc.column = col;
-    loc.fileName = "<input>";
+    loc.fileName = diag_.sourceFileName();
     return loc;
 }
 

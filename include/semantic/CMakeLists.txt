@@ -6,6 +6,8 @@ add_library(st2cpp_semantic STATIC
     ${CMAKE_SOURCE_DIR}/src/semantic/SemanticAnalyzer.cpp
     ${CMAKE_SOURCE_DIR}/src/semantic/DeclVisitor.cpp
     ${CMAKE_SOURCE_DIR}/src/semantic/BodyVisitor.cpp
+    ${CMAKE_SOURCE_DIR}/src/semantic/LibrarySymbolImporter.cpp
+    ${CMAKE_SOURCE_DIR}/src/semantic/LibraryDescriptorBuilder.cpp
 )
 
 target_include_directories(st2cpp_semantic PUBLIC
@@ -15,4 +17,4 @@ target_include_directories(st2cpp_semantic PUBLIC
 
 target_compile_features(st2cpp_semantic PUBLIC cxx_std_17)
 
-target_link_libraries(st2cpp_semantic PUBLIC st2cpp_lib)
+target_link_libraries(st2cpp_semantic PUBLIC st2cpp_lib st2cpp_library)

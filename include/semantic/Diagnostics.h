@@ -49,6 +49,8 @@ enum class DiagnosticCode : uint16_t {
     DuplicateEnumValue           = 1007,
     MissingStructMember          = 1008,
     CircularDependency           = 1009,
+    ExternalSymbolCollision      = 1010, // same symbol exported by two libraries
+    ExternalBindingIncomplete    = 1011, // external symbol whose C++ binding is malformed
     
     // Type errors (2000-2999)
     TypeMismatch                 = 2001,
@@ -102,6 +104,7 @@ enum class DiagnosticCode : uint16_t {
     UnusedVariable               = 9002,
     DeprecatedFeature            = 9003,
     UnsupportedConstruct         = 9004,
+    InvalidTimeLiteral           = 9005,
     InternalError                = 9999
 };
 
@@ -119,6 +122,8 @@ inline std::string diagnosticCodeToString(DiagnosticCode code) {
         case DiagnosticCode::DuplicateEnumValue:           return "DuplicateEnumValue";
         case DiagnosticCode::MissingStructMember:          return "MissingStructMember";
         case DiagnosticCode::CircularDependency:           return "CircularDependency";
+        case DiagnosticCode::ExternalSymbolCollision:      return "ExternalSymbolCollision";
+        case DiagnosticCode::ExternalBindingIncomplete:    return "ExternalBindingIncomplete";
         case DiagnosticCode::TypeMismatch:                 return "TypeMismatch";
         case DiagnosticCode::IncompatibleTypes:            return "IncompatibleTypes";
         case DiagnosticCode::InvalidAssignment:            return "InvalidAssignment";
@@ -155,6 +160,7 @@ inline std::string diagnosticCodeToString(DiagnosticCode code) {
         case DiagnosticCode::UnusedVariable:               return "UnusedVariable";
         case DiagnosticCode::DeprecatedFeature:            return "DeprecatedFeature";
         case DiagnosticCode::UnsupportedConstruct:         return "UnsupportedConstruct";
+        case DiagnosticCode::InvalidTimeLiteral:           return "InvalidTimeLiteral";
         case DiagnosticCode::InternalError:                return "InternalError";
         default: return "UnknownCode(" + std::to_string(static_cast<uint16_t>(code)) + ")";
     }
@@ -267,23 +273,131 @@ public:
     // Print formatted output (GCC/Clang style)
     void print(std::ostream& out) const {
         for (const auto& d : diagnostics_) {
-            out << d.toString() << '\n';
-            for (const auto& rel : d.relatedLocations) {
-                out << rel.toString() << ": note: see here\n";
-            }
-            if (!d.suggestion.empty()) {
-                out << "  suggestion: " << d.suggestion << '\n';
-            }
+            printDiagnostic(out, d);
+        }
+        if (!diagnostics_.empty()) {
+            printSummary(out);
         }
     }
     
     // Print summary
     void printSummary(std::ostream& out) const {
-        out << "Diagnostics: " << errorCount() << " error(s), " << warningCount() << " warning(s)\n";
+        const size_t errors = errorCount();
+        const size_t warnings = warningCount();
+        if (errors > 0 && warnings > 0) {
+            out << errors << " error(s), " << warnings << " warning(s) generated.\n";
+        } else if (errors > 0) {
+            out << errors << (errors == 1 ? " error generated.\n" : " errors generated.\n");
+        } else if (warnings > 0) {
+            out << warnings << (warnings == 1 ? " warning generated.\n" : " warnings generated.\n");
+        }
     }
+
+    // Source context used for pretty printing: the real file name and the raw
+    // text of the analyzed source (needed to render the code snippet/caret).
+    void setSourceName(const std::string& name) { sourceName_ = name; }
+    const std::string& sourceFileName() const { return sourceName_; }
+    void setSourceText(const std::string& text) { sourceText_ = text; }
+    const std::string& sourceText() const { return sourceText_; }
 
 private:
     std::vector<Diagnostic> diagnostics_;
+    std::string sourceName_ = "<input>";
+    std::string sourceText_;
+
+    static std::string severityName(DiagnosticSeverity sev) {
+        switch (sev) {
+            case DiagnosticSeverity::Error:   return "error";
+            case DiagnosticSeverity::Warning: return "warning";
+            case DiagnosticSeverity::Note:    return "note";
+        }
+        return "note";
+    }
+
+    // Extract the raw text of a 1-based source line.
+    static std::string sourceLine(const std::string& text, uint32_t line) {
+        if (text.empty() || line == 0) return "";
+        size_t start = 0;
+        for (uint32_t i = 1; i < line; ++i) {
+            size_t nl = text.find('\n', start);
+            if (nl == std::string::npos) return "";
+            start = nl + 1;
+        }
+        size_t end = text.find('\n', start);
+        std::string l = text.substr(start, end == std::string::npos ? std::string::npos : end - start);
+        if (!l.empty() && l.back() == '\r') l.pop_back();
+        return l;
+    }
+
+    // Expand tabs to spaces so the source line and its caret stay aligned.
+    static std::string expandTabs(const std::string& src) {
+        std::string out;
+        size_t disp = 0;
+        for (char c : src) {
+            if (c == '\t') {
+                const size_t spaces = 4 - (disp % 4);
+                out.append(spaces, ' ');
+                disp += spaces;
+            } else {
+                out += c;
+                ++disp;
+            }
+        }
+        return out;
+    }
+
+    // Build the caret underline for a 1-based column (optionally spanning to
+    // endColumn). Tabs before the column are taken into account.
+    static std::string caretLine(const std::string& src, uint32_t col, uint32_t endColumn) {
+        if (col == 0) return "";
+        size_t disp = 0; // display column of `col` in the expanded line
+        size_t idx = 0;
+        while (idx < src.size() && idx + 1 < static_cast<size_t>(col)) {
+            if (src[idx] == '\t') {
+                disp = (disp / 4 + 1) * 4;
+            } else {
+                ++disp;
+            }
+            ++idx;
+        }
+        size_t span = 1;
+        if (endColumn > col) {
+            span = static_cast<size_t>(endColumn) - col;
+        }
+        return std::string(disp, ' ') + std::string(span, '^');
+    }
+
+    void printDiagnostic(std::ostream& out, const Diagnostic& d) const {
+        // Header line: file:line:col: severity: message [Code]
+        if (d.location.isValid()) {
+            out << d.location.toString() << ": ";
+        } else {
+            std::string file = d.location.fileName.empty() ? sourceName_ : d.location.fileName;
+            out << file << ": ";
+        }
+        out << severityName(d.severity) << ": " << d.message
+            << " [" << diagnosticCodeToString(d.code) << "]\n";
+
+        // Code snippet with a caret (only when a source position and the
+        // analyzed source text are available).
+        if (d.location.isValid() && d.location.column > 0 && !sourceText_.empty()) {
+            const std::string line = expandTabs(sourceLine(sourceText_, d.location.line));
+            if (!line.empty()) {
+                const std::string num = std::to_string(d.location.line);
+                const std::string pad(num.size(), ' ');
+                const std::string caret
+                    = caretLine(line, d.location.column, d.location.endColumn);
+                out << "  " << num << " | " << line << '\n';
+                out << "  " << pad << " | " << caret << '\n';
+            }
+        }
+        for (const auto& rel : d.relatedLocations) {
+            out << rel.toString() << ": note: see here\n";
+        }
+        if (!d.suggestion.empty()) {
+            out << "  suggestion: " << d.suggestion << '\n';
+        }
+    }
 };
 
 } // namespace st2cpp::semantic

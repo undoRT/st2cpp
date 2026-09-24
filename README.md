@@ -150,6 +150,50 @@ With `--strict`, the analyzer runs in **Strict** mode: all diagnostics are print
 
 ---
 
+## External Libraries
+
+`st2cpp` can call into native C++ from ST through **external libraries** declared in JSON. A `project.json` lists one Library Descriptor per library (`libraries/io.json`, …); descriptors define the C++ namespace, the headers to include, and the ST-visible symbols (types, constants, globals, functions, static methods, FB-like objects).
+
+~~~bash
+st2cpp --workspace . --ext-libs project.json --output-dir generated
+~~~
+
+The libraries are loaded into a `LibraryRegistry`, injected into semantic analysis, and the generated C++ emits namespace-qualified calls, FB instance methods, and the required `#include`s automatically. Full JSON schemas: [`docs/12-library-descriptor-spec.md`](docs/12-library-descriptor-spec.md) and [`docs/13-project-configuration-spec.md`](docs/13-project-configuration-spec.md). Runnable example: [`examples/external_library`](examples/external_library).
+
+### Exporting descriptors from ST
+
+The pipeline also runs in the **export** direction: `LibraryDescriptorBuilder`
+turns analyzed ST directly into a valid v1.0 descriptor (semantic-only, no C++
+bindings), which can be serialized to JSON and re-imported. Functions and
+function blocks no longer require a `cppBinding` section, so ST-originated
+libraries load cleanly. See [`docs/15-library-descriptor-export.md`](docs/15-library-descriptor-export.md).
+
+---
+
+## Documentation
+
+In-repository technical documentation lives in [`docs/`](docs/README.md):
+
+| Document | Contents |
+|----------|----------|
+| [`01-overview.md`](docs/01-overview.md) | Overview of the pipeline and repository layout |
+| [`02-architecture.md`](docs/02-architecture.md) | Module/target map and AST model |
+| [`03-build-and-test.md`](docs/03-build-and-test.md) | Build options and how to run the tests |
+| [`04-command-line.md`](docs/04-command-line.md) | Complete CLI reference and exit codes |
+| [`05-language-support.md`](docs/05-language-support.md) | IEC 61131-3 coverage and limitations |
+| [`06-semantic-analysis.md`](docs/06-semantic-analysis.md) | Analyzer passes, symbol table, strictness |
+| [`07-code-generation.md`](docs/07-code-generation.md) | Generated C++ shape, modular project mode |
+| [`08-process-image.md`](docs/08-process-image.md) | `AT %I/%Q/%M` mapping and pi options |
+| [`09-runtime.md`](docs/09-runtime.md) | The `undoCore` header-only runtime |
+| [`10-json-module.md`](docs/10-json-module.md) | `st2cpp::json` DOM/parser/serializer |
+| [`11-external-libraries.md`](docs/11-external-libraries.md) | External-library subsystem overview |
+| [`12-library-descriptor-spec.md`](docs/12-library-descriptor-spec.md) | Library Descriptor JSON v1.0 spec |
+| [`13-project-configuration-spec.md`](docs/13-project-configuration-spec.md) | Project Configuration JSON v1.0 spec |
+| [`14-examples.md`](docs/14-examples.md) | Example walkthroughs |
+| [`15-library-descriptor-export.md`](docs/15-library-descriptor-export.md) | Descriptor import (optional bindings) and export (`LibraryDescriptorBuilder`, ST → JSON) |
+
+---
+
 ## CLI Reference
 
 | Option | Description |
@@ -161,6 +205,7 @@ With `--strict`, the analyzer runs in **Strict** mode: all diagnostics are print
 | `--tokens` | Dump token list and exit |
 | `--caseSensitive` | Preserve original case (default: convert to uppercase) |
 | `--workspace <path>` | Process all .st files in workspace (recursive) |
+| `--ext-libs <file.json>` | Load external libraries listed in the given Project Configuration JSON (`project.json`) |
 | `--project-style` | Generate modular project structure (separate files for each FB) |
 | `--output-dir <dir>` | Output directory (default: generated) |
 | `--pi-auto` | Auto-detect Process Image sizes (default) |
@@ -193,11 +238,14 @@ With `--strict`, the analyzer runs in **Strict** mode: all diagnostics are print
 
 ## Testing
 
-The project includes a comprehensive test suite using Google Test (470+ tests), covering:
+The project includes a comprehensive test suite using Google Test (**659 tests passing, 2 disabled, 23 suites**), covering:
 
 - **Lexing and parsing** of all IEC 61131-3 constructs
-- **Semantic analysis**: symbol resolution, type checking, scope chains, enums, structs, arrays, interfaces, inheritance, method overriding, forward type references and by-value dependency cycles, and process image globals
+- **Semantic analysis**: symbol resolution, type checking, scope chains, enums, structs, arrays, interfaces, inheritance, method overriding, forward type references and by-value dependency cycles, process image globals, and **external-library symbol import**
 - **Code generation** for single-file and modular project output
+- **JSON, Library Descriptor and Project Configuration modules**
+- **Library descriptor export**: ST → descriptor → canonical JSON → re-import round trip, dependency policies, and representability errors
+- **End-to-end compilation** of generated C++ with a native compiler
 
 To build and run tests:
 

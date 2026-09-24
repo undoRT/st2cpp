@@ -1,0 +1,16 @@
+{
+  "$schemaVersion": "1.0",
+  "name": "AnalogMonitor",
+  "libraries": [
+    {
+      "id": "core",
+      "version": "^1.0.0",
+      "path": "libraries/core.json"
+    },
+    {
+      "id": "io",
+      "version": "^1.0.0",
+      "path": "libraries/io.json"
+    }
+  ]
+}

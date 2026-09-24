@@ -89,6 +89,15 @@ target_compile_options(st2cpp_lib PRIVATE
 # Semantic analysis library
 add_subdirectory(include/semantic)
 
+# JSON module library
+add_subdirectory(include/json)
+
+# Library Descriptor module library
+add_subdirectory(include/library)
+
+# Project Configuration module library
+add_subdirectory(include/project)
+
 # If undoCore is available as a CMake target, link it
 if(TARGET undoCore)
     target_link_libraries(st2cpp_lib PUBLIC undoCore)
@@ -105,7 +114,7 @@ endif()
 # ============================================================================
 add_executable(st2cpp src/cli/main.cpp)
 
-target_link_libraries(st2cpp PRIVATE st2cpp_semantic st2cpp_lib)
+target_link_libraries(st2cpp PRIVATE st2cpp_semantic st2cpp_lib st2cpp_project)
 
 target_include_directories(st2cpp PRIVATE
     ${ST2CPP_INCLUDE_DIR}
@@ -158,16 +167,34 @@ if(BUILD_TESTS)
         tests/semantic/test_type_system.cpp
         tests/semantic/test_decl_visitor.cpp
         tests/semantic/test_body_visitor.cpp
+        tests/semantic/test_iec_time.cpp
         tests/semantic/test_codegen_semantic.cpp
+        tests/library/test_json.cpp
+        tests/library/test_library_loader.cpp
+        tests/library/test_library_registry.cpp
+        tests/library/test_library_descriptor_builder.cpp
+        tests/project/test_project_config_loader.cpp
+        tests/project/test_project_loader.cpp
+        tests/semantic/test_semantic_library.cpp
+        tests/codegen/test_codegen_external_library.cpp
     )
 
     file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/tests/st_samples/ 
      DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/tests/st_samples/)
 
+    file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/tests/library/data/
+     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/tests/library/data/)
+
+    file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/tests/project/data/
+     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/tests/project/data/)
+
     # Link libraries
     target_link_libraries(st2cpp_tests
         st2cpp_lib
         st2cpp_semantic
+        st2cpp_library
+        st2cpp_json
+        st2cpp_project
         GTest::gtest_main
         # pthread is required on Linux/Unix, included automatically via GTest on Windows
     )
@@ -187,7 +214,11 @@ if(BUILD_TESTS)
         ${ST2CPP_COMPILE_FLAGS}
     )
     
-    # Copy ST sample files to build directory for golden tests
+    # Copy ST sample files to build directory for golden tests.
+    # In an in-source build (binary dir == source dir) the copies below would
+    # target a file onto itself and fail, so they are skipped: the samples are
+    # already where the tests expect them.
+    if(NOT CMAKE_CURRENT_BINARY_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     file(GLOB ST_SAMPLES "${CMAKE_CURRENT_SOURCE_DIR}/tests/st_samples/*.st")
     set(ST_SAMPLE_FILES "")
     foreach(SAMPLE ${ST_SAMPLES})
@@ -234,10 +265,13 @@ if(BUILD_TESTS)
     
     add_custom_target(st_samples ALL DEPENDS ${ST_SAMPLE_FILES})
     add_dependencies(st2cpp_tests st_samples)
+    endif()
     
     # Passa la directory dei sample al test eseguibile
     target_compile_definitions(st2cpp_tests PRIVATE
         ST_SAMPLES_DIR="${CMAKE_CURRENT_BINARY_DIR}/tests/st_samples"
+        LIBRARY_SAMPLES_DIR="${CMAKE_CURRENT_BINARY_DIR}/tests/library/data"
+        PROJECT_SAMPLES_DIR="${CMAKE_CURRENT_BINARY_DIR}/tests/project/data"
     )
     
     # Registra i test con CTest

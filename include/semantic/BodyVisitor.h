@@ -19,21 +19,21 @@
 namespace st2cpp::semantic {
 
 /**
- * @brief Visitor for body analysis phase (Sprint 2B)
+ * @brief Visitor for body analysis phase
  * 
  * Second pass: resolves names and decorates AST with semantic information.
  * Handles: name resolution, shadowing, scope traversal.
- * Does NOT perform type checking of expressions/statements (Sprint 3).
+ * Does NOT perform type checking of expressions/statements.
  * 
  * AST Decoration Model:
  * - Expr::symbolId is populated with the resolved SymbolId
  * - Expr::resolvedTypeId is populated with the resolved TypeId
  * - IdentExpr::symbolId is populated with the resolved SymbolId
  * - CallExpr::calleeSymbolId is populated with the resolved callee SymbolId
- * - MemberExpr::symbolId is populated when type information is available (Sprint 2C)
+ * - MemberExpr::symbolId is populated when type information is available
  * 
  * The AST is decorated in-place during traversal, making the results
- * directly accessible to downstream phases (Sprint 2C+, CodeGenerator).
+ * directly accessible to downstream phases (CodeGenerator).
  */
 class BodyVisitor {
 public:
@@ -94,10 +94,10 @@ public:
     // --- Statement Visiting ---
     void visitStatementList(const std::vector<std::shared_ptr<Stmt>>& stmts);
     void visitStatement(const Stmt& stmt);
-    void visitAssignStmt(const AssignStmt& stmt, uint32_t line);
+    void visitAssignStmt(const AssignStmt& stmt, uint32_t line, uint32_t col);
     void visitExprStmt(const ExprStmt& stmt);
     void visitIfStmt(const IfStmt& stmt);
-    void visitForStmt(const ForStmt& stmt, uint32_t line);
+    void visitForStmt(const ForStmt& stmt, uint32_t line, uint32_t col);
     void visitWhileStmt(const WhileStmt& stmt);
     void visitRepeatStmt(const RepeatStmt& stmt);
     void visitCaseStmt(const CaseStmt& stmt);

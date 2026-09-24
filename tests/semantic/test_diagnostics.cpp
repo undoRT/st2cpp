@@ -197,6 +197,40 @@ TEST(DiagnosticsTest, DiagnosticCodeValues) {
     EXPECT_LT(static_cast<uint16_t>(DiagnosticCode::WrongArgumentCount), 4000);
 }
 
+TEST(DiagnosticsTest, PrintShowsCaretAndRail) {
+    Diagnostics diag;
+    diag.setSourceName("array.st");
+    diag.setSourceText("FUNCTION_BLOCK F\nVAR\n    n : INT;\n    A : ARRAY[n..2] OF INT;\nEND_VAR\nEND_FUNCTION_BLOCK\n");
+    SourceLocation loc{"array.st", 4, 5};
+    diag.addError(DiagnosticCode::ArrayBoundsNotConstant, "array lower bound must be a constant", loc);
+
+    std::ostringstream oss;
+    diag.print(oss);
+
+    std::string output = oss.str();
+    EXPECT_NE(output.find("array.st:4:5: error"), std::string::npos);
+    EXPECT_NE(output.find("[ArrayBoundsNotConstant]"), std::string::npos);
+    // gcc-style gutter with source line and caret aligned under the column
+    EXPECT_NE(output.find("  4 |"), std::string::npos);
+    EXPECT_NE(output.find('|'), std::string::npos);
+    EXPECT_NE(output.find("    A : ARRAY"), std::string::npos);
+    // summary line
+    EXPECT_NE(output.find("1 error generated"), std::string::npos);
+}
+
+TEST(DiagnosticsTest, PrintUsesSourceNameWhenLocationInvalid) {
+    Diagnostics diag;
+    diag.setSourceName("really.boo.st");
+    SourceLocation loc{"really.boo.st", 0, 0}; // invalid: no line number
+    diag.addError(DiagnosticCode::DuplicateDeclaration, "generic error", loc);
+
+    std::ostringstream oss;
+    diag.print(oss);
+
+    std::string output = oss.str();
+    EXPECT_NE(output.find("really.boo.st: error"), std::string::npos);
+}
+
 TEST(DiagnosticsTest, SourceLocationEndPosition) {
     SourceLocation loc;
     loc.fileName = "test.st";
