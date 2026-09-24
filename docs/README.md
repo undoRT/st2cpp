@@ -13,7 +13,7 @@ runtime shipped under `st2cpp_includes/`.
 | — | [`01-overview.md`](01-overview.md) | What st2cpp is, the end-to-end pipeline, repository layout |
 | — | [`02-architecture.md`](02-architecture.md) | Module map, build targets, dependency chains, AST model |
 | — | [`03-build-and-test.md`](03-build-and-test.md) | Requirements, CMake options, targets, running the tests |
-| — | [`04-command-line.md`](04-command-line.md) | Complete CLI reference (`--ext-libs`, exit codes, modes) |
+| — | [`04-command-line.md`](04-command-line.md) | Complete CLI reference (`--ext-libs`, `--export-descriptor`, exit codes, modes) |
 | — | [`05-language-support.md`](05-language-support.md) | IEC 61131-3 coverage and known limitations |
 | — | [`06-semantic-analysis.md`](06-semantic-analysis.md) | Two-pass analysis, symbol table, type checking, Strict vs Permissive |
 | — | [`07-code-generation.md`](07-code-generation.md) | Single-file and modular project generation, C++ output shape |
@@ -24,7 +24,7 @@ runtime shipped under `st2cpp_includes/`.
 | — | [`12-library-descriptor-spec.md`](12-library-descriptor-spec.md) | Library Descriptor JSON v1.0 specification |
 | — | [`13-project-configuration-spec.md`](13-project-configuration-spec.md) | Project Configuration JSON v1.0 specification |
 | — | [`14-examples.md`](14-examples.md) | Walkthrough of every example under `examples/` |
-| — | [`15-library-descriptor-export.md`](15-library-descriptor-export.md) | Descriptor JSON: import and export (`LibraryDescriptorBuilder`, ST → JSON) |
+| — | [`15-library-descriptor-export.md`](15-library-descriptor-export.md) | Descriptor JSON: import and export (`LibraryDescriptorBuilder`, CLI `--export-descriptor`, ST → JSON) |
 
 ## Suggested reading order
 

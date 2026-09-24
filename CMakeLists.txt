@@ -173,6 +173,7 @@ if(BUILD_TESTS)
         tests/library/test_library_loader.cpp
         tests/library/test_library_registry.cpp
         tests/library/test_library_descriptor_builder.cpp
+        tests/library/test_cli_export.cpp
         tests/project/test_project_config_loader.cpp
         tests/project/test_project_loader.cpp
         tests/semantic/test_semantic_library.cpp
@@ -212,6 +213,11 @@ if(BUILD_TESTS)
     # Compiler options for tests
     target_compile_options(st2cpp_tests PRIVATE
         ${ST2CPP_COMPILE_FLAGS}
+    )
+
+    # Path of the CLI binary injected into the CLI integration tests
+    target_compile_definitions(st2cpp_tests PRIVATE
+        ST2CPP_CLI_PATH="${CMAKE_CURRENT_BINARY_DIR}/st2cpp"
     )
     
     # Copy ST sample files to build directory for golden tests.

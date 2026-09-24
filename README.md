@@ -166,7 +166,20 @@ The pipeline also runs in the **export** direction: `LibraryDescriptorBuilder`
 turns analyzed ST directly into a valid v1.0 descriptor (semantic-only, no C++
 bindings), which can be serialized to JSON and re-imported. Functions and
 function blocks no longer require a `cppBinding` section, so ST-originated
-libraries load cleanly. See [`docs/15-library-descriptor-export.md`](docs/15-library-descriptor-export.md).
+libraries load cleanly.
+
+~~~bash
+# Single file → reusable library descriptor
+./st2cpp lib.st --export-descriptor lib.json \
+    --lib-id timerlib --lib-name TimerLib --lib-version 1.0.0
+
+# Whole workspace, merged as one library, resolved against external libraries
+./st2cpp --workspace ./plc --export-descriptor mylib.json \
+    --lib-id mylib --lib-name MyLib --lib-version 2.0.0 \
+    --ext-libs project.json --lib-dependency timerlib=^1.0.0
+~~~
+
+See [`docs/15-library-descriptor-export.md`](docs/15-library-descriptor-export.md).
 
 ---
 
@@ -190,7 +203,7 @@ In-repository technical documentation lives in [`docs/`](docs/README.md):
 | [`12-library-descriptor-spec.md`](docs/12-library-descriptor-spec.md) | Library Descriptor JSON v1.0 spec |
 | [`13-project-configuration-spec.md`](docs/13-project-configuration-spec.md) | Project Configuration JSON v1.0 spec |
 | [`14-examples.md`](docs/14-examples.md) | Example walkthroughs |
-| [`15-library-descriptor-export.md`](docs/15-library-descriptor-export.md) | Descriptor import (optional bindings) and export (`LibraryDescriptorBuilder`, ST → JSON) |
+| [`15-library-descriptor-export.md`](docs/15-library-descriptor-export.md) | Descriptor import (optional bindings) and export (`LibraryDescriptorBuilder`, CLI `--export-descriptor`, ST → JSON) |
 
 ---
 
@@ -213,6 +226,12 @@ In-repository technical documentation lives in [`docs/`](docs/README.md):
 | `--pi-input <bytes>` | Process Image Input size in bytes (default: 1024) |
 | `--pi-output <bytes>` | Process Image Output size in bytes (default: 1024) |
 | `--pi-marker <bytes>` | Process Image Marker size in bytes (default: 1024) |
+| `--export-descriptor <file.json>` | Export a semantic-only JSON Library Descriptor from the analyzed ST |
+| `--lib-id <id>` | Library id for `--export-descriptor` (required) |
+| `--lib-name <name>` | Library name for `--export-descriptor` (required) |
+| `--lib-version <ver>` | Library semver version for `--export-descriptor` (required) |
+| `--lib-description <text>` | Optional library description |
+| `--lib-dependency <id>=<constraint>` | Version policy for an external dependency (repeatable) |
 | `-v, --verbose` | Print detailed processing information |
 | `--strict` | Strict IEC 61131-3 mode: block generation on semantic errors |
 | `-h, --help` | Show this help |
@@ -238,13 +257,14 @@ In-repository technical documentation lives in [`docs/`](docs/README.md):
 
 ## Testing
 
-The project includes a comprehensive test suite using Google Test (**659 tests passing, 2 disabled, 23 suites**), covering:
+The project includes a comprehensive test suite using Google Test (**663 tests passing, 2 disabled, 24 suites**), covering:
 
 - **Lexing and parsing** of all IEC 61131-3 constructs
 - **Semantic analysis**: symbol resolution, type checking, scope chains, enums, structs, arrays, interfaces, inheritance, method overriding, forward type references and by-value dependency cycles, process image globals, and **external-library symbol import**
 - **Code generation** for single-file and modular project output
 - **JSON, Library Descriptor and Project Configuration modules**
 - **Library descriptor export**: ST → descriptor → canonical JSON → re-import round trip, dependency policies, and representability errors
+- **CLI export integration**: `--export-descriptor` end-to-end (single file, workspace, validation and error codes)
 - **End-to-end compilation** of generated C++ with a native compiler
 
 To build and run tests:

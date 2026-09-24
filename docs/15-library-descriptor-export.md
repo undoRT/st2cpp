@@ -276,6 +276,38 @@ and the associated TypeRef becomes:
   `LibraryLoader::fromString` and the reloaded JSON must be byte-identical
   (test `SerializeThenReloadIsStable`).
 
+### 3.10 CLI: `--export-descriptor`
+
+The export pipeline is exposed on the command line:
+
+```
+st2cpp lib.st --export-descriptor lib.json \
+    --lib-id timerlib --lib-name TimerLib --lib-version 1.0.0
+```
+
+| Option | Meaning |
+| --- | --- |
+| `--export-descriptor <file.json>` | Destination JSON file |
+| `--lib-id <id>` | Library id (required) |
+| `--lib-name <name>` | Library name (required) |
+| `--lib-version <semver>` | Library version, semver (required) |
+| `--lib-description <text>` | Optional library description |
+| `--lib-dependency <id>=<constraint>` | Version policy for an external dependency (repeatable, e.g. `timerlib=^1.0.0`) |
+
+Semantics:
+
+- works on a **single `.st` file** or on a whole **`--workspace`** (all files are
+  merged and de-duplicated as one library, mirroring project-style conflation);
+- may be combined with `--ext-libs project.json`: external references then
+  resolve against the registry and enter `dependencies` — each one requires a
+  matching `--lib-dependency` policy;
+- export errors print as `Export error:` lines and the process exits `1`; the
+  descriptor is still written best-effort for inspection (mirrors §3.2);
+- missing `--lib-id`/`--lib-name`/`--lib-version` or a malformed
+  `--lib-dependency <id>=<constraint>` is a usage error (exit `1`).
+
+The flags above populate exactly the `LibraryExportOptions` of §3.1.
+
 ---
 
 ## 4. Complete example
@@ -308,7 +340,9 @@ VAR acc : TIME; END_VAR
 END_FUNCTION_BLOCK
 ```
 
-Call from the application (or from tests, via `TestHelper`):
+Call from the application (or from tests, via `TestHelper`), or from the CLI —
+`st2cpp lib.st --export-descriptor lib.json --lib-id mylib --lib-name MyLib
+--lib-version 1.2.3 --lib-description "Exported ST library"`:
 
 ```cpp
 st2cpp::semantic::LibraryExportOptions opts;
@@ -458,8 +492,6 @@ This closes the loop: **ST export → JSON → re-import → resolution**.
   semantic-only builder).
 - B2 (`Symbol*` pointers saved before `TypeInfo` registration during imports
   with collisions) remains a documented debt.
-- CLI export is not part of this work: the C++ API and the tests cover the
-  pipeline; the CLI can later reuse the same library.
 
 ## 8. References
 

@@ -17,6 +17,8 @@
 #include "codegen/CodeGenerator.h"
 #include "semantic/SemanticAnalyzer.h"
 #include "semantic/SemanticInfo.h"
+#include "semantic/LibraryDescriptorBuilder.h"
+#include "library/LibrarySerializer.h"
 #include "project/ProjectConfigLoader.h"
 #include "project/ProjectLoader.h"
 #include "version.hpp"
@@ -220,12 +222,25 @@ static void printUsage(const char* prog)
                 "  --pi-input <bytes>   Process Image Input size in bytes (default: 1024)\n"
                 "  --pi-output <bytes>  Process Image Output size in bytes (default: 1024)\n"
                 "  --pi-marker <bytes>  Process Image Marker size in bytes (default: 1024)\n"
+                "  --export-descriptor <file.json>\n"
+                "                       Export a semantic-only JSON Library Descriptor from the\n"
+                "                       analyzed ST (works with a single file or --workspace)\n"
+                "  --lib-id <id>        Library id for --export-descriptor (required)\n"
+                "  --lib-name <name>    Library name for --export-descriptor (required)\n"
+                "  --lib-version <ver>  Library version (semver) for --export-descriptor (required)\n"
+                "  --lib-description <text>\n"
+                "                       Optional library description\n"
+                "  --lib-dependency <id>=<constraint>\n"
+                "                       Version policy for an external dependency (repeatable,\n"
+                "                       e.g. --lib-dependency timerlib=^1.0.0)\n"
                 "  -v, --verbose        Print detailed processing information\n"
                 "  -h, --help           Show this help\n\n"
                 "Examples:\n"
                 "  Single file:     st2cpp counter.st -o counter.cpp\n"
                 "  Workspace:       st2cpp --workspace ./my_plc_project\n"
-                "  Project style:   st2cpp --workspace ./my_plc_project --project-style --output-dir build\n";
+                "  Project style:   st2cpp --workspace ./my_plc_project --project-style --output-dir build\n"
+                "  Export library:  st2cpp lib.st --export-descriptor lib.json --lib-id timerlib\n"
+                "                          --lib-name TimerLib --lib-version 1.0.0\n";
 }
 
 /**
@@ -532,8 +547,11 @@ int main(int argc, char* argv[])
    bool autoDetectPI = true;
    size_t piInputBytes = 1024;
    size_t piOutputBytes = 1024;
-   size_t piMarkerBytes = 1024;
-   std::string extLibsConfig;
+size_t piMarkerBytes = 1024;
+    std::string extLibsConfig;
+    std::string exportDescriptorPath;
+    std::string libId, libName, libVersion, libDescription;
+    std::vector<std::string> dependencyFlags;
 
    for (int i = 1; i < argc; ++i) {
       if (std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "--help") == 0) {
@@ -581,9 +599,21 @@ int main(int argc, char* argv[])
          piInputBytes = std::stoul(argv[++i]);
       } else if (std::strcmp(argv[i], "--pi-output") == 0 && i + 1 < argc) {
          piOutputBytes = std::stoul(argv[++i]);
-      } else if (std::strcmp(argv[i], "--pi-marker") == 0 && i + 1 < argc) {
-         piMarkerBytes = std::stoul(argv[++i]);
-      } else if (argv[i][0] != '-') {
+} else if (std::strcmp(argv[i], "--pi-marker") == 0 && i + 1 < argc) {
+          piMarkerBytes = std::stoul(argv[++i]);
+       } else if (std::strcmp(argv[i], "--export-descriptor") == 0 && i + 1 < argc) {
+          exportDescriptorPath = argv[++i];
+       } else if (std::strcmp(argv[i], "--lib-id") == 0 && i + 1 < argc) {
+          libId = argv[++i];
+       } else if (std::strcmp(argv[i], "--lib-name") == 0 && i + 1 < argc) {
+          libName = argv[++i];
+       } else if (std::strcmp(argv[i], "--lib-version") == 0 && i + 1 < argc) {
+          libVersion = argv[++i];
+       } else if (std::strcmp(argv[i], "--lib-description") == 0 && i + 1 < argc) {
+          libDescription = argv[++i];
+       } else if (std::strcmp(argv[i], "--lib-dependency") == 0 && i + 1 < argc) {
+          dependencyFlags.push_back(argv[++i]);
+       } else if (argv[i][0] != '-') {
          inputPath = argv[i];
       } else {
          std::cerr << "Unknown option: " << argv[i] << "\n";
@@ -622,6 +652,123 @@ int main(int argc, char* argv[])
             std::cout << "  - " << id << "\n";
          }
       }
+   }
+
+   // ========================================================================
+   // DESCRIPTOR EXPORT MODE (--export-descriptor <file.json>)
+   // ST -> SemanticAnalyzer -> LibraryDescriptorBuilder -> JSON
+   // Produces a semantic-only Library Descriptor v1.0 (no cppBinding) that is
+   // re-importable through --ext-libs. Constructs not representable in the
+   // JSON schema surface as explicit export errors (never silent).
+   // ========================================================================
+   if (!exportDescriptorPath.empty()) {
+      if (inputPath.empty() && !workspaceMode) {
+         std::cerr << "Error: --export-descriptor requires an input .st file or --workspace\n";
+         printUsage(argv[0]);
+         return 1;
+      }
+      if (libId.empty() || libName.empty() || libVersion.empty()) {
+         std::cerr << "Error: --export-descriptor requires --lib-id, --lib-name and --lib-version\n";
+         printUsage(argv[0]);
+         return 1;
+      }
+
+      st2cpp::semantic::LibraryExportOptions options;
+      options.id = libId;
+      options.name = libName;
+      options.version = libVersion;
+      options.description = libDescription;
+      for (const auto& dep : dependencyFlags) {
+         size_t eq = dep.find('=');
+         if (eq == std::string::npos || eq == 0 || eq + 1 == dep.size()) {
+            std::cerr << "Error: invalid --lib-dependency '" << dep
+                      << "' (expected <id>=<constraint>, e.g. timerlib=^1.0.0)\n";
+            return 1;
+         }
+         options.dependencyVersions[dep.substr(0, eq)] = dep.substr(eq + 1);
+      }
+
+      TranslationUnit tu;
+      std::string sourceName;
+      std::string sourceText;
+      try {
+         if (workspaceMode) {
+            if (workspacePath.empty()) {
+               std::cerr << "Error: --workspace requires a path\n";
+               return 1;
+            }
+            fs::path ws(workspacePath);
+            if (!fs::exists(ws)) {
+               std::cerr << "Error: Workspace path does not exist: " << workspacePath << "\n";
+               return 1;
+            }
+            auto stFiles = findStFiles(workspacePath, true);
+            if (stFiles.empty()) {
+               std::cerr << "Warning: No .st files found in workspace: " << workspacePath << "\n";
+               return 0;
+            }
+            int parsed = 0;
+            for (const auto& file : stFiles) {
+               auto fileTu = processSingleFile(file, false);
+               tu.pous.insert(tu.pous.end(), fileTu.pous.begin(), fileTu.pous.end());
+               tu.structs.insert(tu.structs.end(), fileTu.structs.begin(), fileTu.structs.end());
+               tu.enums.insert(tu.enums.end(), fileTu.enums.begin(), fileTu.enums.end());
+               tu.globals.insert(tu.globals.end(), fileTu.globals.begin(), fileTu.globals.end());
+               tu.interfaces.insert(tu.interfaces.end(), fileTu.interfaces.begin(), fileTu.interfaces.end());
+               parsed++;
+            }
+            if (parsed == 0) {
+               std::cerr << "Error: no .st files could be parsed in workspace: " << workspacePath << "\n";
+               return 1;
+            }
+            deduplicateMergedTu(tu);
+            sourceName = workspacePath;
+         } else {
+            tu = processSingleFile(inputPath, false);
+            sourceName = inputPath;
+            sourceText = readFile(inputPath);
+         }
+      } catch (const ParseError& e) {
+         std::cerr << "Parse error: " << e.what() << "\n";
+         return 1;
+      } catch (const std::exception& e) {
+         std::cerr << "Error: " << e.what() << "\n";
+         return 1;
+      }
+
+      auto semanticInfo = runSemanticAnalysis(tu, &libraryRegistry, sourceName, sourceText);
+      auto result = st2cpp::semantic::LibraryDescriptorBuilder::build(tu, semanticInfo, options);
+
+      for (const auto& err : result.errors) {
+         std::cerr << "Export error: " << err.toString() << "\n";
+      }
+
+      if (!result.descriptor) {
+         std::cerr << "Error: no library descriptor could be built; nothing written to "
+                   << exportDescriptorPath << "\n";
+         return 1;
+      }
+
+      try {
+         writeFile(exportDescriptorPath, st2cpp::library::LibrarySerializer::toJson(*result.descriptor, 2));
+      } catch (const std::exception& e) {
+         std::cerr << "Error: cannot write " << exportDescriptorPath << ": " << e.what() << "\n";
+         return 1;
+      }
+
+      std::cout << "Exported library descriptor: " << exportDescriptorPath << "\n";
+      std::cout << "  id: " << options.id << "\n";
+      std::cout << "  name: " << options.name << "\n";
+      std::cout << "  version: " << options.version << "\n";
+      std::cout << "  sections: enums=" << result.descriptor->enums.size()
+                << " types=" << result.descriptor->types.size()
+                << " constants=" << result.descriptor->constants.size()
+                << " globals=" << result.descriptor->globalVariables.size()
+                << " functions=" << result.descriptor->functions.size()
+                << " fbs=" << result.descriptor->functionBlocks.size()
+                << " deps=" << result.descriptor->dependencies.size() << "\n";
+
+      return result.ok() ? 0 : 1;
    }
 
    // ========================================================================

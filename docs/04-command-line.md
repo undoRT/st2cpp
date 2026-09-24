@@ -24,6 +24,12 @@ st2cpp <input.st> [options]
 | `--pi-input <bytes>` | Process Image Input size in bytes (default: `1024`) |
 | `--pi-output <bytes>` | Process Image Output size in bytes (default: `1024`) |
 | `--pi-marker <bytes>` | Process Image Marker size in bytes (default: `1024`) |
+| `--export-descriptor <file.json>` | Export a semantic-only JSON Library Descriptor from the analyzed ST |
+| `--lib-id <id>` | Library id for `--export-descriptor` (required) |
+| `--lib-name <name>` | Library name for `--export-descriptor` (required) |
+| `--lib-version <ver>` | Library semver version for `--export-descriptor` (required) |
+| `--lib-description <text>` | Optional library description |
+| `--lib-dependency <id>=<constraint>` | Version policy for an external dependency (repeatable) |
 | `-v, --verbose` | Print detailed processing information |
 | `-h, --help` | Show help and exit |
 | `--version` | Show version and exit |
@@ -88,6 +94,25 @@ the modes above. Errors in the project JSON or descriptor loading are printed
 with the full diagnostic list and exit code `1`. See
 `11-external-libraries.md`.
 
+### 5. Export a JSON Library Descriptor
+
+```bash
+st2cpp lib.st --export-descriptor lib.json \
+    --lib-id timerlib --lib-name TimerLib --lib-version 1.0.0
+```
+
+Runs the export pipeline (ST → semantic analysis → `LibraryDescriptorBuilder`
+→ JSON, see `15-library-descriptor-export.md`) and writes a semantic-only
+Library Descriptor v1.0 — no `cppBinding`, ready to be re-imported through
+`--ext-libs`. Works on a **single file** or on a whole **`--workspace`** (all
+files are merged and de-duplicated as one library). `--ext-libs` may be
+combined so external references become `dependencies`; each such library must
+have a policy entry via `--lib-dependency <id>=<constraint>`.
+
+Constructs not representable in the JSON schema are reported as `Export error:`
+lines (`exit 1`); the descriptor is still written best-effort for inspection.
+Missing `--lib-id`/`--lib-name`/`--lib-version` is a usage error.
+
 ## Semantic strictness and exit codes
 
 - Default: **Permissive** — diagnostics are collected and (with `-v`) printed,
@@ -101,7 +126,7 @@ Exit codes:
 | Code | Meaning |
 |------|---------|
 | `0` | success (also `--help`/`--version`) |
-| `1` | usage error, parse error, generation error, strict-mode block, invalid `--ext-libs` JSON |
+| `1` | usage error, parse error, generation error, strict-mode block, invalid `--ext-libs` JSON, export errors |
 
 Workspace and project-style runs return `1` if any file failed, `0` otherwise.
 
@@ -127,6 +152,10 @@ st2cpp --workspace ./plc --project-style --output-dir build
 
 # External libraries (project JSON drives everything)
 st2cpp --workspace . --ext-libs project.json --output-dir generated
+
+# Export a reusable library descriptor from ST
+st2cpp lib.st --export-descriptor lib.json --lib-id timerlib \
+    --lib-name TimerLib --lib-version 1.0.0 --lib-description "Timing library"
 
 # Strict, CI-friendly
 st2cpp --workspace ./plc --strict --output-dir build
