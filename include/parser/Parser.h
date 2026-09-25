@@ -30,9 +30,14 @@
 class ParseError : public std::runtime_error
 {
 public:
+   std::string message;
+   std::string fileName;
    uint32_t line, col;
-   ParseError(const std::string& msg, uint32_t ln, uint32_t c)
-      : std::runtime_error("Parse error at line " + std::to_string(ln) + ":" + std::to_string(c) + ": " + msg), line(ln), col(c)
+   uint32_t endCol;
+
+   ParseError(const std::string& msg, uint32_t ln, uint32_t c, const std::string& file = "", uint32_t endColumn = 0)
+      : std::runtime_error("Parse error at line " + std::to_string(ln) + ":" + std::to_string(c) + ": " + msg),
+        message(msg), fileName(file), line(ln), col(c), endCol(endColumn)
    {}
 };
 
@@ -49,7 +54,7 @@ public:
 class Parser
 {
 public:
-   explicit Parser(std::vector<Token> tokens);
+   explicit Parser(std::vector<Token> tokens, const std::string& fileName = "");
 
    TranslationUnit parseTranslationUnit();
    static const std::vector<Interface>& getParsedInterfaces() { return s_parsedInterfaces; }
@@ -61,6 +66,7 @@ private:
    // ========================================================================
 
    std::vector<Token> m_tokens; ///< Token stream to parse
+   std::string m_fileName;      ///< Source file used for diagnostics
    size_t m_pos = 0;            ///< Current parsing position
    static std::vector<Interface> s_parsedInterfaces;
 

@@ -25,7 +25,7 @@ std::vector<Interface> Parser::s_parsedInterfaces;
  * @brief Construct a parser with a token stream
  * @param tokens Vector of tokens from the lexer
  */
-Parser::Parser(std::vector<Token> tokens) : m_tokens(std::move(tokens)) {}
+Parser::Parser(std::vector<Token> tokens, const std::string& fileName) : m_tokens(std::move(tokens)), m_fileName(fileName) {}
 
 // ============================================================================
 //  Token Navigation Helpers
@@ -112,7 +112,8 @@ const Token& Parser::expect(TokenType t, const std::string& msg)
 ParseError Parser::error(const std::string& msg) const
 {
    const auto& tok = peek();
-   return ParseError(msg, tok.line, tok.col);
+   const uint32_t span = tok.text.empty() ? 1U : static_cast<uint32_t>(tok.text.size());
+   return ParseError(msg, tok.line, tok.col, m_fileName, tok.col + span);
 }
 
 // ============================================================================

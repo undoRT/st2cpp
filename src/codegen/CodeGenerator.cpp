@@ -1293,7 +1293,7 @@ void CodeGenerator::genFunctionBlock(const POU& pou)
          }
          std::string ctype = mapType(d.type);
          std::string upperName_inst = normalizeIdent(d.name);
-         std::string init = d.initialValue ? "{" + genExpr(*d.initialValue) + "}" : "{}";
+         std::string init = d.initialValue ? "{" + genExpr(*d.initialValue, d.type.base) + "}" : "{}";
 
          if (sec.kind == VarKind::IN_OUT) {
             // IN_OUT variables are wrapped in VAR_INOUT template
@@ -1433,7 +1433,7 @@ void CodeGenerator::genFunctionBlock(const POU& pou)
             }
             std::string ctype = mapType(d.type);
             std::string upperName_inst = normalizeIdent(d.name);
-            std::string init = d.initialValue ? "{" + genExpr(*d.initialValue) + "}" : "{}";
+            std::string init = d.initialValue ? "{" + genExpr(*d.initialValue, d.type.base) + "}" : "{}";
             m_src << ind() << ctype << " " << upperName_inst << init << ";\n";
          }
       }
@@ -1547,7 +1547,7 @@ void CodeGenerator::genFunction(const POU& pou)
             }
             std::string ctype = mapType(d.type);
             std::string varName = normalizeIdent(d.name);
-            std::string init = d.initialValue ? "{" + genExpr(*d.initialValue) + "}" : "{}";
+            std::string init = d.initialValue ? "{" + genExpr(*d.initialValue, d.type.base) + "}" : "{}";
             m_src << ind() << ctype << " " << varName << init << ";\n";
          }
       }
@@ -1670,7 +1670,7 @@ void CodeGenerator::genStruct(const StructType& st)
    for (const auto& member : st.members) {
       std::string ctype = mapType(member.type);
       std::string upperMember = normalizeIdent(member.name);
-      std::string init = member.initialValue ? "{" + genExpr(*member.initialValue) + "}" : "{}";
+      std::string init = member.initialValue ? "{" + genExpr(*member.initialValue, member.type.base) + "}" : "{}";
       m_hdr << ind() << ctype << " " << upperMember << init << ";\n";
    }
    pop();
@@ -1724,7 +1724,7 @@ void CodeGenerator::generateStructsInOrder(const std::vector<StructType>& struct
             for (const auto& member : st.members) {
                std::string ctype = mapType(member.type);
                std::string upperMember = normalizeIdent(member.name);
-               std::string init = member.initialValue ? "{" + genExpr(*member.initialValue) + "}" : "{}";
+               std::string init = member.initialValue ? "{" + genExpr(*member.initialValue, member.type.base) + "}" : "{}";
                *out << "    " << ctype << " " << upperMember << init << ";\n";
             }
             *out << "};\n\n";
@@ -1747,7 +1747,7 @@ void CodeGenerator::generateStructsInOrder(const std::vector<StructType>& struct
                for (const auto& member : st.members) {
                   std::string ctype = mapType(member.type);
                   std::string upperMember = normalizeIdent(member.name);
-                  std::string init = member.initialValue ? "{" + genExpr(*member.initialValue) + "}" : "{}";
+                  std::string init = member.initialValue ? "{" + genExpr(*member.initialValue, member.type.base) + "}" : "{}";
                   *out << "    " << ctype << " " << upperMember << init << ";\n";
                }
                *out << "};\n\n";
@@ -1904,7 +1904,7 @@ void CodeGenerator::genGlobals(const std::vector<VarSection>& globals)
             std::string arrayDecl = ctype + " " + upperName;
 
             if (d.initialValue) {
-               m_hdr << "inline " << arrayDecl << " = " << genExpr(*d.initialValue) << ";\n";
+               m_hdr << "inline " << arrayDecl << " = " << genExpr(*d.initialValue, d.type.base) << ";\n";
             } else {
                m_hdr << "inline " << arrayDecl << "{};\n";
             }
@@ -2138,7 +2138,7 @@ std::string CodeGenerator::memberDecl(const VarDecl& d)
    if (!d.type.arrayDims.empty()) {
       std::string result = ctype + " " + upperName;
       if (d.initialValue) {
-         init = " = " + genExpr(*d.initialValue);
+         init = " = " + genExpr(*d.initialValue, d.type.base);
       } else {
          init = "{}";
       }
@@ -2162,7 +2162,7 @@ std::string CodeGenerator::memberDecl(const VarDecl& d)
       }
 
       // Generate the initializer expression string
-      std::string initExpr = genExpr(*d.initialValue);
+      std::string initExpr = genExpr(*d.initialValue, d.type.base);
 
       // Avoid double braces: if the initializer is already a braced-init-list,
       // use it directly; otherwise wrap it in braces.
@@ -3150,9 +3150,12 @@ void CodeGenerator::collectUsedLibrariesFromStmt(const Stmt& stmt, std::unordere
    std::visit(
       [&](const auto& s) {
          using T = std::decay_t<decltype(s)>;
-         if constexpr (std::is_same_v<T, AssignStmt>) {
-            if (s.lhs) collectUsedLibrariesFromExpr(*s.lhs, used);
-            if (s.rhs) collectUsedLibrariesFromExpr(*s.rhs, used);
+          if constexpr (std::is_same_v<T, AssignStmt>) {
+             if (s.lhs) collectUsedLibrariesFromExpr(*s.lhs, used);
+             for (const auto& target : s.additionalTargets) {
+                if (target) collectUsedLibrariesFromExpr(*target, used);
+             }
+             if (s.rhs) collectUsedLibrariesFromExpr(*s.rhs, used);
          } else if constexpr (std::is_same_v<T, ExprStmt>) {
             if (s.expr) collectUsedLibrariesFromExpr(*s.expr, used);
          } else if constexpr (std::is_same_v<T, ReturnStmt>) {
@@ -3468,42 +3471,49 @@ void CodeGenerator::genStmt(const Stmt& stmt)
       [&](const auto& s) {
          using T = std::decay_t<decltype(s)>;
 
-         if constexpr (std::is_same_v<T, AssignStmt>) {
-            std::string lhsStr = genExpr(*s.lhs);
-            std::string rhsStr = genExpr(*s.rhs);
+          if constexpr (std::is_same_v<T, AssignStmt>) {
+             std::string chainValue;
+             if (!s.additionalTargets.empty()) {
+                chainValue = "_st2cpp_chain_" + std::to_string(m_scope.getNextTempCounter("chain_assignment"));
+                m_src << ind() << "auto " << chainValue << " = " << genExpr(*s.rhs) << ";\n";
+             }
 
-            // Check if LHS is a getter for an AT variable (get_NOMEVAR())
-            std::string varName;
-            if (lhsStr.rfind("getPi_", 0) == 0 && lhsStr.length() > 6 && lhsStr.back() == ')') {
-               // It is a getter: getPi_NOMEVAR()
-               varName = lhsStr.substr(6, lhsStr.length() - 8); // Remove getPi_ and ()
-               // Check if it is an AT variable using the scope manager
-               auto atOpt = m_scope.lookupATAddress(varName);
-               if (atOpt) {
-                  // Use setter instead of assignment
-                  m_src << ind() << "setPi_" << varName << "(" << rhsStr << ");\n";
-                  return;
-               }
-            }
+             auto emitAssignment = [&](const std::shared_ptr<Expr>& lhsExpr) {
+                if (!lhsExpr) {
+                   return;
+                }
 
-            // Check if LHS is an address (write access required)
-            if (auto* addr = std::get_if<AddressExpr>(&s.lhs->node)) {
-               // If this is a placeholder, it should have been resolved already.
-               // But we handle it gracefully.
-               std::string writeAccess = generateAddressWrite(*addr, rhsStr);
-               m_src << ind() << writeAccess << ";\n";
-               return;
-            }
+                std::string lhsStr = genExpr(*lhsExpr);
+                std::string rhsStr = chainValue.empty() ? genExpr(*s.rhs) : chainValue;
 
-            // Normal assignment
-            if (lhsStr == m_currentFunctionName) {
-               lhsStr = m_currentFunctionName + "_ret";
-            }
-            // Semantic-aware conversion: make the validated IEC conversion explicit
-            // (no-op when no semantic info is attached or types are identical).
-            rhsStr = applySemanticAssignmentCast(*s.lhs, *s.rhs, rhsStr);
-            m_src << ind() << lhsStr << " = " << rhsStr << ";\n";
-         } else if constexpr (std::is_same_v<T, ExprStmt>) {
+                std::string varName;
+                if (lhsStr.rfind("getPi_", 0) == 0 && lhsStr.length() > 6 && lhsStr.back() == ')') {
+                   varName = lhsStr.substr(6, lhsStr.length() - 8);
+                   auto atOpt = m_scope.lookupATAddress(varName);
+                   if (atOpt) {
+                      m_src << ind() << "setPi_" << varName << "(" << rhsStr << ");\n";
+                      return;
+                   }
+                }
+
+                if (auto* addr = std::get_if<AddressExpr>(&lhsExpr->node)) {
+                   std::string writeAccess = generateAddressWrite(*addr, rhsStr);
+                   m_src << ind() << writeAccess << ";\n";
+                   return;
+                }
+
+                if (lhsStr == m_currentFunctionName) {
+                   lhsStr = m_currentFunctionName + "_ret";
+                }
+                rhsStr = applySemanticAssignmentCast(*lhsExpr, *s.rhs, rhsStr);
+                m_src << ind() << lhsStr << " = " << rhsStr << ";\n";
+             };
+
+             emitAssignment(s.lhs);
+             for (const auto& target : s.additionalTargets) {
+                emitAssignment(target);
+             }
+          } else if constexpr (std::is_same_v<T, ExprStmt>) {
             // Expression statement (often a function call)
             if (auto* call = std::get_if<CallExpr>(&s.expr->node)) {
                std::string calleeName = genExpr(*call->callee);
@@ -4075,7 +4085,7 @@ int getBinaryPrecFromOp(const std::string& op)
  * @param expr The AST expression node to generate
  * @return C++ code string for the expression
  */
-std::string CodeGenerator::genExpr(const Expr& expr)
+std::string CodeGenerator::genExpr(const Expr& expr, BaseType typeHint)
 {
    return std::visit(
       [&](const auto& e) -> std::string {
@@ -4127,8 +4137,19 @@ std::string CodeGenerator::genExpr(const Expr& expr)
                return "0" + oct;
             }
 
-            return value;
-         } else if constexpr (std::is_same_v<T, BoolLitExpr>) {
+// Convert string literal quotes for C++:
+             // STRING (std::string): '...' -> "..."
+             // WSTRING (std::wstring): "..." -> L"..."
+             if (value.size() >= 2) {
+                if (value.front() == '\'' && value.back() == '\'') {
+                   value = "\"" + value.substr(1, value.size() - 2) + "\"";
+                } else if (typeHint == BaseType::WSTRING && value.front() == '"' && value.back() == '"') {
+                   value = "L" + value;
+                }
+             }
+
+             return value;
+          } else if constexpr (std::is_same_v<T, BoolLitExpr>) {
             return e.value ? "true" : "false";
          } else if constexpr (std::is_same_v<T, IdentExpr>) {
             std::string varName = normalizeIdent(e.name);
@@ -5339,6 +5360,17 @@ std::vector<GeneratedFile> CodeGenerator::generateModular(const TranslationUnit&
  */
 bool CodeGenerator::structContainsFB(const std::string& structName, const TranslationUnit& tu) const
 {
+   std::unordered_set<std::string> visited;
+   return structContainsFB(structName, tu, visited);
+}
+
+bool CodeGenerator::structContainsFB(const std::string& structName, const TranslationUnit& tu,
+                                     std::unordered_set<std::string>& visited) const
+{
+   if (!visited.insert(structName).second) {
+      return false;
+   }
+
    // Find the struct definition
    const StructType* targetStruct = nullptr;
    for (const auto& st : tu.structs) {
@@ -5363,7 +5395,7 @@ bool CodeGenerator::structContainsFB(const std::string& structName, const Transl
          }
 
          // Recursive check: is this member a struct that contains FB?
-         if (structContainsFB(memberType, tu)) {
+         if (structContainsFB(memberType, tu, visited)) {
             return true;
          }
       }
@@ -5664,7 +5696,7 @@ std::string CodeGenerator::generateGVLsHeader(const TranslationUnit& tu)
          for (const auto& member : st.members) {
             std::string ctype = mapType(member.type);
             std::string upperMember = normalizeIdent(member.name);
-            std::string init = member.initialValue ? "{" + genExpr(*member.initialValue) + "}" : "{}";
+            std::string init = member.initialValue ? "{" + genExpr(*member.initialValue, member.type.base) + "}" : "{}";
             out << "    " << ctype << " " << upperMember << init << ";\n";
          }
          out << "};\n\n";
@@ -5942,7 +5974,7 @@ std::string CodeGenerator::generateFBHeader(const POU& pou, const std::unordered
          }
          std::string ctype = mapType(d.type);
          std::string varName = normalizeIdent(d.name);
-         std::string init = d.initialValue ? "{" + genExpr(*d.initialValue) + "}" : "{}";
+         std::string init = d.initialValue ? "{" + genExpr(*d.initialValue, d.type.base) + "}" : "{}";
 
          if (sec.kind == VarKind::IN_OUT) {
             out << "    VAR_INOUT<" << ctype << "> " << varName << init << ";\n";
@@ -6660,7 +6692,7 @@ std::string CodeGenerator::generateFBOperatorBody(const POU& pou)
          for (const auto& d : sec.decls) {
             std::string ctype = mapType(d.type);
             std::string varName = normalizeIdent(d.name);
-            std::string init = d.initialValue ? "{" + genExpr(*d.initialValue) + "}" : "{}";
+            std::string init = d.initialValue ? "{" + genExpr(*d.initialValue, d.type.base) + "}" : "{}";
             out << ind() << ctype << " " << varName << init << ";\n";
          }
       }
@@ -6715,7 +6747,7 @@ std::string CodeGenerator::generateProgramBody(const POU& pou)
             if (d.atAddress.empty()) {
                std::string ctype = mapType(d.type);
                std::string varName = normalizeIdent(d.name);
-               std::string init = d.initialValue ? "{" + genExpr(*d.initialValue) + "}" : "{}";
+               std::string init = d.initialValue ? "{" + genExpr(*d.initialValue, d.type.base) + "}" : "{}";
                m_src << ind() << ctype << " " << varName << init << ";\n";
             }
          }
@@ -6962,9 +6994,12 @@ void ProcessImageAnalyzer::findAddresses(const std::shared_ptr<Stmt>& stmt)
       [this](const auto& s) {
          using T = std::decay_t<decltype(s)>;
 
-         if constexpr (std::is_same_v<T, AssignStmt>) {
-            findAddressesInExpr(s.lhs);
-            findAddressesInExpr(s.rhs);
+          if constexpr (std::is_same_v<T, AssignStmt>) {
+             findAddressesInExpr(s.lhs);
+             for (const auto& target : s.additionalTargets) {
+                findAddressesInExpr(target);
+             }
+             findAddressesInExpr(s.rhs);
          } else if constexpr (std::is_same_v<T, ExprStmt>) {
             findAddressesInExpr(s.expr);
          } else if constexpr (std::is_same_v<T, IfStmt>) {

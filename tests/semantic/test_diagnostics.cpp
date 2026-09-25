@@ -52,6 +52,11 @@ TEST(DiagnosticsTest, DiagnosticToString) {
     EXPECT_NE(str.find("expected INT, got BOOL"), std::string::npos);
 }
 
+TEST(DiagnosticsTest, SyntaxErrorHasCode)
+{
+    EXPECT_EQ(diagnosticCodeToString(DiagnosticCode::SyntaxError), std::string("SyntaxError"));
+}
+
 TEST(DiagnosticsTest, DiagnosticWithSuggestion) {
     Diagnostic d;
     d.severity = DiagnosticSeverity::Error;

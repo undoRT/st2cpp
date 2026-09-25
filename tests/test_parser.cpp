@@ -376,6 +376,57 @@ TEST(ParserTest, ParseProgram)
    EXPECT_TRUE(foundY);
 }
 
+TEST(ParserTest, ParseChainedAssignment)
+{
+    std::string st = R"(
+         PROGRAM Main
+             VAR
+                 i : INT;
+                 j : INT;
+                 k : INT;
+             END_VAR
+             i := j := k := 0;
+         END_PROGRAM
+    )";
+    Lexer lexer(st, "<test>");
+    auto tokens = lexer.tokenize();
+    Parser parser(std::move(tokens));
+    auto tu = parser.parseTranslationUnit();
+
+    ASSERT_EQ(tu.pous.size(), 1);
+    ASSERT_EQ(tu.pous[0].body.size(), 1);
+    auto* assign = std::get_if<AssignStmt>(&tu.pous[0].body[0]->node);
+    ASSERT_NE(assign, nullptr);
+    ASSERT_EQ(assign->additionalTargets.size(), 2);
+
+    auto* first = std::get_if<IdentExpr>(&assign->lhs->node);
+    ASSERT_NE(first, nullptr);
+    EXPECT_EQ(first->name, "i");
+
+    auto* second = std::get_if<IdentExpr>(&assign->additionalTargets[0]->node);
+    ASSERT_NE(second, nullptr);
+    EXPECT_EQ(second->name, "j");
+
+    auto* third = std::get_if<IdentExpr>(&assign->additionalTargets[1]->node);
+    ASSERT_NE(third, nullptr);
+    EXPECT_EQ(third->name, "k");
+
+    auto* value = std::get_if<LiteralExpr>(&assign->rhs->node);
+    ASSERT_NE(value, nullptr);
+    EXPECT_EQ(value->value, "0");
+}
+
+TEST(ParserTest, ParseErrorCarriesFileAndEndColumn)
+{
+    ParseError e("expected ';'", 4, 18, "test.st", 25);
+    EXPECT_EQ(e.line, 4);
+    EXPECT_EQ(e.col, 18);
+    EXPECT_EQ(e.fileName, "test.st");
+    EXPECT_EQ(e.endCol, 25);
+    EXPECT_EQ(e.message, "expected ';'");
+    EXPECT_NE(std::string(e.what()).find("Parse error"), std::string::npos);
+}
+
 /**
  * @brief Test parsing a program with local AT variables
  */

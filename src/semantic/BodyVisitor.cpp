@@ -267,27 +267,41 @@ if (auto p = std::get_if<AssignStmt>(&stmt.node)) {
  */
 void BodyVisitor::visitAssignStmt(const AssignStmt& stmt, uint32_t line, uint32_t col)
 {
-   visitExpression(*stmt.lhs);
+   std::vector<Expr*> lhsExprs;
+   lhsExprs.push_back(stmt.lhs.get());
+   for (auto& target : stmt.additionalTargets) {
+      if (target) {
+         lhsExprs.push_back(target.get());
+      }
+   }
+
+   for (auto* lhsExpr : lhsExprs) {
+      if (lhsExpr) {
+         visitExpression(*lhsExpr);
+      }
+   }
    visitExpression(*stmt.rhs);
 
-   TypeId lhsId = stmt.lhs->resolvedTypeId;
-   TypeId rhsId = stmt.rhs->resolvedTypeId;
-   const TypeInfo* lhsType = symTab_.getType(lhsId);
-   const TypeInfo* rhsType = symTab_.getType(rhsId);
+   for (auto* lhsExpr : lhsExprs) {
+      if (!lhsExpr) {
+         continue;
+      }
 
-   if (lhsType && rhsType) {
-      bool legacyOk = TypeChecker::checkAssignment(lhsType, rhsType, makeLocation(line, col), diag_);
+      TypeId lhsId = lhsExpr->resolvedTypeId;
+      TypeId rhsId = stmt.rhs->resolvedTypeId;
+      const TypeInfo* lhsType = symTab_.getType(lhsId);
+      const TypeInfo* rhsType = symTab_.getType(rhsId);
 
-      // IEEE 61131-3 Strict compliance (Fase 6): report IEC implicit-conversion
-      // violations as their OWN diagnostic ONLY when (a) strict mode is on AND
-      // (b) the legacy permissive baseline already passed. This yields a single,
-      // precise diagnostic for REAL=INT and keeps the Permissive golden path
-      // byte-identical (it is never reached in Permissive mode).
-      if (strict_ && legacyOk && !lhsType->isImplicitlyConvertibleFrom(rhsType)) {
-         diag_.addError(DiagnosticCode::InvalidAssignment,
-                        "strict IEC: " + rhsType->name + " is not implicitly convertible to " + lhsType->name
-                           + " (value-losing or cross-family implicit assignment)",
-                        makeLocation(line, col));
+      if (lhsType && rhsType) {
+         auto location = makeLocation(lhsExpr->line ? lhsExpr->line : line, lhsExpr->col ? lhsExpr->col : col);
+         bool legacyOk = TypeChecker::checkAssignment(lhsType, rhsType, location, diag_);
+
+         if (strict_ && legacyOk && !lhsType->isImplicitlyConvertibleFrom(rhsType)) {
+            diag_.addError(DiagnosticCode::InvalidAssignment,
+                           "strict IEC: " + rhsType->name + " is not implicitly convertible to " + lhsType->name
+                              + " (value-losing or cross-family implicit assignment)",
+                           location);
+         }
       }
    }
 }

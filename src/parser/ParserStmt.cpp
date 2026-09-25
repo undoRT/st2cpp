@@ -109,9 +109,15 @@ std::shared_ptr<Stmt> Parser::parseStatement()
    auto lhs = parseExpr();
 
    if (match(TokenType::OP_ASSIGN)) {
-      auto rhs = parseExpr();
+      AssignStmt assignment;
+      assignment.lhs = lhs;
+      assignment.rhs = parseExpr();
+      while (match(TokenType::OP_ASSIGN)) {
+         assignment.additionalTargets.push_back(assignment.rhs);
+         assignment.rhs = parseExpr();
+      }
       match(TokenType::SEMICOLON);
-      return std::make_shared<Stmt>(AssignStmt{lhs, rhs}, ln, col);
+      return std::make_shared<Stmt>(std::move(assignment), ln, col);
    }
    // Expression statement (FB call)
    match(TokenType::SEMICOLON);

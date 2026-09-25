@@ -42,6 +42,50 @@ protected:
    }
 };
 
+TEST_F(CodegenSemanticTest, ChainedAssignmentChecksEveryTargetAndGeneratesOneRhs)
+{
+    const std::string st = R"(
+       PROGRAM Main
+          VAR
+             i : INT;
+             j : INT;
+             k : INT;
+          END_VAR
+          i := j := k := 0;
+       END_PROGRAM
+    )";
+
+    auto tu = TestHelper::parseST(st);
+    st2cpp::semantic::SemanticAnalyzer analyzer;
+    auto info = analyzer.analyze(tu, st2cpp::semantic::SemanticAnalyzer::Strictness::Permissive);
+    EXPECT_FALSE(info.diagnostics.hasErrors());
+
+    auto code = TestHelper::generateFromSTWithSemantics(st);
+    expectSource(code.source, R"(auto _st2cpp_chain_[0-9]+ = 0;)", "chained assignment must evaluate the RHS once");
+    expectSource(code.source, R"(I = _st2cpp_chain_[0-9]+;)", "first chained target must be assigned");
+    expectSource(code.source, R"(J = _st2cpp_chain_[0-9]+;)", "second chained target must be assigned");
+    expectSource(code.source, R"(K = _st2cpp_chain_[0-9]+;)", "third chained target must be assigned");
+}
+
+TEST_F(CodegenSemanticTest, ChainedAssignmentReportsInvalidIntermediateTarget)
+{
+    const std::string st = R"(
+       PROGRAM Main
+          VAR
+             i : INT;
+             b : BOOL;
+             k : INT;
+          END_VAR
+          i := b := k := 0;
+       END_PROGRAM
+    )";
+
+    auto tu = TestHelper::parseST(st);
+    st2cpp::semantic::SemanticAnalyzer analyzer;
+    auto info = analyzer.analyze(tu, st2cpp::semantic::SemanticAnalyzer::Strictness::Permissive);
+    EXPECT_TRUE(info.diagnostics.hasErrors());
+}
+
 // ============================================================================
 // Test 1 — Struct-member BOOL operands: semantic path resolves BOOL, legacy
 // heuristic treats the whole struct access as non-BOOL. With semantics the
@@ -902,6 +946,52 @@ auto files = gen.generateModularProject(tu, "/tmp/st2cpp_struct_fb_later");
    EXPECT_NE(fbPos, std::string::npos);
    EXPECT_NE(structPos, std::string::npos);
    EXPECT_LT(fbPos, structPos) << "FB_COUNTER must be defined before S_REPORT:\n" << all;
+}
+
+TEST_F(CodegenSemanticTest, StructByValueCycleDoesNotRecurseForever)
+{
+    const std::string st = R"(
+       TYPE S_A :
+          STRUCT
+             b : S_B;
+          END_STRUCT
+       END_TYPE
+
+       TYPE S_B :
+          STRUCT
+             a : S_A;
+          END_STRUCT
+       END_TYPE
+
+       FUNCTION_BLOCK FB_Counter
+          VAR
+             value : INT;
+          END_VAR
+       END_FUNCTION_BLOCK
+    )";
+
+    Lexer lexer(st, "<test>");
+    auto tokens = lexer.tokenize();
+    Parser parser(std::move(tokens));
+    auto tu = parser.parseTranslationUnit();
+
+    st2cpp::semantic::SemanticAnalyzer analyzer;
+    auto info = analyzer.analyze(tu, st2cpp::semantic::SemanticAnalyzer::Strictness::Permissive);
+    EXPECT_TRUE(info.diagnostics.hasErrors());
+
+    CodeGenerator gen;
+    gen.setRuntimeHeader("undoCore/types.hpp");
+    gen.setCaseSensitive(false);
+    ProcessImageConfig pi;
+    pi.inputBytes = 1024;
+    pi.outputBytes = 1024;
+    pi.markerBytes = 1024;
+    pi.autoDetect = true;
+    gen.setProcessImageConfig(pi);
+    gen.setSemanticInfo(&info);
+
+    auto files = gen.generateModularProject(tu, "/tmp/st2cpp_struct_by_value_cycle");
+    EXPECT_FALSE(files.empty());
 }
 
 // ============================================================================

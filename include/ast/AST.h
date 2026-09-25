@@ -416,6 +416,7 @@ struct AssignStmt
 {
    std::shared_ptr<Expr> lhs;
    std::shared_ptr<Expr> rhs;
+   std::vector<std::shared_ptr<Expr>> additionalTargets;
 };
 struct ExprStmt
 {

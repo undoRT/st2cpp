@@ -105,6 +105,7 @@ enum class DiagnosticCode : uint16_t {
     DeprecatedFeature            = 9003,
     UnsupportedConstruct         = 9004,
     InvalidTimeLiteral           = 9005,
+    SyntaxError                  = 9006,
     InternalError                = 9999
 };
 
@@ -161,6 +162,7 @@ inline std::string diagnosticCodeToString(DiagnosticCode code) {
         case DiagnosticCode::DeprecatedFeature:            return "DeprecatedFeature";
         case DiagnosticCode::UnsupportedConstruct:         return "UnsupportedConstruct";
         case DiagnosticCode::InvalidTimeLiteral:           return "InvalidTimeLiteral";
+        case DiagnosticCode::SyntaxError:                  return "SyntaxError";
         case DiagnosticCode::InternalError:                return "InternalError";
         default: return "UnknownCode(" + std::to_string(static_cast<uint16_t>(code)) + ")";
     }

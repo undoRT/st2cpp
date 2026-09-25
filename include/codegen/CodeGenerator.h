@@ -510,7 +510,7 @@ private:
    //  Expression generation
    // ============================================================================
 
-   std::string genExpr(const Expr& expr);
+   std::string genExpr(const Expr& expr, BaseType typeHint = BaseType::VOID);
 
    // ============================================================================
    //  Address and process image
@@ -532,6 +532,8 @@ private:
    std::vector<std::string> orderedFbNamesFromSemantic();
    std::vector<GeneratedFile> generateModular(const TranslationUnit& tu, const std::string& outputDir);
    bool structContainsFB(const std::string& structName, const TranslationUnit& tu) const;
+   bool structContainsFB(const std::string& structName, const TranslationUnit& tu,
+                         std::unordered_set<std::string>& visited) const;
    std::string generateSimpleGVLsHeader(const TranslationUnit& tu);
    std::string generateGVLsHeader(const TranslationUnit& tu);
    std::string generateGVLsSource(const TranslationUnit& tu);

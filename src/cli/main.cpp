@@ -35,6 +35,26 @@ namespace fs = std::filesystem;
 static bool verbose = false;
 static bool strictMode = false;
 
+static bool hasUnresolvableCircularDependency(const st2cpp::semantic::SemanticInfo& info)
+{
+   for (const auto& diagnostic : info.diagnostics.all()) {
+      if (diagnostic.severity == st2cpp::semantic::DiagnosticSeverity::Error
+          && diagnostic.code == st2cpp::semantic::DiagnosticCode::CircularDependency) {
+         return true;
+      }
+   }
+   return false;
+}
+
+static void reportGenerationBlocked(const st2cpp::semantic::SemanticInfo& info)
+{
+   if (strictMode) {
+      std::cerr << "Strict mode: " << info.diagnostics.errorCount() << " semantic error(s) block generation.\n";
+      return;
+   }
+   std::cerr << "Generation blocked: unresolvable circular by-value dependency.\n";
+}
+
 /**
  * @brief Run semantic analysis on a translation unit for codegen consumption
  *
@@ -60,14 +80,15 @@ static st2cpp::semantic::SemanticInfo runSemanticAnalysis(
    } else {
       info = analyzer.analyze(tu, strictness);
    }
-   if (verbose || strictMode) {
-      if (info.diagnostics.totalCount() > 0) {
-         info.diagnostics.setSourceText(sourceText);
-         info.diagnostics.print(std::cerr);
-      }
-      std::cerr << "Semantic analysis: " << info.diagnostics.errorCount() << " errors, " << info.diagnostics.warningCount()
-                << " warnings\n";
-   }
+    const bool fatalCycle = hasUnresolvableCircularDependency(info);
+    if (verbose || strictMode || fatalCycle) {
+       if (info.diagnostics.totalCount() > 0) {
+          info.diagnostics.setSourceText(sourceText);
+          info.diagnostics.print(std::cerr);
+       }
+       std::cerr << "Semantic analysis: " << info.diagnostics.errorCount() << " errors, " << info.diagnostics.warningCount()
+                 << " warnings\n";
+    }
    return info;
 }
 
@@ -79,7 +100,7 @@ static st2cpp::semantic::SemanticInfo runSemanticAnalysis(
  */
 static bool strictBlocksGeneration(const st2cpp::semantic::SemanticInfo& info)
 {
-   return strictMode && info.diagnostics.hasErrors();
+   return (strictMode && info.diagnostics.hasErrors()) || hasUnresolvableCircularDependency(info);
 }
 
 /**
@@ -258,6 +279,31 @@ static std::string readFile(const std::string& path)
    std::ostringstream ss;
    ss << f.rdbuf();
    return ss.str();
+}
+
+static void printParseError(const ParseError& error)
+{
+   std::string sourceName = error.fileName.empty() ? "<input>" : error.fileName;
+   std::string sourceText;
+   if (!error.fileName.empty()) {
+      try {
+         sourceText = readFile(error.fileName);
+      } catch (const std::exception&) {
+      }
+   }
+
+   st2cpp::semantic::Diagnostics diagnostics;
+   diagnostics.setSourceName(sourceName);
+   diagnostics.setSourceText(sourceText);
+
+   st2cpp::semantic::SourceLocation location;
+   location.fileName = sourceName;
+   location.line = error.line;
+   location.column = error.col;
+   location.endLine = error.line;
+   location.endColumn = error.endCol;
+   diagnostics.addError(st2cpp::semantic::DiagnosticCode::SyntaxError, error.message, location);
+   diagnostics.print(std::cerr);
 }
 
 /**
@@ -511,7 +557,7 @@ static TranslationUnit processSingleFile(const std::string& filePath, bool dumpT
       }
    }
 
-   Parser parser(std::move(tokens));
+   Parser parser(std::move(tokens), filePath);
    Parser::clearParsedInterfaces();
    return parser.parseTranslationUnit();
 }
@@ -729,8 +775,8 @@ size_t piMarkerBytes = 1024;
             sourceText = readFile(inputPath);
          }
       } catch (const ParseError& e) {
-         std::cerr << "Parse error: " << e.what() << "\n";
-         return 1;
+          printParseError(e);
+          return 1;
       } catch (const std::exception& e) {
          std::cerr << "Error: " << e.what() << "\n";
          return 1;
@@ -821,9 +867,9 @@ size_t piMarkerBytes = 1024;
             mergedTu.interfaces.insert(mergedTu.interfaces.end(), tu.interfaces.begin(), tu.interfaces.end());
 
             successCount++;
-         } catch (const ParseError& e) {
-            std::cerr << "  Parse error in " << file << ": " << e.what() << "\n";
-            failCount++;
+          } catch (const ParseError& e) {
+             printParseError(e);
+             failCount++;
          } catch (const std::exception& e) {
             std::cerr << "  Error in " << file << ": " << e.what() << "\n";
             failCount++;
@@ -867,18 +913,18 @@ size_t piMarkerBytes = 1024;
       try {
          auto semanticInfo = runSemanticAnalysis(mergedTu, &libraryRegistry, workspacePath);
 
-         if (strictBlocksGeneration(semanticInfo)) {
-            std::cerr << "Strict mode: " << semanticInfo.diagnostics.errorCount() << " semantic error(s) block generation.\n";
-            return 1;
-         }
+       if (strictBlocksGeneration(semanticInfo)) {
+          reportGenerationBlocked(semanticInfo);
+          return 1;
+       }
 
-         CodeGenerator gen;
-         gen.setNamespace(namespaceName);
-         gen.setRuntimeHeader(runtimeHeader);
-         gen.setCaseSensitive(caseSensitive);
-         gen.setProcessImageConfig(piConfig);
-         gen.setSemanticInfo(&semanticInfo);
-         auto files = gen.generateModularProject(mergedTu, outputDir);
+       CodeGenerator gen;
+       gen.setNamespace(namespaceName);
+       gen.setRuntimeHeader(runtimeHeader);
+       gen.setCaseSensitive(caseSensitive);
+       gen.setProcessImageConfig(piConfig);
+       gen.setSemanticInfo(&semanticInfo);
+       auto files = gen.generateModularProject(mergedTu, outputDir);
          writeGeneratedFiles(files, outputDir);
 
          std::cout << "\nProject generation complete!\n";
@@ -964,11 +1010,11 @@ size_t piMarkerBytes = 1024;
 
 auto semanticInfo = runSemanticAnalysis(tu, &libraryRegistry, file, readFile(file));
 
-            if (strictBlocksGeneration(semanticInfo)) {
-               std::cerr << "Strict mode: " << semanticInfo.diagnostics.errorCount() << " semantic error(s) block generation.\n";
-               failCount++;
-               continue;
-            }
+             if (strictBlocksGeneration(semanticInfo)) {
+                reportGenerationBlocked(semanticInfo);
+                failCount++;
+                continue;
+             }
 
             CodeGenerator gen;
             gen.setProcessImageConfig(piConfig);
@@ -984,9 +1030,9 @@ auto semanticInfo = runSemanticAnalysis(tu, &libraryRegistry, file, readFile(fil
             }
 
             successCount++;
-         } catch (const ParseError& e) {
-            std::cerr << "  Parse error: " << e.what() << "\n";
-            failCount++;
+          } catch (const ParseError& e) {
+             printParseError(e);
+             failCount++;
          } catch (const std::exception& e) {
             std::cerr << "  Error: " << e.what() << "\n";
             failCount++;
@@ -1060,10 +1106,10 @@ auto semanticInfo = runSemanticAnalysis(tu, &libraryRegistry, file, readFile(fil
 
       auto semanticInfo = runSemanticAnalysis(tu, &libraryRegistry, inputPath, readFile(inputPath));
 
-      if (strictBlocksGeneration(semanticInfo)) {
-         std::cerr << "Strict mode: " << semanticInfo.diagnostics.errorCount() << " semantic error(s) block generation.\n";
-         return 1;
-      }
+       if (strictBlocksGeneration(semanticInfo)) {
+          reportGenerationBlocked(semanticInfo);
+          return 1;
+       }
 
       CodeGenerator gen;
       gen.setProcessImageConfig(piConfig);
@@ -1078,9 +1124,9 @@ auto semanticInfo = runSemanticAnalysis(tu, &libraryRegistry, file, readFile(fil
       std::cout << "\nTo compile the output:\n";
       std::cout << "  g++ -std=c++17 -I<path-to-runtime/include> " << outputCpp << " -o your_program\n";
 
-   } catch (const ParseError& e) {
-      std::cerr << "Parse error: " << e.what() << "\n";
-      return 1;
+    } catch (const ParseError& e) {
+       printParseError(e);
+       return 1;
    } catch (const std::exception& e) {
       std::cerr << "Error: " << e.what() << "\n";
       return 1;
