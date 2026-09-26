@@ -32,6 +32,7 @@ BodyVisitor::BodyVisitor(SymbolTable& symTab, Diagnostics& diag) : symTab_(symTa
 void BodyVisitor::visitTranslationUnit(const TranslationUnit& tu)
 {
    for (const auto& sec : tu.globals) {
+      currentFile_ = sec.fileName;
       for (const auto& decl : sec.decls) {
          if (decl.initialValue) {
             visitExpression(*decl.initialValue);
@@ -40,8 +41,10 @@ void BodyVisitor::visitTranslationUnit(const TranslationUnit& tu)
    }
 
    for (const auto& pou : tu.pous) {
+      currentFile_ = pou.fileName;
       visitPouBody(pou);
    }
+   currentFile_.clear();
 }
 
 /**
@@ -947,9 +950,16 @@ void BodyVisitor::visitCallExpr(Expr& expr)
          expr.resolvedTypeId = calleeSym->returnTypeId;
       }
 
+      // A function block is callable with the parameters it inherits from its
+      // base blocks, so the check must run against the effective interface and
+      // not only against the parameters declared in this very block.
       std::vector<SymbolId> paramSymbols;
-      for (SymbolId paramId : calleeSym->params) {
-         paramSymbols.push_back(paramId);
+      if (isFbCall) {
+         paramSymbols = symTab_.effectiveParams(calleeSym->id);
+      } else {
+         for (SymbolId paramId : calleeSym->params) {
+            paramSymbols.push_back(paramId);
+         }
       }
       SourceLocation loc = makeLocation(expr.line, expr.col);
       bool callOk = TypeChecker::checkCallArguments(paramSymbols, call.args, loc, diag_, symTab_, isFbCall);
@@ -1261,7 +1271,9 @@ SourceLocation BodyVisitor::makeLocation(uint32_t line, uint32_t col) const
    SourceLocation loc;
    loc.line = line;
    loc.column = col;
-   loc.fileName = diag_.sourceFileName();
+   // Prefer the file the current entity was declared in; fall back to the
+   // global source name for entities that carry no file of their own.
+   loc.fileName = currentFile_.empty() ? diag_.sourceFileName() : currentFile_;
    return loc;
 }
 

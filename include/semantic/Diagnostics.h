@@ -10,6 +10,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include <map>
 #include <ostream>
 #include <cstdint>
 
@@ -302,8 +303,31 @@ public:
     void setSourceText(const std::string& text) { sourceText_ = text; }
     const std::string& sourceText() const { return sourceText_; }
 
+    // Register an additional source file so that diagnostics pointing into it
+    // can render their snippet. Workspace analysis spans many .st files, so a
+    // single sourceText is not enough: a location names its own file and the
+    // snippet must be cut from that file, not from the primary one.
+    void addSourceFile(const std::string& name, const std::string& text) {
+        if (!name.empty()) {
+            sources_[name] = text;
+        }
+    }
+
+    // Resolve the text of the file a location points into, falling back to the
+    // primary source when the location carries no file name.
+    std::string textFor(const SourceLocation& loc) const {
+        if (!loc.fileName.empty()) {
+            auto it = sources_.find(loc.fileName);
+            if (it != sources_.end()) return it->second;
+        }
+        if (!sourceText_.empty()) return sourceText_;
+        auto it = sources_.find(sourceName_);
+        return it != sources_.end() ? it->second : std::string();
+    }
+
 private:
     std::vector<Diagnostic> diagnostics_;
+    std::map<std::string, std::string> sources_;
     std::string sourceName_ = "<input>";
     std::string sourceText_;
 
@@ -371,19 +395,25 @@ private:
 
     void printDiagnostic(std::ostream& out, const Diagnostic& d) const {
         // Header line: file:line:col: severity: message [Code]
+        // A location that names no file falls back to the primary source name,
+        // otherwise the header would start with a bare ":".
+        const std::string displayFile =
+            !d.location.fileName.empty() ? d.location.fileName
+            : (!sourceName_.empty()        ? sourceName_
+                                         : std::string("<input>"));
         if (d.location.isValid()) {
-            out << d.location.toString() << ": ";
+            out << displayFile << ':' << d.location.line << ':' << d.location.column << ": ";
         } else {
-            std::string file = d.location.fileName.empty() ? sourceName_ : d.location.fileName;
-            out << file << ": ";
+            out << displayFile << ": ";
         }
         out << severityName(d.severity) << ": " << d.message
             << " [" << diagnosticCodeToString(d.code) << "]\n";
 
-        // Code snippet with a caret (only when a source position and the
-        // analyzed source text are available).
-        if (d.location.isValid() && d.location.column > 0 && !sourceText_.empty()) {
-            const std::string line = expandTabs(sourceLine(sourceText_, d.location.line));
+        // Code snippet with a caret (only when a source position and the text
+        // of the file that location points into are both available).
+        const std::string text = textFor(d.location);
+        if (d.location.isValid() && d.location.column > 0 && !text.empty()) {
+            const std::string line = expandTabs(sourceLine(text, d.location.line));
             if (!line.empty()) {
                 const std::string num = std::to_string(d.location.line);
                 const std::string pad(num.size(), ' ');

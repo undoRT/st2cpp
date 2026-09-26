@@ -64,6 +64,10 @@ public:
  private:
     SymbolTable& symTab_;
     Diagnostics& diag_;
+
+    // Source file of the entity currently being visited, so that locations
+    // point at the .st file a workspace entity really came from.
+    std::string currentFile_;
     
     // Statistics
     size_t resolvedCount_ = 0;

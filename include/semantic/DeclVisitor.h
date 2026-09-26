@@ -58,6 +58,12 @@ private:
     // Current POU context (for nested scopes)
     SymbolId currentPouId_ = 0;
     SymbolId currentMethodId_ = 0;
+
+    // Source file of the entity currently being visited. Workspace analysis
+    // merges declarations coming from many .st files into a single
+    // TranslationUnit, so a location must name the file the entity was
+    // declared in rather than one global source name.
+    std::string currentFile_;
     
     // --- Type Registration (two-pass: header then body) ---
     void registerEnumType(const EnumType& et);
@@ -103,7 +109,7 @@ private:
     TypeId resolveTypeRef(const TypeRef& typeRef, uint32_t line = 0, uint32_t col = 0);
     TypeId resolveBaseType(BaseType baseType);
     std::string baseTypeName(BaseType baseType);
-    TypeId resolveNamedType(const std::string& name, uint32_t line = 0);
+    TypeId resolveNamedType(const std::string& name, uint32_t line = 0, uint32_t col = 0);
     
     // --- Helpers ---
     SourceLocation makeLocation(uint32_t line, uint32_t col = 0) const;

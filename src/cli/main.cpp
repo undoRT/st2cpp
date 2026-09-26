@@ -29,6 +29,7 @@
 #include <cstring>
 #include <cctype>
 #include <set>
+#include <map>
 
 namespace fs = std::filesystem;
 
@@ -66,7 +67,8 @@ static void reportGenerationBlocked(const st2cpp::semantic::SemanticInfo& info)
  */
 static st2cpp::semantic::SemanticInfo runSemanticAnalysis(
    const TranslationUnit& tu, const st2cpp::library::LibraryRegistry* registry = nullptr,
-   const std::string& sourceName = "", const std::string& sourceText = "")
+   const std::string& sourceName = "", const std::string& sourceText = "",
+   const std::map<std::string, std::string>* sources = nullptr)
 {
    auto strictness = strictMode ? st2cpp::semantic::SemanticAnalyzer::Strictness::Strict
                                 : st2cpp::semantic::SemanticAnalyzer::Strictness::Permissive;
@@ -84,6 +86,13 @@ static st2cpp::semantic::SemanticInfo runSemanticAnalysis(
     if (verbose || strictMode || fatalCycle) {
        if (info.diagnostics.totalCount() > 0) {
           info.diagnostics.setSourceText(sourceText);
+          // Register every workspace file so a diagnostic can print the
+          // snippet of the file it actually points into, not of the workspace.
+          if (sources != nullptr) {
+             for (const auto& entry : *sources) {
+                info.diagnostics.addSourceFile(entry.first, entry.second);
+             }
+          }
           info.diagnostics.print(std::cerr);
        }
        std::cerr << "Semantic analysis: " << info.diagnostics.errorCount() << " errors, " << info.diagnostics.warningCount()
@@ -526,6 +535,28 @@ static void deduplicateMergedTu(TranslationUnit& tu)
    }
 
    {
+      // Type aliases: same name in several files means the same declaration
+      // repeated (typically a shared header copied per file). Keep the first,
+      // and warn only if the aliased types actually disagree.
+      std::set<std::string> seen;
+      std::vector<TypeAlias> out;
+      for (const auto& item : tu.typeAliases) {
+         std::string key = normalizedKey(item.name);
+         if (seen.insert(key).second) {
+            out.push_back(item);
+            continue;
+         }
+         for (const auto& existing : out) {
+            if (normalizedKey(existing.name) == key && !sameTypeRef(existing.type, item.type)) {
+               std::cerr << "  Warning: duplicate TYPE alias '" << item.name << "' differs across workspace files; keeping first\n";
+               break;
+            }
+         }
+      }
+      tu.typeAliases = std::move(out);
+   }
+
+   {
       // Globals: deduplicate VarDecl by name across all sections
       std::set<std::string> seen;
       for (auto& section : tu.globals) {
@@ -544,9 +575,12 @@ static void deduplicateMergedTu(TranslationUnit& tu)
 /**
  * @brief Process a single translation unit (for workspace or project style)
  */
-static TranslationUnit processSingleFile(const std::string& filePath, bool dumpTokens)
+static TranslationUnit processSingleFile(const std::string& filePath, bool dumpTokens, std::string* sourceOut = nullptr)
 {
    std::string source = readFile(filePath);
+   if (sourceOut != nullptr) {
+      *sourceOut = source;
+   }
    Lexer lexer(source, filePath);
    auto tokens = lexer.tokenize();
 
@@ -560,6 +594,27 @@ static TranslationUnit processSingleFile(const std::string& filePath, bool dumpT
    Parser parser(std::move(tokens), filePath);
    Parser::clearParsedInterfaces();
    return parser.parseTranslationUnit();
+}
+
+/**
+ * @brief Merge the declarations of one file into a workspace-wide unit
+ *
+ * Every declaration kind carried by a TranslationUnit must be forwarded here.
+ * Keeping the merge in a single place is what guarantees a type declared in one
+ * .st file is visible from the others: forgetting a kind (as type aliases were)
+ * silently makes that kind of declaration file-local.
+ */
+static void mergeTranslationUnit(TranslationUnit& dst, const TranslationUnit& src)
+{
+   auto append = [](auto& to, const auto& from) {
+      to.insert(to.end(), std::make_move_iterator(from.begin()), std::make_move_iterator(from.end()));
+   };
+   append(dst.pous, src.pous);
+   append(dst.structs, src.structs);
+   append(dst.enums, src.enums);
+   append(dst.globals, src.globals);
+   append(dst.interfaces, src.interfaces);
+   append(dst.typeAliases, src.typeAliases);
 }
 
 /**
@@ -737,6 +792,7 @@ size_t piMarkerBytes = 1024;
       TranslationUnit tu;
       std::string sourceName;
       std::string sourceText;
+      std::map<std::string, std::string> sources;
       try {
          if (workspaceMode) {
             if (workspacePath.empty()) {
@@ -755,12 +811,10 @@ size_t piMarkerBytes = 1024;
             }
             int parsed = 0;
             for (const auto& file : stFiles) {
-               auto fileTu = processSingleFile(file, false);
-               tu.pous.insert(tu.pous.end(), fileTu.pous.begin(), fileTu.pous.end());
-               tu.structs.insert(tu.structs.end(), fileTu.structs.begin(), fileTu.structs.end());
-               tu.enums.insert(tu.enums.end(), fileTu.enums.begin(), fileTu.enums.end());
-               tu.globals.insert(tu.globals.end(), fileTu.globals.begin(), fileTu.globals.end());
-               tu.interfaces.insert(tu.interfaces.end(), fileTu.interfaces.begin(), fileTu.interfaces.end());
+               std::string fileSource;
+               auto fileTu = processSingleFile(file, false, &fileSource);
+               sources.emplace(file, std::move(fileSource));
+               mergeTranslationUnit(tu, fileTu);
                parsed++;
             }
             if (parsed == 0) {
@@ -770,9 +824,8 @@ size_t piMarkerBytes = 1024;
             deduplicateMergedTu(tu);
             sourceName = workspacePath;
          } else {
-            tu = processSingleFile(inputPath, false);
+            tu = processSingleFile(inputPath, false, &sourceText);
             sourceName = inputPath;
-            sourceText = readFile(inputPath);
          }
       } catch (const ParseError& e) {
           printParseError(e);
@@ -782,7 +835,7 @@ size_t piMarkerBytes = 1024;
          return 1;
       }
 
-      auto semanticInfo = runSemanticAnalysis(tu, &libraryRegistry, sourceName, sourceText);
+      auto semanticInfo = runSemanticAnalysis(tu, &libraryRegistry, sourceName, sourceText, &sources);
       auto result = st2cpp::semantic::LibraryDescriptorBuilder::build(tu, semanticInfo, options);
 
       for (const auto& err : result.errors) {
@@ -847,6 +900,7 @@ size_t piMarkerBytes = 1024;
 
       // Parse all files and merge translation units
       TranslationUnit mergedTu;
+      std::map<std::string, std::string> sources;
       int successCount = 0;
       int failCount = 0;
 
@@ -857,14 +911,12 @@ size_t piMarkerBytes = 1024;
          }
 
          try {
-            auto tu = processSingleFile(file, dumpTokens);
+            std::string fileSource;
+            auto tu = processSingleFile(file, dumpTokens, &fileSource);
+            sources.emplace(file, std::move(fileSource));
 
             // Merge translation units
-            mergedTu.pous.insert(mergedTu.pous.end(), tu.pous.begin(), tu.pous.end());
-            mergedTu.structs.insert(mergedTu.structs.end(), tu.structs.begin(), tu.structs.end());
-            mergedTu.enums.insert(mergedTu.enums.end(), tu.enums.begin(), tu.enums.end());
-            mergedTu.globals.insert(mergedTu.globals.end(), tu.globals.begin(), tu.globals.end());
-            mergedTu.interfaces.insert(mergedTu.interfaces.end(), tu.interfaces.begin(), tu.interfaces.end());
+            mergeTranslationUnit(mergedTu, tu);
 
             successCount++;
           } catch (const ParseError& e) {
@@ -911,7 +963,7 @@ size_t piMarkerBytes = 1024;
 
       // Generate modular project
       try {
-         auto semanticInfo = runSemanticAnalysis(mergedTu, &libraryRegistry, workspacePath);
+         auto semanticInfo = runSemanticAnalysis(mergedTu, &libraryRegistry, workspacePath, "", &sources);
 
        if (strictBlocksGeneration(semanticInfo)) {
           reportGenerationBlocked(semanticInfo);
@@ -983,7 +1035,8 @@ size_t piMarkerBytes = 1024;
          }
 
          try {
-            auto tu = processSingleFile(file, dumpTokens);
+            std::string fileSource;
+            auto tu = processSingleFile(file, dumpTokens, &fileSource);
 
             // Process Image auto-detection for flat mode
             ProcessImageAnalyzer piAnalyzer;
@@ -1008,7 +1061,8 @@ size_t piMarkerBytes = 1024;
             std::string headerFilename = baseName + ".hpp";
             std::string sourceFilename = baseName + ".cpp";
 
-auto semanticInfo = runSemanticAnalysis(tu, &libraryRegistry, file, readFile(file));
+std::map<std::string, std::string> oneSource{{file, std::move(fileSource)}};
+auto semanticInfo = runSemanticAnalysis(tu, &libraryRegistry, file, fileSource, &oneSource);
 
              if (strictBlocksGeneration(semanticInfo)) {
                 reportGenerationBlocked(semanticInfo);
@@ -1078,7 +1132,8 @@ auto semanticInfo = runSemanticAnalysis(tu, &libraryRegistry, file, readFile(fil
    std::string headerName = fs::path(outputHpp).filename().string();
 
    try {
-      auto tu = processSingleFile(inputPath, dumpTokens);
+      std::string sourceText;
+      auto tu = processSingleFile(inputPath, dumpTokens, &sourceText);
 
       if (dumpTokens) {
          return 0;
@@ -1104,7 +1159,7 @@ auto semanticInfo = runSemanticAnalysis(tu, &libraryRegistry, file, readFile(fil
       }
       piConfig.autoDetect = autoDetectPI;
 
-      auto semanticInfo = runSemanticAnalysis(tu, &libraryRegistry, inputPath, readFile(inputPath));
+      auto semanticInfo = runSemanticAnalysis(tu, &libraryRegistry, inputPath, sourceText);
 
        if (strictBlocksGeneration(semanticInfo)) {
           reportGenerationBlocked(semanticInfo);

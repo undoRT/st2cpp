@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 #include <unordered_map>
+#include <unordered_set>
 #include <functional>
 #include <cctype>
 
@@ -57,6 +58,12 @@ struct Symbol {
     SymbolId parentScopeId = 0;
     std::vector<SymbolId> params;
     TypeId returnTypeId = 0;
+    /// Where the declaration of this symbol starts, so a diagnostic about it can
+    /// point at the source. Zero when the declaration carried no position.
+    uint32_t line = 0;
+    uint32_t col = 0;
+    /// Source file the declaration came from. Empty when unknown.
+    std::string fileName;
     bool isAbstract = false;
     bool isFinal = false;
     bool isOverride = false;
@@ -368,6 +375,62 @@ public:
     Symbol* get(SymbolId id) {
         if (id == 0 || id >= symbols_.size()) return nullptr;
         return &symbols_[id];
+    }
+
+    /**
+     * @brief The call interface of a function block, inheritance included.
+     * @details `Symbol::params` holds only the parameters declared by that very
+     * block, but a block that EXTENDS another one is callable with the base's
+     * VAR_INPUT/VAR_OUTPUT too. This returns the effective interface: the
+     * parameters inherited from the base chain (root ancestor first, so the
+     * base interface stays the prefix that positional calls bind against)
+     * followed by the block's own.
+     *
+     * A parameter redeclared by a derived block replaces the inherited one
+     * instead of appearing twice. Cycles in the base chain are guarded against.
+     */
+    std::vector<SymbolId> effectiveParams(SymbolId fbId) const {
+        // Base chain, root ancestor first.
+        std::vector<const Symbol*> chain;
+        std::unordered_set<SymbolId> visited;
+        for (const Symbol* cursor = get(fbId);
+             cursor != nullptr && visited.insert(cursor->id).second;
+             cursor = (cursor->baseClassId != 0) ? get(cursor->baseClassId) : nullptr) {
+            chain.push_back(cursor);
+        }
+        std::reverse(chain.begin(), chain.end());
+
+        // First pass, most derived block first: the winning declaration of each
+        // name is the one in the nearest block that redeclares it.
+        std::unordered_map<std::string, SymbolId> winner;
+        for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+            for (SymbolId paramId : (*it)->params) {
+                const Symbol* param = get(paramId);
+                if (param == nullptr) continue;
+                const std::string key = normalizeKey(param->name);
+                if (winner.count(key) != 0) continue; // a derived block already declared it
+                winner.emplace(key, paramId);
+            }
+        }
+
+        // Second pass, base first, so the base interface stays the prefix that
+        // positional calls bind against. Each name is emitted once.
+        std::vector<SymbolId> out;
+        std::unordered_set<std::string> emitted;
+        for (const Symbol* fb : chain) {
+            for (SymbolId paramId : fb->params) {
+                const Symbol* param = get(paramId);
+                if (param == nullptr) continue;
+                const std::string key = normalizeKey(param->name);
+                // Test the winner first: a shadowed declaration must not mark
+                // the name as taken, or the winning one below would be dropped.
+                auto win = winner.find(key);
+                if (win == winner.end() || win->second != paramId) continue;
+                if (!emitted.insert(key).second) continue;
+                out.push_back(paramId);
+            }
+        }
+        return out;
     }
     const TypeInfo* getType(TypeId id) const {
         if (id == 0 || id >= types_.size()) return nullptr;

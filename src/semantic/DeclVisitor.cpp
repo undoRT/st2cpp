@@ -95,40 +95,53 @@ DeclVisitor::DeclVisitor(SymbolTable& symTab, Diagnostics& diag)
  * @param tu The translation unit to register
  */
 void DeclVisitor::visitTranslationUnit(const TranslationUnit& tu) {
+    // Each loop tracks the file its entity was declared in, so that every
+    // diagnostic raised while visiting it names that .st file and not the
+    // workspace or the primary input.
     // Pass A: declare names and register empty TypeInfos (stable TypeIds).
     // ENUMs go first: there is no type resolution in this pass, but the
     // enumerators must be typed with their enum as today.
     for (const auto& et : tu.enums) {
+        currentFile_ = et.fileName;
         registerEnumType(et);
     }
     for (const auto& st : tu.structs) {
+        currentFile_ = st.fileName;
         registerStructHeader(st);
     }
     for (const auto& iface : tu.interfaces) {
+        currentFile_ = iface.fileName;
         registerInterfaceHeader(iface);
     }
+    currentFile_.clear();
     registerPouHeaders(tu.pous);
 
     // Pass B: resolve bodies. Every type name is now visible regardless of the
     // order in which enum/struct/interface/POU were declared or merged.
     for (const auto& st : tu.structs) {
+        currentFile_ = st.fileName;
         registerStructBody(st);
     }
     for (const auto& iface : tu.interfaces) {
+        currentFile_ = iface.fileName;
         registerInterfaceBody(iface);
     }
     // Named type aliases (TYPE Name : <type>; END_TYPE) resolve here so that
     // POU bodies/globals declared later can reference them by name.
     for (const auto& alias : tu.typeAliases) {
+        currentFile_ = alias.fileName;
         registerTypeAlias(alias);
     }
+    currentFile_.clear();
     registerPouBodies(tu.pous);
 
     // Phase 4: Register global variables
     for (const auto& sec : tu.globals) {
+        currentFile_ = sec.fileName;
         SymbolId globalScopeId = symTab_.globalScope();
         registerVarSection(sec, globalScopeId, SymbolKind::Variable);
     }
+    currentFile_.clear();
 
     // Phase 5: Resolve inheritance
     resolveInheritance();
@@ -207,7 +220,7 @@ void DeclVisitor::registerStructBody(const StructType& st) {
 
     std::vector<SymbolId> memberSymIds;
     for (const auto& member : st.members) {
-        TypeId memberTypeId = resolveTypeRef(member.type);
+        TypeId memberTypeId = resolveTypeRef(member.type, member.line, member.col);
         SymbolId memberSymId = symTab_.declare(member.name, SymbolKind::StructMember, memberTypeId);
         if (memberSymId == 0) {
             reportError(DiagnosticCode::DuplicateDeclaration,
@@ -216,6 +229,9 @@ void DeclVisitor::registerStructBody(const StructType& st) {
             Symbol* memberSym = symTab_.get(memberSymId);
             if (memberSym) {
                 memberSym->typeId = memberTypeId;
+                memberSym->line = member.line;
+                memberSym->col = member.col;
+                memberSym->fileName = st.fileName;
             }
             memberSymIds.push_back(memberSymId);
         }
@@ -432,14 +448,14 @@ void DeclVisitor::registerInterfaceBody(const Interface& iface) {
                 // Register return type (interface methods use the interface's line)
                 TypeId returnTypeId = 0;
                 if (method.returnType.base != BaseType::VOID) {
-                    returnTypeId = resolveTypeRef(method.returnType, iface.line);
+                    returnTypeId = resolveTypeRef(method.returnType, method.line, method.col);
                 }
                 methodSym->returnTypeId = returnTypeId;
                 
                 // Register parameters
                 std::vector<SymbolId> paramSymIds;
                 for (const auto& param : method.parameters) {
-                    TypeId paramTypeId = resolveTypeRef(param.type, iface.line);
+                    TypeId paramTypeId = resolveTypeRef(param.type, param.line, param.col);
                     SymbolId paramSymId = symTab_.declare(param.name, SymbolKind::Parameter, paramTypeId);
                     if (paramSymId != 0) {
                         Symbol* paramSym = symTab_.get(paramSymId);
@@ -481,6 +497,7 @@ void DeclVisitor::registerInterfaceBody(const Interface& iface) {
  */
 void DeclVisitor::registerPouHeaders(const std::vector<POU>& pous) {
     for (const auto& pou : pous) {
+        currentFile_ = pou.fileName;
         SourceLocation loc = makeLocation(pou.line, pou.col);
         
         // Check for duplicate in global scope
@@ -532,6 +549,7 @@ void DeclVisitor::registerPouHeaders(const std::vector<POU>& pous) {
             }
         }
     }
+    currentFile_.clear();
 }
 
 /**
@@ -540,8 +558,10 @@ void DeclVisitor::registerPouHeaders(const std::vector<POU>& pous) {
  */
 void DeclVisitor::registerPouBodies(const std::vector<POU>& pous) {
     for (const auto& pou : pous) {
+        currentFile_ = pou.fileName;
         registerPou(pou);
     }
+    currentFile_.clear();
 }
 
 /**
@@ -568,7 +588,7 @@ void DeclVisitor::registerPou(const POU& pou) {
     // Resolve FUNCTION return type (deferred to Pass B, when every type name
     // is visible regardless of declaration order).
     if (pou.kind == POUKind::FUNCTION && pou.returnType.base != BaseType::VOID) {
-        pouSym->returnTypeId = resolveTypeRef(pou.returnType, pou.line);
+        pouSym->returnTypeId = resolveTypeRef(pou.returnType, pou.line, pou.col);
     }
 
     // Create POU scope
@@ -661,6 +681,9 @@ void DeclVisitor::registerVarDecl(const VarDecl& decl, SymbolId scopeId, SymbolK
     Symbol* varSym = symTab_.get(varSymId);
     if (varSym) {
         varSym->typeId = typeId;
+        varSym->line = decl.line;
+        varSym->col = decl.col;
+        varSym->fileName = currentFile_;
         varSym->isConstant = decl.isConstant;
         varSym->isRetain = decl.isRetain;
         varSym->atAddress = decl.atAddress;
@@ -731,7 +754,7 @@ void DeclVisitor::registerMethod(const Method& method, SymbolId fbScopeId, Symbo
     // Register return type
     TypeId returnTypeId = 0;
     if (method.returnType.base != BaseType::VOID) {
-        returnTypeId = resolveTypeRef(method.returnType, method.line);
+        returnTypeId = resolveTypeRef(method.returnType, method.line, method.col);
     }
     methodSym->returnTypeId = returnTypeId;
     
@@ -742,7 +765,7 @@ void DeclVisitor::registerMethod(const Method& method, SymbolId fbScopeId, Symbo
     // Register parameters in method scope
     std::vector<SymbolId> paramSymIds;
     for (const auto& param : method.parameters) {
-        TypeId paramTypeId = resolveTypeRef(param.type, method.line);
+        TypeId paramTypeId = resolveTypeRef(param.type, param.line, param.col);
         SymbolId paramSymId = symTab_.declare(param.name, SymbolKind::Parameter, paramTypeId);
         if (paramSymId != 0) {
             Symbol* paramSym = symTab_.get(paramSymId);
@@ -764,7 +787,7 @@ void DeclVisitor::registerMethod(const Method& method, SymbolId fbScopeId, Symbo
     
     // Register local variables in method scope
     for (const auto& localVar : method.localVars) {
-        TypeId varTypeId = resolveTypeRef(localVar.type, localVar.line);
+        TypeId varTypeId = resolveTypeRef(localVar.type, localVar.line, localVar.col);
         SymbolId varSymId = symTab_.declare(localVar.name, SymbolKind::Variable, varTypeId);
         if (varSymId != 0) {
             Symbol* varSym = symTab_.get(varSymId);
@@ -999,7 +1022,10 @@ void DeclVisitor::detectValueCycles() {
     }
     if (nodes.empty()) return;
 
-    auto addEdge = [&](SymbolId payload, SymbolId container) {
+    // Each edge remembers the symbol that introduced it, so a cycle can be
+    // reported at the declaration that closes it rather than nowhere.
+    std::unordered_map<SymbolId, SymbolId> edgeOrigin;
+    auto addEdge = [&](SymbolId payload, SymbolId container, SymbolId origin) {
         if (payload == 0) return;
         const Symbol* payloadSym = symTab_.get(payload);
         // External payloads are pre-imported: they add no ordering constraint
@@ -1009,6 +1035,9 @@ void DeclVisitor::detectValueCycles() {
         if (std::find(edges.begin(), edges.end(), container) == edges.end()) {
             edges.push_back(container);
             inDegree[container]++;
+            if (origin != 0) {
+                edgeOrigin[payload * 1000003ull + container] = origin;
+            }
         }
     };
 
@@ -1019,7 +1048,7 @@ void DeclVisitor::detectValueCycles() {
         for (SymbolId memberId : structSym->members) {
             Symbol* memberSym = symTab_.get(memberId);
             if (!memberSym) continue;
-            addEdge(valuePayloadSymbol(memberSym->typeId), structId);
+            addEdge(valuePayloadSymbol(memberSym->typeId), structId, memberId);
         }
     }
 
@@ -1047,7 +1076,7 @@ void DeclVisitor::detectValueCycles() {
         for (SymbolId ownedId : owned) {
             Symbol* sym = symTab_.get(ownedId);
             if (!sym) continue;
-            addEdge(valuePayloadSymbol(sym->typeId), fbId);
+            addEdge(valuePayloadSymbol(sym->typeId), fbId, ownedId);
         }
     }
 
@@ -1074,13 +1103,62 @@ void DeclVisitor::detectValueCycles() {
             if (deg > 0) cyclic.push_back(nodeId);
         }
         std::sort(cyclic.begin(), cyclic.end());
-        std::string msg = "circular by-value dependency between types: ";
-        for (size_t i = 0; i < cyclic.size(); ++i) {
-            if (i > 0) msg += ", ";
-            Symbol* sym = symTab_.get(cyclic[i]);
-            msg += sym ? sym->name : std::to_string(cyclic[i]);
+
+        // Find the declaration that closes the cycle, so the diagnostic can
+        // point at the member a human has to change. An edge whose two ends are
+        // both still cyclic is by construction part of a cycle.
+        SymbolId culprit = 0;
+        SymbolId culpritFrom = 0, culpritTo = 0;
+        for (SymbolId from : cyclic) {
+            auto edgeIt = graph.find(from);
+            if (edgeIt == graph.end()) continue;
+            for (SymbolId to : edgeIt->second) {
+                if (std::find(cyclic.begin(), cyclic.end(), to) == cyclic.end()) continue;
+                auto originIt = edgeOrigin.find(from * 1000003ull + to);
+                if (originIt != edgeOrigin.end() && originIt->second != 0) {
+                    culprit = originIt->second;
+                    culpritFrom = from;
+                    culpritTo = to;
+                    break;
+                }
+            }
+            if (culprit != 0) break;
         }
-        reportError(DiagnosticCode::CircularDependency, msg, makeLocation(0));
+
+        auto nameOf = [&](SymbolId id) {
+            const Symbol* sym = symTab_.get(id);
+            return sym ? sym->name : std::to_string(id);
+        };
+
+        std::string msg;
+        if (culprit != 0) {
+            const Symbol* sym = symTab_.get(culprit);
+            if (culpritFrom == culpritTo) {
+                // The common and most confusing case: a type containing itself.
+                msg = "'" + nameOf(culpritFrom) + "' contains itself through member '" + nameOf(culprit)
+                    + "': a value of this type has no finite size";
+            } else {
+                msg = "'" + nameOf(culpritFrom) + "' contains '" + nameOf(culpritTo)
+                    + "' through member '" + nameOf(culprit)
+                    + "', and '" + nameOf(culpritTo) + "' contains '" + nameOf(culpritFrom)
+                    + "' directly or indirectly";
+            }
+        } else {
+            msg = "circular by-value dependency between types: ";
+            for (size_t i = 0; i < cyclic.size(); ++i) {
+                if (i > 0) msg += ", ";
+                msg += nameOf(cyclic[i]);
+            }
+        }
+
+        const Symbol* culpritSym = (culprit != 0) ? symTab_.get(culprit) : nullptr;
+        if (culpritSym != nullptr && !culpritSym->fileName.empty()) {
+            // detectValueCycles runs after the per-entity walks, so point the
+            // diagnostic at the file that actually holds the offending member.
+            currentFile_ = culpritSym->fileName;
+        }
+        reportError(DiagnosticCode::CircularDependency, msg,
+                    makeLocation(culpritSym ? culpritSym->line : 0, culpritSym ? culpritSym->col : 0));
     }
 }
 
@@ -1281,12 +1359,18 @@ void DeclVisitor::topoSortStructs() {
  * @return The resolved TypeId
  */
 TypeId DeclVisitor::resolveTypeRef(const TypeRef& typeRef, uint32_t line, uint32_t col) {
+    // A type reference records where its own name starts, which is a better
+    // place to report an unknown type than the declaration mentioning it.
+    if (typeRef.line != 0) {
+        line = typeRef.line;
+        col = typeRef.col;
+    }
     // Handle POINTER TO
     if (typeRef.isPointer) {
         TypeId pointedTypeId = 0;
         std::string baseName;
         if (typeRef.base == BaseType::NAMED) {
-            pointedTypeId = resolveNamedType(typeRef.name, line);
+            pointedTypeId = resolveNamedType(typeRef.name, line, col);
             baseName = typeRef.name;
         } else {
             pointedTypeId = resolveBaseType(typeRef.base);
@@ -1309,7 +1393,7 @@ TypeId DeclVisitor::resolveTypeRef(const TypeRef& typeRef, uint32_t line, uint32
         TypeId pointedTypeId = 0;
         std::string baseName;
         if (typeRef.base == BaseType::NAMED) {
-            pointedTypeId = resolveNamedType(typeRef.name, line);
+            pointedTypeId = resolveNamedType(typeRef.name, line, col);
             baseName = typeRef.name;
         } else {
             pointedTypeId = resolveBaseType(typeRef.base);
@@ -1331,7 +1415,7 @@ TypeId DeclVisitor::resolveTypeRef(const TypeRef& typeRef, uint32_t line, uint32
     if (!typeRef.arrayDims.empty()) {
         TypeId elementTypeId = 0;
         if (typeRef.base == BaseType::NAMED) {
-            elementTypeId = resolveNamedType(typeRef.name, line);
+            elementTypeId = resolveNamedType(typeRef.name, line, col);
         } else {
             elementTypeId = resolveBaseType(typeRef.base);
         }
@@ -1378,7 +1462,7 @@ TypeId DeclVisitor::resolveTypeRef(const TypeRef& typeRef, uint32_t line, uint32
     }
     
     // Handle named types (user-defined)
-    return resolveNamedType(typeRef.name, line);
+    return resolveNamedType(typeRef.name, line, col);
 }
 
 /**
@@ -1466,7 +1550,7 @@ TypeId DeclVisitor::resolveNamedTypeSilent(const std::string& name) {
     return 0;
 }
 
-TypeId DeclVisitor::resolveNamedType(const std::string& name, uint32_t line) {
+TypeId DeclVisitor::resolveNamedType(const std::string& name, uint32_t line, uint32_t col) {
     SymbolId typeSymId = symTab_.lookupGlobal(name);
     if (typeSymId != 0) {
         Symbol* typeSym = symTab_.get(typeSymId);
@@ -1492,7 +1576,7 @@ TypeId DeclVisitor::resolveNamedType(const std::string& name, uint32_t line) {
     }
     
     // Type not found - report error
-    reportError(DiagnosticCode::InvalidTypeName, "unknown type: " + name, makeLocation(line));
+    reportError(DiagnosticCode::InvalidTypeName, "unknown type: '" + name + "'", makeLocation(line, col));
     return 0;
 }
 
@@ -1510,7 +1594,9 @@ SourceLocation DeclVisitor::makeLocation(uint32_t line, uint32_t col) const {
     SourceLocation loc;
     loc.line = line;
     loc.column = col;
-    loc.fileName = diag_.sourceFileName();
+    // Prefer the file the current entity was declared in; fall back to the
+    // global source name for entities that carry no file of their own.
+    loc.fileName = currentFile_.empty() ? diag_.sourceFileName() : currentFile_;
     return loc;
 }
 
