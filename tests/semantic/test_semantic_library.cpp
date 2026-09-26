@@ -19,7 +19,14 @@
 #include "semantic/SemanticAnalyzer.h"
 #include "semantic/SymbolTable.h"
 #include "semantic/Diagnostics.h"
+#include <algorithm>
 #include <string>
+#include <vector>
+#include "library/LibraryRegistry.h"
+#include "semantic/LibraryDescriptorBuilder.h"
+#include "lexer/Lexer.h"
+#include "parser/Parser.h"
+#include "ast/AST.h"
 
 using namespace st2cpp::semantic;
 using st2cpp::library::LibraryDescriptor;
@@ -328,4 +335,103 @@ TEST_F(SemanticLibraryTest, SingleLibraryRoundTrip) {
         END_PROGRAM
     )", registry, true);
    EXPECT_FALSE(info.diagnostics.hasErrors()) << "errors: " << info.diagnostics.errorCount();
+}
+// ============================================================================
+// An imported function block must carry its state and methods, not only its
+// call interface: a consumer that instantiates it needs to know what it holds.
+// ============================================================================
+
+TEST(SemanticLibraryImportTest, ImportedFunctionBlockExposesMembersAndMethods)
+{
+    const std::string st =
+        "FUNCTION_BLOCK Motor\n"
+        "VAR_INPUT\n"
+        "    rpm : INT;\n"
+        "END_VAR\n"
+        "VAR\n"
+        "    pos : INT;\n"
+        "END_VAR\n"
+        "VAR CONSTANT\n"
+        "    limite : INT := 10;\n"
+        "END_VAR\n"
+        "METHOD PUBLIC Reset : BOOL\n"
+        "    Reset := TRUE;\n"
+        "END_METHOD\n"
+        "END_FUNCTION_BLOCK\n";
+
+    Lexer lexer(st, "motor.st");
+    Parser parser(std::move(lexer.tokenize()), "motor.st");
+    TranslationUnit tu = parser.parseTranslationUnit();
+
+    st2cpp::semantic::SemanticAnalyzer analyzer;
+    auto info = analyzer.analyze(tu, st2cpp::semantic::SemanticAnalyzer::Strictness::Permissive);
+    ASSERT_TRUE(info.symbolTable);
+
+    st2cpp::semantic::LibraryExportOptions options;
+    options.id = "motorlib";
+    options.name = "MotorLib";
+    options.version = "1.0.0";
+    auto built = st2cpp::semantic::LibraryDescriptorBuilder::build(tu, info, options);
+    ASSERT_TRUE(built.descriptor.has_value()) << (built.errors.empty() ? "" : built.errors[0].toString());
+
+    st2cpp::library::LibraryRegistry registry;
+    std::string error;
+    ASSERT_TRUE(registry.registerLibrary(*built.descriptor, error)) << error;
+
+    // A consumer that only knows the type name.
+    const std::string consumer =
+        "PROGRAM Main\n"
+        "VAR\n"
+        "    m : Motor;\n"
+        "END_VAR\n"
+        "END_PROGRAM\n";
+    Lexer clexer(consumer, "main.st");
+    Parser cparser(std::move(clexer.tokenize()), "main.st");
+    TranslationUnit ctu = cparser.parseTranslationUnit();
+
+    st2cpp::semantic::SemanticAnalyzer canalyzer;
+    auto cinfo = canalyzer.analyze(ctu, registry, st2cpp::semantic::SemanticAnalyzer::Strictness::Permissive);
+    ASSERT_TRUE(cinfo.symbolTable);
+    const st2cpp::semantic::SymbolTable& st2 = *cinfo.symbolTable;
+
+    const st2cpp::semantic::Symbol* fb = st2.get(st2.lookupExternal("Motor"));
+    ASSERT_NE(fb, nullptr) << "the imported block is declared";
+    EXPECT_TRUE(fb->isExternal);
+
+    // The interface.
+    EXPECT_EQ(fb->params.size(), 1u) << "the parameter is restored";
+    if (!fb->params.empty()) {
+        const st2cpp::semantic::Symbol* p = st2.get(fb->params[0]);
+        ASSERT_NE(p, nullptr);
+        EXPECT_EQ(p->name, "rpm");
+        EXPECT_EQ(p->paramDir, st2cpp::semantic::ParamDir::Input);
+    }
+
+    // The state, which used to be dropped on import.
+    const st2cpp::semantic::Scope* scope = st2.getScope(fb->scopeId);
+    ASSERT_NE(scope, nullptr) << "the block has a scope";
+    std::vector<std::string> state;
+    for (const auto& [name, symId] : scope->symbols) {
+        const st2cpp::semantic::Symbol* sym = st2.get(symId);
+        if (sym != nullptr && sym->kind == st2cpp::semantic::SymbolKind::Variable) {
+            state.push_back(name);
+            if (name == "LIMITE") {
+                EXPECT_TRUE(sym->isConstant) << "limite keeps its constant flag";
+            }
+        }
+    }
+    std::sort(state.begin(), state.end());
+    EXPECT_EQ(state, (std::vector<std::string>{"LIMITE", "POS"}));
+
+    // The methods, which used to be dropped on import.
+    ASSERT_EQ(fb->members.size(), 1u) << "the method is restored";
+    const st2cpp::semantic::Symbol* method = st2.get(fb->members[0]);
+    ASSERT_NE(method, nullptr);
+    EXPECT_EQ(method->name, "Reset");
+    EXPECT_EQ(method->kind, st2cpp::semantic::SymbolKind::Method);
+    EXPECT_EQ(method->containingFbId, fb->id);
+    EXPECT_NE(method->returnTypeId, 0u) << "the return type is resolved";
+    const st2cpp::semantic::TypeInfo* ret = st2.getType(method->returnTypeId);
+    ASSERT_NE(ret, nullptr);
+    EXPECT_EQ(ret->name, "BOOL");
 }

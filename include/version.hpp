@@ -14,7 +14,7 @@
 // Version numbers following Semantic Versioning (semver.org)
 #define ST2CPP_VERSION_MAJOR  0
 #define ST2CPP_VERSION_MINOR  4
-#define ST2CPP_VERSION_PATCH  3
+#define ST2CPP_VERSION_PATCH  4
 #define ST2CPP_VERSION_PREREL ""
 
 // Helper macros for stringification (workaround for MSVC)

@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.4.4] - 2026-09-26
+
+### Fixed
+- `LibrarySymbolImporter` restored only the call interface of an imported
+  function block, so a consumer could see the parameters of a block declared in
+  another file but none of its state or methods. It now imports `members` (with
+  their constant and retain flags) and `methods` (each in its own nested scope
+  holding its parameters, with its return type and modifiers), and resolves
+  `baseType` so an inherited interface resolves through the same chain as in
+  source. An override replaces the inherited declaration instead of being
+  imported next to it.
+- The importer never recorded the block's scope on its symbol, so the symbols it
+  declared were unreachable by scope. DeclVisitor does record it, and so does
+  the importer now.
+
 ## [0.4.3] - 2026-09-26
 
 ### Added

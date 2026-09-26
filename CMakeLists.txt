@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(st2cpp VERSION 0.4.3 LANGUAGES CXX)
+project(st2cpp VERSION 0.4.4 LANGUAGES CXX)
 
 set(CPACK_PACKAGE_LICENSE "GPL-3.0-or-later")
 

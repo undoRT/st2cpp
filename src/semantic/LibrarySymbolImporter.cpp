@@ -270,8 +270,96 @@ const SymbolId symId = symTab_.declareExternal(fb.name, SymbolKind::FunctionBloc
       }
       paramIds.push_back(paramSymId);
    }
+
+   // Internal state. The descriptor carries it, so restoring it here is what
+   // makes a sibling block's members visible to a consumer: without these
+   // symbols a caller could see the interface of an imported block but none of
+   // what it holds.
+   std::vector<SymbolId> stateIds;
+   for (const auto& member : fb.members) {
+      const TypeId memberTypeId = resolveLibraryType(member.type, owner);
+      const SymbolId memberSymId = symTab_.declare(member.name, SymbolKind::Variable, memberTypeId);
+      if (memberSymId == 0) {
+         diag_.addError(DiagnosticCode::DuplicateDeclaration,
+            "duplicate member '" + member.name + "' in function block '" + fb.name + "'", makeLocation());
+         continue;
+      }
+      if (Symbol* memberSym = symTab_.get(memberSymId)) {
+         memberSym->typeId = memberTypeId;
+         memberSym->isConstant =
+            member.storage == st2cpp::library::FbMemberStorage::Constant;
+         memberSym->isRetain = member.storage == st2cpp::library::FbMemberStorage::Retain;
+         memberSym->hasDefaultValue = member.initValue.kind != st2cpp::library::InitKind::None;
+      }
+      stateIds.push_back(memberSymId);
+   }
    symTab_.exitScope();
    sym->params = std::move(paramIds);
+   // DeclVisitor records the scope on the block symbol; doing the same here is
+   // what makes the imported members and methods reachable by scope, the way a
+   // block declared in source is.
+   sym->scopeId = fbScope;
+
+   // Methods, each with its own nested scope holding its parameters, mirroring
+   // how DeclVisitor lays out a block declared in source. An override replaces
+   // the inherited declaration instead of being imported next to it.
+   std::vector<SymbolId> methodIds;
+   std::vector<std::string> methodNames;
+   for (const auto& method : fb.methods) {
+      const std::string key = SymbolTable::normalizeKey(method.name);
+      if (std::find(methodNames.begin(), methodNames.end(), key) != methodNames.end()) {
+         continue;
+      }
+      methodNames.push_back(key);
+
+      const SymbolId methodSymId = symTab_.declare(method.name, SymbolKind::Method);
+      if (methodSymId == 0) {
+         diag_.addError(DiagnosticCode::DuplicateDeclaration,
+            "duplicate method '" + method.name + "' in function block '" + fb.name + "'", makeLocation());
+         continue;
+      }
+
+      const ScopeId methodScope = symTab_.pushExternalScope("METHOD_" + method.name);
+      std::vector<SymbolId> methodParamIds;
+      for (const auto& param : method.parameters) {
+         const TypeId paramTypeId = resolveLibraryType(param.type, owner);
+         const SymbolId paramSymId = symTab_.declare(param.name, SymbolKind::Parameter, paramTypeId);
+         if (paramSymId == 0) {
+            continue;
+         }
+         if (Symbol* paramSym = symTab_.get(paramSymId)) {
+            paramSym->typeId = paramTypeId;
+            paramSym->paramDir = paramDirection(param.direction);
+            paramSym->hasDefaultValue = param.initValue.kind != st2cpp::library::InitKind::None;
+         }
+         methodParamIds.push_back(paramSymId);
+      }
+      symTab_.exitScope();
+
+      if (Symbol* methodSym = symTab_.get(methodSymId)) {
+         methodSym->containingFbId = symId;
+         methodSym->params = std::move(methodParamIds);
+         methodSym->returnTypeId = resolveLibraryType(method.returnType, owner);
+         methodSym->isAbstract = method.isAbstract;
+         methodSym->isFinal = method.isFinal;
+         methodSym->isOverride = method.isOverride;
+         methodSym->scopeId = methodScope;
+      }
+      methodIds.push_back(methodSymId);
+   }
+   // DeclVisitor stores an FB's methods in `members`; keep the same shape so a
+   // consumer walking the symbol table finds them the same way either way.
+   sym->members = std::move(methodIds);
+
+   // The base block, when the descriptor named one, so that inherited
+   // parameters and state resolve through the same chain as in source.
+   if (!fb.baseType.empty()) {
+      const SymbolId baseSymId = symTab_.lookupGlobal(fb.baseType);
+      if (baseSymId != 0) {
+         sym->baseClassId = baseSymId;
+      }
+   }
+   (void)stateIds;
 
    // Cache the FB type under its library-qualified key so that repeated
    // references to this FB type (params, members, globals) resolve to the
