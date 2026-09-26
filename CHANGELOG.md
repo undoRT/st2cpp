@@ -1,5 +1,67 @@
 # Changelog
 
+## [0.4.3] - 2026-09-26
+
+### Added
+- Function block descriptors now describe the whole block instead of only its
+  call interface: `members` (internal `VAR`/`VAR_TEMP`/`VAR RETAIN`/`VAR CONSTANT`
+  state) and `methods`, plus `baseType`, `interfaces`, `isAbstract` and `isFinal`
+- Inherited state and methods are folded into the block with `inherited` /
+  `declaredIn` markers, so a consumer can lay out an instance without walking the
+  `EXTENDS` chain itself; an overriding method replaces the inherited declaration
+  instead of being duplicated
+- Diagnostics carry the `.st` file each declaration came from: top-level AST
+  entities (`POU`, `StructType`, `EnumType`, `TypeAlias`, `Interface`,
+  `VarSection`) record a `fileName`, so a cross-file error in a merged workspace
+  names the file it actually points into
+- `Diagnostics::addSourceFile()` registers additional sources, letting a
+  diagnostic print the snippet of the file its location names
+- `schemaVersion` 1.1; the loader accepts both 1.0 and 1.1
+- Function block methods carry a `documentation` field, so a method has the
+  same shape as a function
+
+### Fixed
+- Inherited function block parameters were invisible, which made `EXTENDS`
+  unusable at a call site and incomplete in a descriptor.
+  `SymbolTable::effectiveParams()` now returns the whole call interface: the
+  parameters of the base chain (root ancestor first, so the base interface stays
+  the prefix positional calls bind against) followed by the block's own. A
+  parameter redeclared by a derived block is emitted once, with the derived
+  type. The arity check in `BodyVisitor` and the descriptor export both use it,
+  and exported parameters carry `inherited` / `declaredIn` like members and
+  methods do. Code generation was already correct
+- Workspace merge dropped `typeAliases`, silently making a type alias declared
+  in one `.st` file invisible to the others in `--project-style`. The merge now
+  lives in a single helper so every declaration kind is forwarded, and type
+  aliases are deduplicated across files with a warning when they disagree
+- Parse errors pointed at the offending token instead of the insertion point of
+  the missing one, blaming unrelated code (often the next line). `expect()` now
+  reports just past the last consumed token, so a missing `;` is reported at the
+  end of the declaration that lacks it
+- A diagnostic whose location named no file printed a header starting with a bare
+  `:line:col:`; it now falls back to the primary source name
+- An unknown type was reported with no position at all, so a struct member whose
+  type is missing produced a bare `file:` header with no line, column or snippet.
+  `TypeRef` and `MethodParameter` now record where the type name starts, and
+  `resolveTypeRef` prefers that position over the enclosing declaration, so the
+  caret lands on the type name (`v : Missing`) rather than on the variable
+  (`missing : Missing`)
+- `unknown type: X` now quotes the name, as the identifier diagnostics already did
+- A circular by-value dependency was reported with no position and a bare type
+  list. `Symbol` now records the line, column and source file of its
+  declaration, and the cycle report names the member that closes the cycle:
+  `'ST_Motor5' contains itself through member 'Motor_': a value of this type has
+  no finite size` instead of `circular by-value dependency between types:
+  ST_Motor5`. A mutual cycle names both ends. `Symbol` positions are also set for
+  method parameters
+- Flat workspace mode no longer re-reads each `.st` file to render diagnostics
+
+### Changed
+- Build archives (`*.a`) are ignored by a single rule instead of an explicit
+  list, so the per-target archives CMake emits next to their sources
+  (`include/json/`, `include/library/`, `include/project/`, `include/semantic/`)
+  no longer show up as untracked files
+
 ## [0.4.2] - 2026-09-25
 
 ### Fixed

@@ -11,7 +11,6 @@ cmake-build-*/
 !st2cpp_includes/**
 CMakeDoxy*
 CPack*
-libst2cpp_lib.a
 !tests/*.cpp
 !tests/*.hpp
 *.out
@@ -53,11 +52,11 @@ tests/*.hpp
 # Build artifacts
 *.o
 *.obj
+*.a
 *.exe
 *.dll
 *.so
 *.dylib
-libst2cpp.a
 st2cpp
 st2cpp_tests
 
@@ -74,8 +73,6 @@ simple_program_2/
 !examples/*/main.cpp
 *.notrac
 clearBeforePush.sh
-libst2cpp_lib.a
-libst2cpp_semantic.a
 undoCoreConfig.cmake
 undoCoreConfigVersion.cmake
 

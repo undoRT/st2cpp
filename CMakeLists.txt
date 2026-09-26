@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(st2cpp VERSION 0.4.2 LANGUAGES CXX)
+project(st2cpp VERSION 0.4.3 LANGUAGES CXX)
 
 set(CPACK_PACKAGE_LICENSE "GPL-3.0-or-later")
 
@@ -163,6 +163,7 @@ if(BUILD_TESTS)
         tests/test_complex_program.cpp  
         tests/helpers/TestHelper.cpp
         tests/semantic/test_diagnostics.cpp
+        tests/semantic/test_source_location.cpp
         tests/semantic/test_symbol_table.cpp
         tests/semantic/test_type_system.cpp
         tests/semantic/test_decl_visitor.cpp
