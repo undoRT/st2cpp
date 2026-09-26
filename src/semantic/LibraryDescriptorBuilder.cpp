@@ -14,6 +14,7 @@
 #include "semantic/LibraryDescriptorBuilder.h"
 #include <algorithm>
 #include <cctype>
+#include <set>
 
 namespace st2cpp::semantic {
 
@@ -25,7 +26,7 @@ namespace {
 // Small helpers
 // ---------------------------------------------------------------------------
 
-const std::string kSchemaVersion = "1.0";
+const std::string kSchemaVersion = "1.1";
 
 /**
  * @brief IEC 61131-3 case-insensitive key (same normalization everywhere).
@@ -369,6 +370,19 @@ struct LibraryDescriptorBuilder::Impl {
     void exportInterface(const Interface& iface);
     void exportTypeAlias(const TypeAlias& alias);
 
+    // ---- function block members ----
+    // The base chain of a function block, root ancestor first, excluding the
+    // block itself. Walking it lets a member or method be emitted once, with
+    // the block that actually declares it.
+    std::vector<const Symbol*> fbAncestors(const Symbol* fbSym) const;
+    const POU* fbAstFor(const Symbol* fbSym) const;
+    SymbolId lookupInScope(ScopeId scopeId, const std::string& name) const;
+    void emitFbMembers(const POU& pou, const Symbol* pouSym, lib::FunctionBlockDef& fb);
+    void emitFbMethods(const POU& pou, lib::FunctionBlockDef& fb);
+    lib::FbMemberStorage storageOf(const POU& pou, const std::string& memberName) const;
+    lib::FbMethodVisibility visibilityOf(const Method& method) const;
+    void noteExternalDependency(TypeId typeId);
+
     void runMetadataValidation()
     {
         if (options.id.empty()) {
@@ -678,6 +692,325 @@ bool LibraryDescriptorBuilder::Impl::collectParams(const POU& pou, const std::st
     return ok;
 }
 
+std::vector<const Symbol*> LibraryDescriptorBuilder::Impl::fbAncestors(const Symbol* fbSym) const
+{
+   std::vector<const Symbol*> chain;
+   if (fbSym == nullptr) {
+      return chain;
+   }
+   // Follow baseClassId upwards, then reverse, so the root ancestor comes
+   // first. The visited set guards against a cycle that slipped past the
+   // analyzer's topological sort.
+   std::set<SymbolId> visited;
+   const Symbol* cursor = fbSym;
+   while (cursor != nullptr && cursor->baseClassId != 0 && visited.insert(cursor->id).second) {
+      const Symbol* base = st.get(cursor->baseClassId);
+      if (base == nullptr) {
+         break;
+      }
+      chain.push_back(base);
+      cursor = base;
+   }
+   std::reverse(chain.begin(), chain.end());
+   return chain;
+}
+
+SymbolId LibraryDescriptorBuilder::Impl::lookupInScope(ScopeId scopeId, const std::string& name) const
+{
+   if (scopeId == 0) {
+      return 0;
+   }
+   const Scope* scope = st.getScope(scopeId);
+   if (scope == nullptr) {
+      return 0;
+   }
+   auto it = scope->symbols.find(SymbolTable::normalizeKey(name));
+   return (it != scope->symbols.end()) ? it->second : 0;
+}
+
+const POU* LibraryDescriptorBuilder::Impl::fbAstFor(const Symbol* fbSym) const{
+   if (fbSym == nullptr) {
+      return nullptr;
+   }
+   for (const auto& candidate : tu.pous) {
+      if (candidate.kind == POUKind::FUNCTION_BLOCK && keyOf(candidate.name) == keyOf(fbSym->name)) {
+         return &candidate;
+      }
+   }
+   return nullptr;
+}
+
+lib::FbMemberStorage LibraryDescriptorBuilder::Impl::storageOf(const POU& pou, const std::string& memberName) const
+{
+   for (const auto& sec : pou.varSections) {
+      // INPUT/OUTPUT/IN_OUT describe the call interface, not state.
+      if (sec.kind == VarKind::INPUT || sec.kind == VarKind::OUTPUT || sec.kind == VarKind::IN_OUT) {
+         continue;
+      }
+      for (const auto& decl : sec.decls) {
+         if (keyOf(decl.name) != keyOf(memberName)) {
+            continue;
+         }
+         if (decl.isConstant) {
+            return lib::FbMemberStorage::Constant;
+         }
+         if (decl.isRetain) {
+            return lib::FbMemberStorage::Retain;
+         }
+         return (sec.kind == VarKind::TEMP) ? lib::FbMemberStorage::Temp : lib::FbMemberStorage::Var;
+      }
+   }
+   return lib::FbMemberStorage::Var;
+}
+
+lib::FbMethodVisibility LibraryDescriptorBuilder::Impl::visibilityOf(const Method& method) const
+{
+   switch (method.visibility) {
+      case MethodVisibility::PRIVATE: return lib::FbMethodVisibility::Private;
+      case MethodVisibility::PROTECTED: return lib::FbMethodVisibility::Protected;
+      case MethodVisibility::PUBLIC: break;
+   }
+   return lib::FbMethodVisibility::Public;
+}
+
+void LibraryDescriptorBuilder::Impl::noteExternalDependency(TypeId typeId)
+{
+   if (typeId == 0) {
+      return;
+   }
+   const TypeInfo* ti = st.getType(typeId);
+   if (ti == nullptr) {
+      return;
+   }
+   std::string libId;
+   if (isExternal(*ti, libId)) {
+      addDependency(libId);
+   }
+}
+
+void LibraryDescriptorBuilder::Impl::emitFbMembers(const POU& pou, const Symbol* pouSym, lib::FunctionBlockDef& fb)
+{
+   if (pouSym == nullptr) {
+      return;
+   }
+   const std::string entity = "function block " + pou.name;
+
+   // Names declared by this block itself: a base member with the same name is
+   // shadowed and must not be emitted twice.
+   std::set<std::string> ownNames;
+   for (const auto& sec : pou.varSections) {
+      if (sec.kind == VarKind::INPUT || sec.kind == VarKind::OUTPUT || sec.kind == VarKind::IN_OUT) {
+         continue;
+      }
+      for (const auto& decl : sec.decls) {
+         ownNames.insert(keyOf(decl.name));
+      }
+   }
+
+   // Emit inherited state first (root ancestor downwards) so the resulting
+   // order matches the declaration order of the flattened instance.
+   std::set<std::string> emitted = ownNames;
+   for (const Symbol* ancestor : fbAncestors(pouSym)) {
+      const POU* ancestorAst = fbAstFor(ancestor);
+      for (const auto& sec : ancestorAst->varSections) {
+         if (sec.kind == VarKind::INPUT || sec.kind == VarKind::OUTPUT || sec.kind == VarKind::IN_OUT) {
+            continue;
+         }
+         for (const auto& decl : sec.decls) {
+            if (!emitted.insert(keyOf(decl.name)).second) {
+               continue;
+            }
+            const SymbolId symId = ancestor->scopeId != 0 ? lookupInScope(ancestor->scopeId, decl.name) : 0;
+            const Symbol* sym = (symId != 0) ? st.get(symId) : nullptr;
+            if (sym == nullptr) {
+               continue;
+            }
+            lib::FbMember member;
+            member.name = decl.name;
+            member.storage = ancestorAst != nullptr ? storageOf(*ancestorAst, decl.name) : lib::FbMemberStorage::Var;
+            member.inherited = true;
+            member.declaredIn = ancestor->name;
+            std::string why;
+            auto ref = typeRefFromTypeId(sym->typeId, &why);
+            if (!ref) {
+               error(entity + ".member " + decl.name, why);
+               continue;
+            }
+            member.type = std::move(*ref);
+            if (decl.initialValue) {
+               auto init = initFromExpr(*decl.initialValue, entity + ".member " + decl.name);
+               if (init) {
+                  member.initValue = std::move(*init);
+               }
+            }
+            noteExternalDependency(sym->typeId);
+            fb.members.push_back(std::move(member));
+         }
+      }
+   }
+
+   // Then the block's own state, in declaration order.
+   for (const auto& sec : pou.varSections) {
+      if (sec.kind == VarKind::INPUT || sec.kind == VarKind::OUTPUT || sec.kind == VarKind::IN_OUT) {
+         continue;
+      }
+      for (const auto& decl : sec.decls) {
+         const std::string memberEntity = entity + ".member " + decl.name;
+         const SymbolId symId = lookupInScope(pouSym->scopeId, decl.name);
+         const Symbol* sym = (symId != 0) ? st.get(symId) : nullptr;
+         if (sym == nullptr) {
+            error(memberEntity, "semantic member symbol not found");
+            continue;
+         }
+         lib::FbMember member;
+         member.name = decl.name;
+         member.storage = storageOf(pou, decl.name);
+         std::string why;
+         auto ref = typeRefFromTypeId(sym->typeId, &why);
+         if (!ref) {
+            error(memberEntity, why);
+            continue;
+         }
+         member.type = std::move(*ref);
+         if (decl.initialValue) {
+            auto init = initFromExpr(*decl.initialValue, memberEntity);
+            if (!init) {
+               error(memberEntity, "default value is not a compile-time literal");
+            } else {
+               member.initValue = std::move(*init);
+            }
+         }
+         noteExternalDependency(sym->typeId);
+         fb.members.push_back(std::move(member));
+      }
+   }
+}
+
+void LibraryDescriptorBuilder::Impl::emitFbMethods(const POU& pou, lib::FunctionBlockDef& fb)
+{
+   const std::string entity = "function block " + pou.name;
+   const Symbol* pouSym = st.get(st.lookupGlobal(pou.name));
+   if (pouSym == nullptr) {
+      return;
+   }
+
+   // A method symbol carries its resolved return type and its parameter symbols
+   // in declaration order, so both come from the symbol table rather than from
+   // re-resolving the AST type references here.
+   auto findMethodSym = [&](const Symbol* fb, const std::string& name) -> const Symbol* {
+      if (fb == nullptr) {
+         return nullptr;
+      }
+      for (SymbolId memberId : fb->members) {
+         const Symbol* member = st.get(memberId);
+         if (member != nullptr && member->kind == SymbolKind::Method && keyOf(member->name) == keyOf(name)) {
+            return member;
+         }
+      }
+      return nullptr;
+   };
+
+   // Names declared by this block itself. Seeding the set with them makes the
+   // base walk skip anything the block redeclares, so an override is emitted
+   // once, as the derived declaration.
+   std::set<std::string> emitted;
+   for (const auto& method : pou.methods) {
+      emitted.insert(keyOf(method.name));
+   }
+
+   auto emitFrom = [&](const POU& owner, const Symbol* ownerSym, bool inherited) {
+      for (const auto& method : owner.methods) {
+         // A method the block overrides replaces the inherited one, so the
+         // derived declaration is the only one emitted.
+         if (!emitted.insert(keyOf(method.name)).second) {
+            continue;
+         }
+         const std::string methodEntity = entity + ".method " + method.name;
+         const Symbol* methodSym = findMethodSym(ownerSym, method.name);
+         if (methodSym == nullptr) {
+            error(methodEntity, "semantic method symbol not found");
+            continue;
+         }
+
+         lib::FbMethodDef def;
+         def.name = method.name;
+         def.visibility = visibilityOf(method);
+         def.isAbstract = method.isAbstract;
+         def.isFinal = method.isFinal;
+         def.isOverride = method.isOverride;
+         def.inherited = inherited;
+         if (inherited) {
+            def.declaredIn = owner.name;
+         }
+
+         if (method.returnType.base == BaseType::VOID || methodSym->returnTypeId == 0) {
+            def.returnType.kind = lib::TypeRefKind::Primitive;
+            def.returnType.name = "VOID";
+         } else {
+            std::string why;
+            auto ret = typeRefFromTypeId(methodSym->returnTypeId, &why);
+            if (!ret) {
+               error(methodEntity, "return type " + why);
+               continue;
+            }
+            def.returnType = std::move(*ret);
+            noteExternalDependency(methodSym->returnTypeId);
+         }
+
+         for (SymbolId paramId : methodSym->params) {
+            const Symbol* paramSym = st.get(paramId);
+            if (paramSym == nullptr) {
+               continue;
+            }
+            lib::FunParam param;
+            param.name = paramSym->name;
+            switch (paramSym->paramDir) {
+               case ParamDir::Output: param.direction = lib::ParamDirection::Out; break;
+               case ParamDir::InOut: param.direction = lib::ParamDirection::InOut; break;
+               case ParamDir::None:
+               case ParamDir::Input: param.direction = lib::ParamDirection::In; break;
+            }
+            std::string why;
+            auto paramRef = typeRefFromTypeId(paramSym->typeId, &why);
+            if (!paramRef) {
+               error(methodEntity + ".parameter " + paramSym->name, why);
+               continue;
+            }
+            param.type = std::move(*paramRef);
+            noteExternalDependency(paramSym->typeId);
+            def.parameters.push_back(std::move(param));
+         }
+
+         // Default values live on the AST parameter, matched by name.
+         for (size_t i = 0; i < def.parameters.size() && i < method.parameters.size(); ++i) {
+            const auto& astParam = method.parameters[i];
+            if (!astParam.initialValue) {
+               continue;
+            }
+            auto init = initFromExpr(*astParam.initialValue, methodEntity);
+            if (init) {
+               def.parameters[i].initValue = std::move(*init);
+            }
+         }
+
+         fb.methods.push_back(std::move(def));
+      }
+   };
+
+   // Base blocks first (root ancestor downwards), then the block's own.
+   // Seeding `emitted` with the block's own method names makes the base walk
+   // skip anything the block overrides or redeclares, so an override is
+   // emitted once, as the derived declaration. The set is cleared afterwards so
+   // the block's own methods are emitted unconditionally.
+   for (const Symbol* ancestor : fbAncestors(pouSym)) {
+      if (const POU* ancestorAst = fbAstFor(ancestor)) {
+         emitFrom(*ancestorAst, ancestor, true);
+      }
+   }
+   emitted.clear();
+   emitFrom(pou, pouSym, false);
+}
+
 void LibraryDescriptorBuilder::Impl::exportPou(const POU& pou)
 {
     const std::string entity = pou.kind == POUKind::FUNCTION_BLOCK ? "function block " + pou.name
@@ -686,12 +1019,6 @@ void LibraryDescriptorBuilder::Impl::exportPou(const POU& pou)
 
     if (pou.kind == POUKind::PROGRAM) {
         error(entity, "PROGRAM POUs are not representable");
-        return;
-    }
-
-    std::vector<const VarDecl*> paramDecls;
-    std::vector<ParamDir> paramDirs;
-    if (!collectParams(pou, entity, paramDecls, paramDirs)) {
         return;
     }
 
@@ -705,39 +1032,65 @@ void LibraryDescriptorBuilder::Impl::exportPou(const POU& pou)
         return;
     }
 
+    // A function block is callable with the parameters it inherits from its
+    // base blocks, so the exported interface must include them. Bases come
+    // first, keeping the base interface as the prefix positional calls bind to.
+    std::vector<const POU*> paramSources;
     if (pou.kind == POUKind::FUNCTION_BLOCK) {
-        // Only the interface is exported today; state/implementation is internal.
-        // Any of these constructs makes the FB unrepresentable: emit the error
-        // and do not export the block.
-        bool rejected = false;
-        if (!pou.extends.empty()) {
-            error(entity, "EXTENDS is not representable");
-            rejected = true;
+        for (const Symbol* ancestor : fbAncestors(pouSym)) {
+            if (const POU* ancestorAst = fbAstFor(ancestor)) {
+                paramSources.push_back(ancestorAst);
+            }
         }
-        if (!pou.implements.empty()) {
-            error(entity, "IMPLEMENTS is not representable");
-            rejected = true;
-        }
-        if (pou.isAbstract) {
-            error(entity, "ABSTRACT function blocks are not representable");
-            rejected = true;
-        }
-        if (pou.isFinal) {
-            error(entity, "FINAL function blocks are not representable");
-            rejected = true;
-        }
-        if (!pou.methods.empty()) {
-            error(entity, "methods are not representable");
-            rejected = true;
-        }
-        if (rejected) {
+    }
+    paramSources.push_back(&pou);
+
+    std::vector<const VarDecl*> paramDecls;
+    std::vector<ParamDir> paramDirs;
+    for (const POU* source : paramSources) {
+        if (!collectParams(*source, entity, paramDecls, paramDirs)) {
             return;
         }
     }
+    // Which block declares each parameter name, so an inherited parameter can
+    // be marked with the block it comes from. A redeclaration by this block
+    // overwrites the base, matching the dedup below.
+    std::map<std::string, const POU*> paramOwnerByName;
+    for (const POU* source : paramSources) {
+        for (const auto& sec : source->varSections) {
+            if (sec.kind != VarKind::INPUT && sec.kind != VarKind::OUTPUT && sec.kind != VarKind::IN_OUT) {
+                continue;
+            }
+            for (const auto& decl : sec.decls) {
+                paramOwnerByName[keyOf(decl.name)] = source;
+            }
+        }
+    }
 
-    // Align parameter declarations with their registered symbols by name.
+    // A parameter redeclared by the block replaces the inherited declaration.
+    {
+        std::set<std::string> seen;
+        std::vector<const VarDecl*> keptDecls;
+        std::vector<ParamDir> keptDirs;
+        for (size_t i = paramDecls.size(); i-- > 0;) {
+            if (seen.insert(keyOf(paramDecls[i]->name)).second) {
+                keptDecls.push_back(paramDecls[i]);
+                keptDirs.push_back(paramDirs[i]);
+            }
+        }
+        std::reverse(keptDecls.begin(), keptDecls.end());
+        std::reverse(keptDirs.begin(), keptDirs.end());
+        paramDecls = std::move(keptDecls);
+        paramDirs = std::move(keptDirs);
+    }
+
+    // Align parameter declarations with their registered symbols by name. The
+    // lookup spans the whole inheritance chain, so an inherited declaration
+    // finds the symbol the base block registered.
     std::map<std::string, SymbolId> paramById;
-    for (SymbolId pid : pouSym->params) {
+    const std::vector<SymbolId> declaredParams =
+        (pou.kind == POUKind::FUNCTION_BLOCK) ? st.effectiveParams(pouSym->id) : pouSym->params;
+    for (SymbolId pid : declaredParams) {
         if (const Symbol* ps = st.get(pid)) {
             paramById[keyOf(ps->name)] = pid;
         }
@@ -764,6 +1117,12 @@ void LibraryDescriptorBuilder::Impl::exportPou(const POU& pou)
             }
             param.type = std::move(*ref);
             param.direction = paramDirectionOf(ps->paramDir != ParamDir::None ? ps->paramDir : paramDirs[i]);
+            // Mark the parameters that come from a base block, and say which.
+            auto ownerIt = paramOwnerByName.find(keyOf(decl.name));
+            if (ownerIt != paramOwnerByName.end() && ownerIt->second != &pou) {
+                param.inherited = true;
+                param.declaredIn = ownerIt->second->name;
+            }
             if (decl.initialValue) {
                 auto init = initFromExpr(*decl.initialValue, paramEntity);
                 if (!init) {
@@ -798,7 +1157,28 @@ void LibraryDescriptorBuilder::Impl::exportPou(const POU& pou)
     } else {
         lib::FunctionBlockDef fb;
         fb.name = pou.name;
+        fb.isAbstract = pou.isAbstract;
+        fb.isFinal = pou.isFinal;
         emitParams(fb.parameters);
+
+        // The base block and the implemented interfaces are references by name:
+        // they are described by their own entries, so a consumer can resolve
+        // them against the same descriptor.
+        if (!pou.extends.empty()) {
+            fb.baseType = pou.extends;
+            // A base block declared in another library is a real dependency
+            // edge; one declared in this same library is not.
+            if (const Symbol* baseSym = st.get(st.lookupGlobal(pou.extends))) {
+               noteExternalDependency(baseSym->typeId);
+            }
+        }
+        for (const auto& iface : pou.implements) {
+            fb.interfaces.push_back(iface);
+        }
+
+        emitFbMembers(pou, pouSym, fb);
+        emitFbMethods(pou, fb);
+
         desc.functionBlocks.push_back(std::move(fb));
     }
 }

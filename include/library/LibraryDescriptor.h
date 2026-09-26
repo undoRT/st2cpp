@@ -329,6 +329,10 @@ struct FunParam {
     ParamDirection direction = ParamDirection::In;
     InitValue initValue; // optional default value
     std::string documentation;
+    /// True when the parameter is inherited from a base function block rather
+    /// than declared here. Always false for function parameters.
+    bool inherited = false;
+    std::string declaredIn; // base block name, set when inherited
 };
 
 /**
@@ -348,17 +352,83 @@ struct FunctionDef {
 };
 
 /**
+ * @brief The storage class a function block member lives in.
+ * @details Mirrors the ST variable sections an FB member can be declared in.
+ * Parameters (VAR_INPUT/VAR_OUTPUT/VAR_IN_OUT) are not members: they are
+ * described by FunctionBlockDef::parameters instead.
+ */
+enum class FbMemberStorage {
+    Var,      ///< VAR: state that persists across calls
+    Temp,     ///< VAR_TEMP: scratch valid for the duration of one call
+    Retain,   ///< VAR RETAIN: state that survives a warm restart
+    Constant  ///< VAR CONSTANT
+};
+
+/**
+ * @brief A state member of a function block (its internal data).
+ * @details Unlike a parameter, a member is not part of the block's call
+ * interface: it is declared in VAR/VAR_TEMP and is what makes two instances of
+ * the same FB hold different data.
+ */
+struct FbMember {
+    std::string name;
+    TypeRef type;
+    FbMemberStorage storage = FbMemberStorage::Var;
+    InitValue initValue; // optional default value
+    std::string documentation;
+    bool inherited = false;  ///< declared by a base FB, not by this one
+    std::string declaredIn;  ///< base FB name, set when inherited
+};
+
+/**
+ * @brief Visibility of a function block method.
+ */
+enum class FbMethodVisibility {
+    Private,
+    Protected,
+    Public
+};
+
+/**
+ * @brief A method of a function block.
+ */
+struct FbMethodDef {
+    std::string name;
+    TypeRef returnType;
+    std::vector<FunParam> parameters;
+    FbMethodVisibility visibility = FbMethodVisibility::Public;
+    bool isAbstract = false;
+    bool isFinal = false;
+    bool isOverride = false;
+    bool inherited = false;  ///< declared by a base FB, not by this one
+    std::string declaredIn;  ///< base FB name, set when inherited
+    std::string documentation;
+};
+
+/**
  * @brief A FUNCTION_BLOCK exported by the library.
  * @details `cppBinding` is optional: a semantic-only descriptor (e.g. one
  * produced from a Structured Text source by the LibraryDescriptorBuilder)
  * carries no C++ binding until a later enrichment/configuration step adds it.
  * `hasCppBinding` tells whether the binding members are meaningful.
+ *
+ * A descriptor describes the *whole* block, not only its call interface:
+ * `members` carries the internal state (VAR/VAR_TEMP, inherited ones included
+ * so that a consumer can lay out an instance without walking the base chain
+ * itself) and `methods` its behaviour, while `parameters` stays the IN/OUT
+ * surface.
  */
 struct FunctionBlockDef {
     std::string name;
     FbCppBinding cppBinding; // optional, present when hasCppBinding
     bool hasCppBinding = false;
     std::vector<FunParam> parameters;
+    std::string baseType;                ///< EXTENDS target, empty when none
+    std::vector<std::string> interfaces; ///< IMPLEMENTS targets
+    bool isAbstract = false;
+    bool isFinal = false;
+    std::vector<FbMember> members;    ///< internal state, inherited included
+    std::vector<FbMethodDef> methods; ///< behaviour, inherited included
     std::string documentation;
 };
 

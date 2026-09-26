@@ -36,6 +36,38 @@ void addMember(JsonValue& obj, const std::string& key, JsonValue value)
    obj.members.emplace_back(key, std::move(value));
 }
 
+void addBool(JsonValue& obj, const std::string& key, bool value)
+{
+   if (!value) {
+      return;
+   }
+   JsonValue v;
+   v.type = JsonType::Bool;
+   v.boolean = value;
+   obj.members.emplace_back(key, std::move(v));
+}
+
+const char* fbMemberStorageName(FbMemberStorage storage)
+{
+   switch (storage) {
+      case FbMemberStorage::Var: return "VAR";
+      case FbMemberStorage::Temp: return "VAR_TEMP";
+      case FbMemberStorage::Retain: return "VAR RETAIN";
+      case FbMemberStorage::Constant: return "VAR CONSTANT";
+   }
+   return "VAR";
+}
+
+const char* fbMethodVisibilityName(FbMethodVisibility visibility)
+{
+   switch (visibility) {
+      case FbMethodVisibility::Private: return "private";
+      case FbMethodVisibility::Protected: return "protected";
+      case FbMethodVisibility::Public: return "public";
+   }
+   return "public";
+}
+
 JsonValue makeString(const std::string& value)
 {
    JsonValue v;
@@ -276,6 +308,8 @@ JsonValue paramToJson(const FunParam& p)
       addMember(obj, "initValue", initToJson(p.initValue));
    }
    addString(obj, "documentation", p.documentation);
+   addBool(obj, "inherited", p.inherited);
+   addString(obj, "declaredIn", p.declaredIn);
    return obj;
 }
 
@@ -459,6 +493,69 @@ JsonValue LibrarySerializer::toJsonValue(const LibraryDescriptor& desc)
             params.array.push_back(paramToJson(p));
          }
          addMember(o, "parameters", std::move(params));
+
+         // Inheritance: referenced by name, resolved against the same
+         // descriptor by the consumer.
+         addString(o, "baseType", fb.baseType);
+         if (!fb.interfaces.empty()) {
+            JsonValue ifaces;
+            ifaces.type = JsonType::Array;
+            for (const std::string& iface : fb.interfaces) {
+               ifaces.array.push_back(makeString(iface));
+            }
+            addMember(o, "interfaces", std::move(ifaces));
+         }
+         addBool(o, "isAbstract", fb.isAbstract);
+         addBool(o, "isFinal", fb.isFinal);
+
+         // Internal state. Members inherited from a base block are part of the
+         // list, flagged, so that laying out an instance needs no base walk.
+         if (!fb.members.empty()) {
+            JsonValue members;
+            members.type = JsonType::Array;
+            for (const FbMember& m : fb.members) {
+               JsonValue mo;
+               mo.type = JsonType::Object;
+               addString(mo, "name", m.name);
+               addMember(mo, "type", typeRefToJson(m.type));
+               addString(mo, "storage", fbMemberStorageName(m.storage));
+               if (m.initValue.kind != InitKind::None) {
+                  addMember(mo, "initValue", initToJson(m.initValue));
+               }
+               addString(mo, "documentation", m.documentation);
+               addBool(mo, "inherited", m.inherited);
+               addString(mo, "declaredIn", m.declaredIn);
+               members.array.push_back(std::move(mo));
+            }
+            addMember(o, "members", std::move(members));
+         }
+
+         if (!fb.methods.empty()) {
+            JsonValue methods;
+            methods.type = JsonType::Array;
+            for (const FbMethodDef& m : fb.methods) {
+               JsonValue mo;
+               mo.type = JsonType::Object;
+               addString(mo, "name", m.name);
+               addMember(mo, "returnType", typeRefToJson(m.returnType));
+               JsonValue mparams;
+               mparams.type = JsonType::Array;
+               for (const FunParam& p : m.parameters) {
+                  mparams.array.push_back(paramToJson(p));
+               }
+               addMember(mo, "parameters", std::move(mparams));
+               addString(mo, "visibility", fbMethodVisibilityName(m.visibility));
+               addBool(mo, "isAbstract", m.isAbstract);
+               addBool(mo, "isFinal", m.isFinal);
+               addBool(mo, "isOverride", m.isOverride);
+               addBool(mo, "inherited", m.inherited);
+               addString(mo, "declaredIn", m.declaredIn);
+               addString(mo, "documentation", m.documentation);
+               methods.array.push_back(std::move(mo));
+            }
+            addMember(o, "methods", std::move(methods));
+         }
+
          addString(o, "documentation", fb.documentation);
          items.array.push_back(std::move(o));
       }

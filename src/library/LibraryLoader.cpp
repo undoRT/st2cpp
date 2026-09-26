@@ -23,7 +23,11 @@ namespace {
 /**
  * @brief Supported schema version of the Library Descriptor format.
  */
-constexpr const char* kSupportedSchemaVersion = "1.0";
+// 1.0 is the initial schema. 1.1 adds the function block member/method
+// description; those sections are simply absent from a 1.0 descriptor, so both
+// versions are accepted and read into the same model.
+constexpr const char* kSchemaVersion10 = "1.0";
+constexpr const char* kSchemaVersion11 = "1.1";
 
 using json::JsonType;
 using json::JsonValue;
@@ -445,6 +449,8 @@ private:
          param.initValue = parseInitValue(*init, path + ".initValue");
       }
       getString(obj, "documentation", path, param.documentation);
+      getBool(obj, "inherited", path, param.inherited);
+      getString(obj, "declaredIn", path, param.declaredIn);
       return param;
    }
 
@@ -460,9 +466,10 @@ private:
       if (!requireString(root, "$schemaVersion", "$schemaVersion", desc_.schemaVersion)) {
          return;
       }
-      if (desc_.schemaVersion != kSupportedSchemaVersion) {
+      if (desc_.schemaVersion != kSchemaVersion10 && desc_.schemaVersion != kSchemaVersion11) {
          error("$schemaVersion",
-               "unsupported schemaVersion '" + desc_.schemaVersion + "'; supported version is '" + kSupportedSchemaVersion + "'");
+               "unsupported schemaVersion '" + desc_.schemaVersion + "'; supported versions are '"
+                   + std::string(kSchemaVersion10) + "' and '" + kSchemaVersion11 + "'");
       }
 
       requireString(root, "id", "id", desc_.id);
@@ -836,6 +843,128 @@ private:
                }
             }
          }
+         const JsonValue* baseType = o.find("baseType");
+         if (baseType) {
+            getString(o, "baseType", path, fb.baseType);
+         }
+         const JsonValue* ifaces = o.find("interfaces");
+         if (ifaces) {
+            if (!ifaces->isArray()) {
+               error(path + ".interfaces", "expected an array");
+            } else {
+               for (size_t i = 0; i < ifaces->array.size(); ++i) {
+                  std::string iface;
+                  if (ifaces->array[i].isString()) {
+                     iface = ifaces->array[i].text;
+                  } else {
+                     error(path + ".interfaces[" + std::to_string(i) + "]", "expected a string");
+                  }
+                  if (!iface.empty()) {
+                     fb.interfaces.push_back(iface);
+                  }
+               }
+            }
+         }
+         getBool(o, "isAbstract", path, fb.isAbstract);
+         getBool(o, "isFinal", path, fb.isFinal);
+
+         const JsonValue* members = o.find("members");
+         if (members) {
+            if (!members->isArray()) {
+               error(path + ".members", "expected an array");
+            } else {
+               for (size_t m = 0; m < members->array.size(); ++m) {
+                  const JsonValue& mo = members->array[m];
+                  const std::string mpath = path + ".members[" + std::to_string(m) + "]";
+                  if (!mo.isObject()) {
+                     error(mpath, "expected an object");
+                     continue;
+                  }
+                  FbMember member;
+                  requireString(mo, "name", mpath, member.name);
+                  const JsonValue* type = mo.find("type");
+                  if (type) {
+                     member.type = parseTypeRef(*type, mpath + ".type");
+                  }
+                  std::string storage;
+                  if (getString(mo, "storage", mpath, storage)) {
+                     if (storage == "VAR_TEMP") {
+                        member.storage = FbMemberStorage::Temp;
+                     } else if (storage == "VAR RETAIN") {
+                        member.storage = FbMemberStorage::Retain;
+                     } else if (storage == "VAR CONSTANT") {
+                        member.storage = FbMemberStorage::Constant;
+                     } else {
+                        member.storage = FbMemberStorage::Var;
+                     }
+                  }
+                  const JsonValue* init = mo.find("initValue");
+                  if (init) {
+                     member.initValue = parseInitValue(*init, mpath + ".initValue");
+                  }
+                  getString(mo, "documentation", mpath, member.documentation);
+                  getBool(mo, "inherited", mpath, member.inherited);
+                  getString(mo, "declaredIn", mpath, member.declaredIn);
+                  fb.members.push_back(std::move(member));
+               }
+            }
+         }
+
+         const JsonValue* methods = o.find("methods");
+         if (methods) {
+            if (!methods->isArray()) {
+               error(path + ".methods", "expected an array");
+            } else {
+               for (size_t m = 0; m < methods->array.size(); ++m) {
+                  const JsonValue& mo = methods->array[m];
+                  const std::string mpath = path + ".methods[" + std::to_string(m) + "]";
+                  if (!mo.isObject()) {
+                     error(mpath, "expected an object");
+                     continue;
+                  }
+                  FbMethodDef method;
+                  requireString(mo, "name", mpath, method.name);
+                  const JsonValue* ret = mo.find("returnType");
+                  if (ret) {
+                     method.returnType = parseTypeRef(*ret, mpath + ".returnType");
+                  }
+                  const JsonValue* mparams = mo.find("parameters");
+                  if (mparams) {
+                     if (!mparams->isArray()) {
+                        error(mpath + ".parameters", "expected an array");
+                     } else {
+                        for (size_t p = 0; p < mparams->array.size(); ++p) {
+                           const JsonValue& po = mparams->array[p];
+                           const std::string ppath = mpath + ".parameters[" + std::to_string(p) + "]";
+                           if (!po.isObject()) {
+                              error(ppath, "expected an object");
+                              continue;
+                           }
+                           method.parameters.push_back(parseFunParam(po, ppath));
+                        }
+                     }
+                  }
+                  std::string visibility;
+                  if (getString(mo, "visibility", mpath, visibility)) {
+                     if (visibility == "private") {
+                        method.visibility = FbMethodVisibility::Private;
+                     } else if (visibility == "protected") {
+                        method.visibility = FbMethodVisibility::Protected;
+                     } else {
+                        method.visibility = FbMethodVisibility::Public;
+                     }
+                  }
+                  getBool(mo, "isAbstract", mpath, method.isAbstract);
+                  getBool(mo, "isFinal", mpath, method.isFinal);
+                  getBool(mo, "isOverride", mpath, method.isOverride);
+                  getBool(mo, "inherited", mpath, method.inherited);
+                  getString(mo, "declaredIn", mpath, method.declaredIn);
+                  getString(mo, "documentation", mpath, method.documentation);
+                  fb.methods.push_back(std::move(method));
+               }
+            }
+         }
+
          getString(o, "documentation", path, fb.documentation);
          desc_.functionBlocks.push_back(std::move(fb));
       }

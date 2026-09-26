@@ -1,4 +1,4 @@
-# Library Descriptor — JSON v1.0 Specification
+# Library Descriptor — JSON v1.0 / v1.1 Specification
 
 > Part of the [st2cpp documentation](README.md) (docs/12). Normative schema
 > for the Library Descriptor consumed by `LibraryLoader` and `--ext-libs`.
@@ -17,14 +17,15 @@ The descriptor is the *source of truth* for the features that will:
 - generate C++ code for library calls,
 - generate descriptors from ST sources or C++ headers.
 
-This document specifies format version **1.0** and the validation rules applied
-by `LibraryLoader`.
+This document specifies format versions **1.0** and **1.1** and the validation
+rules applied by `LibraryLoader`. Both are accepted: 1.1 adds the function block
+member and method description, and a 1.0 descriptor simply has no such sections.
 
 ## 2. Formal structure
 
 ```
 LibraryDescriptor
-  $schemaVersion   string      "1.0"
+  $schemaVersion   string      "1.0" | "1.1"
   id               string      unique, non-empty (IEC-style, case-insensitive)
   name             string      non-empty
   version          string      "MAJOR.MINOR.PATCH"[-prerelease][+build]
@@ -132,12 +133,46 @@ FunctionCppBinding
 
 ## 2.6 Function blocks
 
+A function block is described in full, not only by its call interface: the
+internal state (`members`) and the behaviour (`methods`) are part of the
+descriptor, so a consumer can lay out and drive an instance from the descriptor
+alone.
+
 ```
 FunctionBlockDef
   name          string
-  parameters    [ FunParam ]  required
-  cppBinding    FbCppBinding          optional
-  documentation string                optional
+  parameters    [ FunParam ]              required   the IN/OUT call interface
+  members       [ FbMember ]              optional   internal state (1.1)
+  methods       [ FbMethodDef ]           optional   behaviour      (1.1)
+  baseType      string                    optional   EXTENDS target, by name
+  interfaces    [ string ]                optional   IMPLEMENTS targets, by name
+  isAbstract    bool                      optional   default false
+  isFinal       bool                      optional   default false
+  cppBinding    FbCppBinding              optional
+  documentation string                    optional
+
+FbMember
+  name          string
+  type          TypeRef
+  storage       "VAR" | "VAR_TEMP" | "VAR RETAIN" | "VAR CONSTANT"
+                                            default "VAR"
+  initValue     InitValue                 optional
+  documentation string                    optional
+  inherited     bool                      optional   default false
+  declaredIn    string                    optional   base block, when inherited
+
+FbMethodDef
+  name          string
+  returnType    TypeRef                   required (VOID for a procedure)
+  parameters    [ FunParam ]              optional
+  visibility    "private" | "protected" | "public"
+                                            default "public"
+  isAbstract    bool                      optional   default false
+  isFinal       bool                      optional   default false
+   isOverride    bool                      optional   default false
+   inherited     bool                      optional   default false
+   declaredIn    string                    optional   base block, when inherited
+   documentation string                    optional
 
 FbCppBinding
   instanceType  string   required
@@ -149,7 +184,35 @@ FunParam
   direction     "IN" | "OUT" | "IN_OUT"   default "IN"
   initValue     InitValue                 optional
   documentation string                    optional
+  inherited     bool                      optional   default false
+  declaredIn    string                    optional   base block, when inherited
 ```
+
+Rules:
+
+- `parameters` is the call interface. `VAR_INPUT`/`VAR_OUTPUT`/`VAR_IN_OUT`
+  declarations appear there, never in `members`; `members` holds only
+  `VAR`, `VAR_TEMP`, `VAR RETAIN` and `VAR CONSTANT`.
+- `parameters` of a function block is **flattened over the `EXTENDS` chain** in
+  the same way as `members` and `methods`: the parameters inherited from the
+  base blocks come first, so the base interface stays the prefix that positional
+  arguments bind against, followed by the block's own. An inherited parameter
+  carries `inherited: true` and `declaredIn: "<base block>"`. A parameter
+  redeclared by the block appears **once**, with the derived type, and is not
+  marked as inherited.
+  These flags are always absent on a function's parameters, which never inherit.
+- `baseType` and each entry of `interfaces` are references **by name**: they are
+  described by their own entry in the same descriptor. A base block that comes
+  from another library makes that library a dependency (see 2.8).
+- `members` and `methods` are **flattened over the `EXTENDS` chain**, ordered
+  from the root ancestor down to the block itself, so laying out an instance
+  needs no base walk. An entry contributed by a base block carries
+  `inherited: true` and `declaredIn: "<base block>"`.
+- A member or method that the block redeclares is emitted **once**, as the
+  derived declaration. Overriding a method therefore does not produce both the
+  inherited and the overriding entry.
+- A member of a type provided by another library makes that library a
+  dependency.
 
 ## 2.7 Type references
 
