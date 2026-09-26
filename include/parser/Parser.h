@@ -82,6 +82,7 @@ private:
 
    const Token& expect(TokenType t, const std::string& msg);
    ParseError error(const std::string& msg) const;
+   ParseError errorAtInsertionPoint(const std::string& msg) const;
 
    // ========================================================================
    //  Top Level Parsing

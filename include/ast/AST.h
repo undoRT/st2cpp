@@ -79,6 +79,8 @@ struct TypeRef
    bool isRefTo = false;            ///< Is this a REF_TO type?
    std::vector<ArrayDim> arrayDims; ///< Array dimensions (non-empty if array)
    std::optional<int> stringLen;    ///< Length for STRING[n]
+   uint32_t line = 0;               ///< Where the type name starts (0 = unknown)
+   uint32_t col = 0;
    TypeId resolvedTypeId = 0;       // Semantic analysis: resolved canonical type
 };
 
@@ -105,6 +107,7 @@ struct StructType
    std::vector<StructMember> members;
    uint32_t line = 0;
    uint32_t col = 0;
+   std::string fileName; // source .st file this type was declared in
 };
 
 /**
@@ -129,6 +132,7 @@ struct EnumType
    std::vector<EnumEnumerator> enumerators;
    uint32_t line = 0;
    uint32_t col = 0;
+   std::string fileName; // source .st file this type was declared in
 };
 
 /**
@@ -147,6 +151,7 @@ struct TypeAlias
    TypeRef type;
    uint32_t line = 0;
    uint32_t col = 0;
+   std::string fileName; // source .st file this alias was declared in
 };
 
 enum class VarKind {
@@ -169,6 +174,8 @@ struct MethodParameter
    TypeRef type;
    VarKind kind; // INPUT, OUTPUT, IN_OUT, VAR, TEMP
    std::shared_ptr<Expr> initialValue;
+   uint32_t line = 0;
+   uint32_t col = 0;
 };
 
 enum class MethodVisibility {
@@ -232,6 +239,9 @@ struct VarSection
    VarKind kind;
    std::vector<Attribute> attributes;
    std::vector<VarDecl> decls;
+   uint32_t line = 0;
+   uint32_t col = 0;
+   std::string fileName; // source .st file this section was declared in
 };
 
 struct LiteralExpr
@@ -347,6 +357,7 @@ struct Interface
    std::vector<Method> methods;
    uint32_t line = 0;
    uint32_t col = 0;
+   std::string fileName; // source .st file this interface was declared in
 };
 
 struct AdrExpr
@@ -517,6 +528,7 @@ struct POU
    std::vector<std::string> implements;
    bool isAbstract = false;
    bool isFinal = false;
+   std::string fileName; // source .st file this POU was declared in
    SymbolId symbolId = 0;                    // Semantic analysis: link to symbol table
    SymbolId baseClassSymbolId = 0;           // EXTENDS resolved
    std::vector<SymbolId> interfaceSymbolIds; // IMPLEMENTS resolved

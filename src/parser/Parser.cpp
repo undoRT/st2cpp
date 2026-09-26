@@ -99,9 +99,35 @@ bool Parser::match(TokenType t)
 const Token& Parser::expect(TokenType t, const std::string& msg)
 {
    if (!check(t)) {
-      throw error(msg);
+      throw errorAtInsertionPoint(msg);
    }
    return advance();
+}
+
+/**
+ * @brief Create a parse error pointing at the insertion point of a missing token
+ * @param msg Error description
+ * @return ParseError exception
+ *
+ * When expect() fails, the expected token is missing *before* the token that is
+ * actually there. Reporting the position of that offending token makes the
+ * diagnostic point at unrelated code, sometimes on the following line, which is
+ * far less useful than pointing at the place where the token should have been
+ * inserted (immediately after the last consumed one). This mirrors how clang
+ * reports "expected ';' at end of declaration".
+ *
+ * Falls back to the offending token when nothing has been consumed yet.
+ */
+ParseError Parser::errorAtInsertionPoint(const std::string& msg) const
+{
+   if (m_pos == 0) {
+      return error(msg);
+   }
+   const Token& prev = m_tokens[m_pos - 1];
+   const uint32_t prevSpan = prev.text.empty() ? 1U : static_cast<uint32_t>(prev.text.size());
+   // Column just past the last consumed token: that is where the expected
+   // token would have started, so a zero-width caret marks the gap.
+   return ParseError(msg, prev.line, prev.col + prevSpan, m_fileName, prev.col + prevSpan);
 }
 
 /**
@@ -177,6 +203,7 @@ TypeAlias alias;
                  alias.name = typeName;
                  alias.line = aliasLine;
                  alias.col = aliasCol;
+                 alias.fileName = m_fileName;
                  alias.type = parseTypeRef();
                 expect(TokenType::SEMICOLON, "Expected ';' at the end of the type alias");
                 expect(TokenType::KW_END_TYPE, "Expected END_TYPE after type alias");
@@ -206,6 +233,7 @@ POU Parser::parsePOU()
    POU pou;
    pou.line = peek().line;
    pou.col = peek().col;
+   pou.fileName = m_fileName;
 
    if (match(TokenType::KW_FUNCTION_BLOCK)) {
       pou.kind = POUKind::FUNCTION_BLOCK;
@@ -312,6 +340,7 @@ StructType Parser::parseStructType()
    StructType st;
    st.line = peek().line;
    st.col = peek().col;
+   st.fileName = m_fileName;
    st.name = expect(TokenType::IDENTIFIER, "Expected type name after TYPE").text;
 
    expect(TokenType::COLON, "Expected ':' after type name");
@@ -367,6 +396,7 @@ EnumType Parser::parseEnumType()
    EnumType et;
    et.line = peek().line;
    et.col = peek().col;
+   et.fileName = m_fileName;
    et.name = expect(TokenType::IDENTIFIER, "Expected type name after TYPE").text;
 
    expect(TokenType::COLON, "Expected ':' after type name");
@@ -463,7 +493,8 @@ Method Parser::parseMethod()
             param.type = decl.type;
             param.kind = VarKind::INPUT;
             param.initialValue = decl.initialValue;
-            method.parameters.push_back(param);
+            param.line = decl.line;
+            param.col = decl.col;            method.parameters.push_back(param);
          }
       } else if (check(TokenType::KW_VAR_OUTPUT)) {
          advance();
@@ -474,7 +505,8 @@ Method Parser::parseMethod()
             param.type = decl.type;
             param.kind = VarKind::OUTPUT;
             param.initialValue = decl.initialValue;
-            method.parameters.push_back(param);
+            param.line = decl.line;
+            param.col = decl.col;            method.parameters.push_back(param);
          }
       } else if (check(TokenType::KW_VAR_IN_OUT)) {
          advance();
@@ -485,7 +517,8 @@ Method Parser::parseMethod()
             param.type = decl.type;
             param.kind = VarKind::IN_OUT;
             param.initialValue = decl.initialValue;
-            method.parameters.push_back(param);
+            param.line = decl.line;
+            param.col = decl.col;            method.parameters.push_back(param);
          }
       } else if (check(TokenType::KW_VAR) || check(TokenType::KW_VAR_TEMP)) {
          VarKind kind = check(TokenType::KW_VAR) ? VarKind::VAR : VarKind::TEMP;
@@ -524,6 +557,7 @@ Interface Parser::parseInterface()
    Interface iface;
    iface.line = peek().line;
    iface.col = peek().col;
+   iface.fileName = m_fileName;
 
    expect(TokenType::KW_INTERFACE, "Expected INTERFACE");
    iface.name = expect(TokenType::IDENTIFIER, "Expected interface name").text;
@@ -558,6 +592,9 @@ VarSection Parser::parseMethodVarSection(VarKind kind)
 {
    VarSection sec;
    sec.kind = kind;
+   sec.line = peek().line;
+   sec.col = peek().col;
+   sec.fileName = m_fileName;
 
    match(TokenType::KW_CONSTANT);
    match(TokenType::KW_RETAIN);
@@ -650,6 +687,9 @@ VarSection Parser::parseVarSection(VarKind kind)
 {
    VarSection sec;
    sec.kind = kind;
+   sec.line = peek().line;
+   sec.col = peek().col;
+   sec.fileName = m_fileName;
 
    // Consume optional CONSTANT / RETAIN modifier
    const bool isConstant = match(TokenType::KW_CONSTANT);
@@ -723,6 +763,9 @@ VarSection Parser::parseGlobalVarSection()
 {
    VarSection sec;
    sec.kind = VarKind::GLOBAL;
+   sec.line = peek().line;
+   sec.col = peek().col;
+   sec.fileName = m_fileName;
 
    // Parse attributes
    sec.attributes = parseAttributes();
@@ -936,7 +979,10 @@ TypeRef Parser::parseTypeRef()
 TypeRef Parser::parseBaseTypeRef()
 {
    TypeRef tr;
-   auto t = peek().type;
+   // Remembered so a diagnostic about this type can point at the type name
+   // itself rather than at the declaration that mentions it.
+   const Token first = peek();
+   auto t = first.type;
 
    auto mapBase = [&](BaseType b) {
       tr.base = b;
@@ -1021,6 +1067,8 @@ TypeRef Parser::parseBaseTypeRef()
    default:
       throw error("Expected type name");
    }
+   tr.line = first.line;
+   tr.col = first.col;
    return tr;
 }
 
