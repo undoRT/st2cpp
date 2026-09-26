@@ -1389,10 +1389,12 @@ TEST_F(DeclVisitorTest, UnknownTypeReportsLine) {
     bool localUnknownLineOk = false;
     for (const auto& d : info.diagnostics.all()) {
         if (d.code == DiagnosticCode::InvalidTypeName) {
-            if (d.message.find(": Missing") != std::string::npos) {
+            // Match on the bare type name: the message quotes it, so matching
+            // on ": Missing" would break the moment the quoting changes.
+            if (d.message.find("Missing") != std::string::npos) {
                 returnTypeLineOk = (d.location.line > 0);
             }
-            if (d.message.find(": AlsoMissing") != std::string::npos) {
+            if (d.message.find("AlsoMissing") != std::string::npos) {
                 localUnknownLineOk = (d.location.line == 4);
             }
         }

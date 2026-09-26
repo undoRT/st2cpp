@@ -75,7 +75,7 @@ VAR_GLOBAL CONSTANT x : INT := 5; END_VAR
 )");
     ASSERT_TRUE(r.ok()) << r.errors[0].toString();
     const LibraryDescriptor& d = *r.descriptor;
-    EXPECT_EQ(d.schemaVersion, "1.0");
+    EXPECT_EQ(d.schemaVersion, "1.1");
     EXPECT_EQ(d.id, "mylib");
     EXPECT_EQ(d.name, "MyLib");
     EXPECT_EQ(d.version, "1.2.3");
@@ -483,7 +483,7 @@ END_FUNCTION_BLOCK
     EXPECT_EQ(fb.parameters[1].direction, ParamDirection::Out);
 }
 
-TEST(LibraryDescriptorBuilder, FunctionBlockWithMethodsIsError)
+TEST(LibraryDescriptorBuilder, FunctionBlockMethodsAreExported)
 {
     auto r = build(R"(
 FUNCTION_BLOCK Dev
@@ -493,28 +493,176 @@ END_METHOD
 END_FUNCTION_BLOCK
 )");
     ASSERT_TRUE(r.descriptor);
-    bool found = false;
-    for (const auto& e : r.errors) {
-        if (e.message.find("methods") != std::string::npos) found = true;
-    }
-    EXPECT_TRUE(found);
+    EXPECT_TRUE(r.errors.empty()) << (r.errors.empty() ? "" : r.errors[0].toString());
+    ASSERT_EQ(r.descriptor->functionBlocks.size(), 1u);
+    const FunctionBlockDef& fb = r.descriptor->functionBlocks[0];
+    ASSERT_EQ(fb.methods.size(), 1u);
+    EXPECT_EQ(fb.methods[0].name, "Reset");
+    EXPECT_FALSE(fb.methods[0].inherited);
+    EXPECT_EQ(fb.methods[0].visibility, FbMethodVisibility::Public);
+    // A method without a return type reports VOID rather than nothing.
+    EXPECT_EQ(fb.methods[0].returnType.name, "VOID");
 }
 
-TEST(LibraryDescriptorBuilder, FunctionBlockExtendsIsError)
+TEST(LibraryDescriptorBuilder, FunctionBlockExtendsIsExported)
 {
     auto r = build(R"(
 FUNCTION_BLOCK Base
+VAR
+    ticks : INT := 3;
+END_VAR
 END_FUNCTION_BLOCK
 FUNCTION_BLOCK Derived EXTENDS Base
+VAR
+    acc : REAL;
+END_VAR
+END_FUNCTION_BLOCK
+)");
+    ASSERT_TRUE(r.descriptor);
+    EXPECT_TRUE(r.errors.empty()) << (r.errors.empty() ? "" : r.errors[0].toString());
+    ASSERT_EQ(r.descriptor->functionBlocks.size(), 2u);
+
+    const FunctionBlockDef& base = r.descriptor->functionBlocks[0];
+    EXPECT_EQ(base.name, "Base");
+    EXPECT_TRUE(base.baseType.empty());
+
+    const FunctionBlockDef& derived = r.descriptor->functionBlocks[1];
+    EXPECT_EQ(derived.name, "Derived");
+    EXPECT_EQ(derived.baseType, "Base");
+
+    // The flattened member list carries the inherited state, flagged, so a
+    // consumer can lay out an instance without walking the base chain.
+    ASSERT_EQ(derived.members.size(), 2u);
+    EXPECT_EQ(derived.members[0].name, "ticks");
+    EXPECT_TRUE(derived.members[0].inherited);
+    EXPECT_EQ(derived.members[0].declaredIn, "Base");
+    EXPECT_EQ(derived.members[0].initValue.kind, InitKind::Scalar);
+    EXPECT_EQ(derived.members[1].name, "acc");
+    EXPECT_FALSE(derived.members[1].inherited);
+}
+
+TEST(LibraryDescriptorBuilder, FunctionBlockOverriddenMethodIsEmittedOnce)
+{
+    auto r = build(R"(
+FUNCTION_BLOCK Base
+METHOD Reset : BOOL
+    Reset := TRUE;
+END_METHOD
+END_FUNCTION_BLOCK
+FUNCTION_BLOCK Derived EXTENDS Base
+METHOD Reset : BOOL
+    Reset := FALSE;
+END_METHOD
+METHOD Step : BOOL
+    Step := TRUE;
+END_METHOD
+END_FUNCTION_BLOCK
+)");
+    ASSERT_TRUE(r.descriptor);
+    ASSERT_EQ(r.descriptor->functionBlocks.size(), 2u);
+    const FunctionBlockDef& derived = r.descriptor->functionBlocks[1];
+    // The override replaces the inherited declaration instead of duplicating it.
+    ASSERT_EQ(derived.methods.size(), 2u);
+    EXPECT_EQ(derived.methods[0].name, "Reset");
+    EXPECT_FALSE(derived.methods[0].inherited);
+    EXPECT_EQ(derived.methods[1].name, "Step");
+    EXPECT_FALSE(derived.methods[1].inherited);
+}
+
+TEST(LibraryDescriptorBuilder, FunctionBlockMethodSignatureMatchesFunctionSignature)
+{
+    // A method must be as reproducible as a function: same name/return/params,
+    // plus the modifiers only a method can have.
+    auto r = build(R"(
+FUNCTION_BLOCK Dev
+METHOD PUBLIC Calibrate : BOOL
+VAR_INPUT
+    offset : INT := 3;
+END_VAR
+VAR
+    scratch : DINT;
+END_VAR
+    Calibrate := TRUE;
+END_METHOD
 END_FUNCTION_BLOCK
 )");
     ASSERT_TRUE(r.descriptor);
     ASSERT_EQ(r.descriptor->functionBlocks.size(), 1u);
-    bool found = false;
-    for (const auto& e : r.errors) {
-        if (e.message.find("EXTENDS") != std::string::npos) found = true;
+    const FunctionBlockDef& fb = r.descriptor->functionBlocks[0];
+    ASSERT_EQ(fb.methods.size(), 1u);
+    const FbMethodDef& m = fb.methods[0];
+
+    EXPECT_EQ(m.name, "Calibrate");
+    // An elementary type is carried by the `primitive` enum; `name` only holds
+    // the identifier of a Named (user-defined) type.
+    ASSERT_EQ(m.returnType.kind, TypeRefKind::Primitive);
+    EXPECT_EQ(m.returnType.primitive, BaseType::BOOL);
+    ASSERT_EQ(m.parameters.size(), 1u);
+    EXPECT_EQ(m.parameters[0].name, "offset");
+    ASSERT_EQ(m.parameters[0].type.kind, TypeRefKind::Primitive);
+    EXPECT_EQ(m.parameters[0].type.primitive, BaseType::INT);
+    EXPECT_EQ(m.parameters[0].direction, ParamDirection::In);
+    EXPECT_EQ(m.parameters[0].initValue.kind, InitKind::Scalar);
+    EXPECT_EQ(m.parameters[0].initValue.scalar, "3");
+    EXPECT_EQ(m.visibility, FbMethodVisibility::Public);
+    // The field exists so a method is shaped like a function; ST carries no
+    // doc comments today, so it is only required to survive a round trip.
+    EXPECT_TRUE(m.documentation.empty());
+
+    // Method-local variables are an implementation detail and are not part of
+    // the signature.
+    for (const auto& member : fb.members) {
+        EXPECT_NE(member.name, "scratch");
     }
-    EXPECT_TRUE(found);
+}
+
+TEST(LibraryDescriptorBuilder, FunctionBlockMemberMethodDocumentationRoundTrips)
+{
+    LibraryDescriptor source;
+    source.schemaVersion = "1.1";
+    source.id = "devlib";
+    source.name = "DevLib";
+    source.version = "1.0.0";
+    FunctionBlockDef fb;
+    fb.name = "Dev";
+    FbMethodDef method;
+    method.name = "Reset";
+    method.returnType.kind = TypeRefKind::Primitive;
+    method.returnType.primitive = BaseType::BOOL;
+    method.documentation = "Restores the initial state.";
+    fb.methods.push_back(method);
+    source.functionBlocks.push_back(fb);
+
+    LibraryDescriptor reloaded;
+    ASSERT_TRUE(roundTrips(source, reloaded));
+    ASSERT_EQ(reloaded.functionBlocks.size(), 1u);
+    ASSERT_EQ(reloaded.functionBlocks[0].methods.size(), 1u);
+    EXPECT_EQ(reloaded.functionBlocks[0].methods[0].documentation, "Restores the initial state.");
+}
+
+TEST(LibraryDescriptorBuilder, FunctionBlockMembersSurviveRoundTrip)
+{
+    auto r = build(R"(
+FUNCTION_BLOCK Base
+VAR_INPUT e : BOOL; END_VAR
+VAR CONSTANT lim : INT := 9; END_VAR
+END_FUNCTION_BLOCK
+FUNCTION_BLOCK Derived EXTENDS Base
+VAR_TEMP scratch : DINT; END_VAR
+END_FUNCTION_BLOCK
+)");
+    ASSERT_TRUE(r.descriptor);
+    LibraryDescriptor reloaded;
+    ASSERT_TRUE(roundTrips(*r.descriptor, reloaded));
+    ASSERT_EQ(reloaded.functionBlocks.size(), 2u);
+    const FunctionBlockDef& derived = reloaded.functionBlocks[1];
+    EXPECT_EQ(derived.baseType, "Base");
+    ASSERT_EQ(derived.members.size(), 2u);
+    EXPECT_EQ(derived.members[0].name, "lim");
+    EXPECT_TRUE(derived.members[0].inherited);
+    EXPECT_EQ(derived.members[0].storage, FbMemberStorage::Constant);
+    EXPECT_EQ(derived.members[1].name, "scratch");
+    EXPECT_EQ(derived.members[1].storage, FbMemberStorage::Temp);
 }
 
 // ============================================================================
@@ -773,4 +921,93 @@ VAR_GLOBAL pair : Pair; END_VAR
     ASSERT_EQ(r.descriptor->dependencies.size(), 1u);
     EXPECT_EQ(r.descriptor->dependencies[0].id, "stdlib");
     EXPECT_EQ(r.descriptor->dependencies[0].version.raw, ">=1.0.0 <2.0.0");
+}
+TEST(LibraryDescriptorBuilder, InheritedParametersAreExported)
+{
+    // A derived block is callable with the base's interface, so the descriptor
+    // must list it: a consumer reading only `parameters` would otherwise build
+    // an instance with the wrong call signature.
+    auto r = build(R"(
+FUNCTION_BLOCK Base
+VAR_INPUT
+    abilita : BOOL;
+END_VAR
+VAR_OUTPUT
+    allarme : BOOL;
+END_VAR
+END_FUNCTION_BLOCK
+FUNCTION_BLOCK Derivato EXTENDS Base
+VAR_INPUT
+    gain : REAL;
+END_VAR
+END_FUNCTION_BLOCK
+)");
+    ASSERT_TRUE(r.descriptor);
+    ASSERT_EQ(r.descriptor->functionBlocks.size(), 2u);
+
+    const FunctionBlockDef& derived = r.descriptor->functionBlocks[1];
+    EXPECT_EQ(derived.baseType, "Base");
+    ASSERT_EQ(derived.parameters.size(), 3u);
+
+    // Base parameters come first so the base interface stays the prefix.
+    EXPECT_EQ(derived.parameters[0].name, "abilita");
+    EXPECT_EQ(derived.parameters[0].direction, ParamDirection::In);
+    EXPECT_TRUE(derived.parameters[0].inherited);
+    EXPECT_EQ(derived.parameters[0].declaredIn, "Base");
+
+    EXPECT_EQ(derived.parameters[1].name, "allarme");
+    EXPECT_EQ(derived.parameters[1].direction, ParamDirection::Out);
+    EXPECT_TRUE(derived.parameters[1].inherited);
+
+    EXPECT_EQ(derived.parameters[2].name, "gain");
+    EXPECT_FALSE(derived.parameters[2].inherited);
+    EXPECT_TRUE(derived.parameters[2].declaredIn.empty());
+}
+
+TEST(LibraryDescriptorBuilder, InheritedParametersSurviveRoundTrip)
+{
+    auto r = build(R"(
+FUNCTION_BLOCK Base
+VAR_INPUT
+    a : INT;
+END_VAR
+END_FUNCTION_BLOCK
+FUNCTION_BLOCK Derivato EXTENDS Base
+VAR_INPUT
+    b : DINT;
+END_VAR
+END_FUNCTION_BLOCK
+)");
+    ASSERT_TRUE(r.descriptor);
+    LibraryDescriptor reloaded;
+    ASSERT_TRUE(roundTrips(*r.descriptor, reloaded));
+    ASSERT_EQ(reloaded.functionBlocks.size(), 2u);
+    const FunctionBlockDef& derived = reloaded.functionBlocks[1];
+    ASSERT_EQ(derived.parameters.size(), 2u);
+    EXPECT_TRUE(derived.parameters[0].inherited);
+    EXPECT_EQ(derived.parameters[0].declaredIn, "Base");
+    EXPECT_FALSE(derived.parameters[1].inherited);
+}
+
+TEST(LibraryDescriptorBuilder, RedeclaredParameterReplacesTheInheritedOne)
+{
+    auto r = build(R"(
+FUNCTION_BLOCK Base
+VAR_INPUT
+    comune : INT;
+END_VAR
+END_FUNCTION_BLOCK
+FUNCTION_BLOCK Derivato EXTENDS Base
+VAR_INPUT
+    comune : DINT;
+END_VAR
+END_FUNCTION_BLOCK
+)");
+    ASSERT_TRUE(r.descriptor);
+    const FunctionBlockDef& derived = r.descriptor->functionBlocks[1];
+    // Once, with the derived type, and not marked as inherited.
+    ASSERT_EQ(derived.parameters.size(), 1u);
+    EXPECT_EQ(derived.parameters[0].name, "comune");
+    EXPECT_EQ(derived.parameters[0].type.primitive, BaseType::DINT);
+    EXPECT_FALSE(derived.parameters[0].inherited);
 }
