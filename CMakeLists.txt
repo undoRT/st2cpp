@@ -75,6 +75,15 @@ add_library(st2cpp_lib STATIC
     src/parser/Parser.cpp
     src/parser/ParserStmt.cpp
     src/codegen/CodeGenerator.cpp
+    src/codegen/ProjectEmitter.cpp
+    src/codegen/DeclEmitter.cpp
+    src/codegen/BodyEmitter.cpp
+    src/codegen/SemanticBridge.cpp
+    src/codegen/LibraryIncludeTracker.cpp
+    src/codegen/DependencyOrdering.cpp
+    src/codegen/TypeMapper.cpp
+    src/codegen/ProcessImage.cpp
+    src/codegen/ScopeManager.cpp
 )
 
 target_include_directories(st2cpp_lib PUBLIC
