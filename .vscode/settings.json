@@ -1,0 +1,12 @@
+{
+    "C_Cpp.errorSquiggles": "enabled",
+    "editor.mouseWheelZoom": true,
+    "editor.formatOnSave": true,
+    "C_Cpp.clang_format_style": "file:${workspaceRoot}/.vscode/.clang-format",
+    "editor.fontFamily": "DejaVu Sans Mono",
+    "editor.fontSize": 13,
+    "[cpp]": {
+        "editor.defaultFormatter": "ms-vscode.cpptools"
+    },
+    "C_Cpp.intelliSenseEngine": "default"
+}
