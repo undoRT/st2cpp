@@ -37,7 +37,8 @@ using BuildStructDepType = std::unordered_map<std::string, std::unordered_set<st
 /**
  * @brief The emission order of function blocks and structs.
  */
-class DependencyOrdering {
+class DependencyOrdering
+{
 public:
    /**
     * @param fbMap      The function blocks collected from the translation unit
@@ -51,19 +52,17 @@ public:
                       const std::unordered_map<std::string, std::vector<std::string>>& structMembers,
                       const SemanticBridge& semantic,
                       IdentifierPolicy identifiers)
-      : m_fbMap(fbMap), m_isFB(isFB), m_structMembers(structMembers),
-        m_semantic(semantic), m_identifiers(identifiers) {}
+      : m_fbMap(fbMap), m_isFB(isFB), m_structMembers(structMembers), m_semantic(semantic), m_identifiers(identifiers)
+   {}
 
    /// The function block order the semantic analysis computed, when it has one.
    std::vector<std::string> orderedFbNamesFromSemantic() const;
 
    /// The dependencies between function blocks, from a syntactic scan.
-   std::unordered_map<std::string, std::unordered_set<std::string>>
-   buildFBDependencies(const TranslationUnit& tu) const;
+   std::unordered_map<std::string, std::unordered_set<std::string>> buildFBDependencies(const TranslationUnit& tu) const;
 
    /// Topologically sort a dependency graph, cycles broken by first-seen order.
-   std::vector<std::string> topologicalSort(
-      const std::unordered_map<std::string, std::unordered_set<std::string>>& dependencies) const;
+   std::vector<std::string> topologicalSort(const std::unordered_map<std::string, std::unordered_set<std::string>>& dependencies) const;
 
    /// Whether a struct is used, directly or through a member, as a function block.
    bool structContainsFB(const std::string& structName, const TranslationUnit& tu) const;
@@ -78,13 +77,12 @@ public:
    std::vector<std::string> topologicalSortStructs(const BuildStructDepType& dependencies) const;
 
    /// Reorder a struct initializer to follow the declaration order of the struct.
-   std::vector<StructInitExpr::MemberInit> orderStructMembers(
-      const std::vector<StructInitExpr::MemberInit>& members, const std::string& typeName) const;
+   std::vector<StructInitExpr::MemberInit> orderStructMembers(const std::vector<StructInitExpr::MemberInit>& members,
+                                                              const std::string& typeName) const;
 
 private:
    /// Recursive worker of structContainsFB, carrying the already-visited set.
-   bool structContainsFB(const std::string& structName, const TranslationUnit& tu,
-                         std::unordered_set<std::string>& visited) const;
+   bool structContainsFB(const std::string& structName, const TranslationUnit& tu, std::unordered_set<std::string>& visited) const;
 
    const std::unordered_map<std::string, POU>& m_fbMap;
    const std::unordered_map<std::string, bool>& m_isFB;

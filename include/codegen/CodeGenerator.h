@@ -33,12 +33,12 @@
 // `st2cpp::codegen` now, next to the components that produce them; they are
 // re-exported because most call sites still refer to them unqualified.
 using st2cpp::codegen::CodegenResult;
-using st2cpp::codegen::GenFileType;
-using st2cpp::codegen::GeneratedFile;
-using st2cpp::codegen::ProjectStyle;
-using st2cpp::codegen::ParameterInfo;
-using st2cpp::codegen::FunctionSignature;
 using st2cpp::codegen::ExternalFbCallInfo;
+using st2cpp::codegen::FunctionSignature;
+using st2cpp::codegen::GeneratedFile;
+using st2cpp::codegen::GenFileType;
+using st2cpp::codegen::ParameterInfo;
+using st2cpp::codegen::ProjectStyle;
 using BuildStructDepType = st2cpp::codegen::BuildStructDepType;
 
 /**

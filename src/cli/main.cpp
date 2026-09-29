@@ -81,10 +81,11 @@ static void reportGenerationBlocked(const st2cpp::semantic::SemanticInfo& info)
  * inference. Only `--strict` (explicitly requested) enables generation blocking
  * on semantic errors, in which case the diagnostics are printed.
  */
-static st2cpp::semantic::SemanticInfo runSemanticAnalysis(
-   const TranslationUnit& tu, const st2cpp::library::LibraryRegistry* registry = nullptr,
-   const std::string& sourceName = "", const std::string& sourceText = "",
-   const std::map<std::string, std::string>* sources = nullptr)
+static st2cpp::semantic::SemanticInfo runSemanticAnalysis(const TranslationUnit& tu,
+                                                          const st2cpp::library::LibraryRegistry* registry = nullptr,
+                                                          const std::string& sourceName = "",
+                                                          const std::string& sourceText = "",
+                                                          const std::map<std::string, std::string>* sources = nullptr)
 {
    auto strictness = strictMode ? st2cpp::semantic::SemanticAnalyzer::Strictness::Strict
                                 : st2cpp::semantic::SemanticAnalyzer::Strictness::Permissive;
@@ -99,26 +100,29 @@ static st2cpp::semantic::SemanticInfo runSemanticAnalysis(
    } else {
       info = analyzer.analyze(tu, strictness);
    }
-    const bool fatalCycle = hasUnresolvableCircularDependency(info);
-    bool hasCaseMismatch = false;
-    for (const auto& d : info.diagnostics.all()) {
-      if (alwaysReport(d)) { hasCaseMismatch = true; break; }
-    }
-    if (verbose || strictMode || fatalCycle || hasCaseMismatch) {
-       if (info.diagnostics.totalCount() > 0) {
-          info.diagnostics.setSourceText(sourceText);
-          // Register every workspace file so a diagnostic can print the
-          // snippet of the file it actually points into, not of the workspace.
-          if (sources != nullptr) {
-             for (const auto& entry : *sources) {
-                info.diagnostics.addSourceFile(entry.first, entry.second);
-             }
-          }
-          info.diagnostics.print(std::cerr);
-       }
-       std::cerr << "Semantic analysis: " << info.diagnostics.errorCount() << " errors, " << info.diagnostics.warningCount()
-                 << " warnings\n";
-    }
+   const bool fatalCycle = hasUnresolvableCircularDependency(info);
+   bool hasCaseMismatch = false;
+   for (const auto& d : info.diagnostics.all()) {
+      if (alwaysReport(d)) {
+         hasCaseMismatch = true;
+         break;
+      }
+   }
+   if (verbose || strictMode || fatalCycle || hasCaseMismatch) {
+      if (info.diagnostics.totalCount() > 0) {
+         info.diagnostics.setSourceText(sourceText);
+         // Register every workspace file so a diagnostic can print the
+         // snippet of the file it actually points into, not of the workspace.
+         if (sources != nullptr) {
+            for (const auto& entry : *sources) {
+               info.diagnostics.addSourceFile(entry.first, entry.second);
+            }
+         }
+         info.diagnostics.print(std::cerr);
+      }
+      std::cerr << "Semantic analysis: " << info.diagnostics.errorCount() << " errors, " << info.diagnostics.warningCount()
+                << " warnings\n";
+   }
    return info;
 }
 
@@ -678,11 +682,11 @@ int main(int argc, char* argv[])
    bool autoDetectPI = true;
    size_t piInputBytes = 1024;
    size_t piOutputBytes = 1024;
-size_t piMarkerBytes = 1024;
-    std::string extLibsConfig;
-    std::string exportDescriptorPath;
-    std::string libId, libName, libVersion, libDescription;
-    std::vector<std::string> dependencyFlags;
+   size_t piMarkerBytes = 1024;
+   std::string extLibsConfig;
+   std::string exportDescriptorPath;
+   std::string libId, libName, libVersion, libDescription;
+   std::vector<std::string> dependencyFlags;
 
    for (int i = 1; i < argc; ++i) {
       if (std::strcmp(argv[i], "-h") == 0 || std::strcmp(argv[i], "--help") == 0) {
@@ -731,21 +735,21 @@ size_t piMarkerBytes = 1024;
          piInputBytes = std::stoul(argv[++i]);
       } else if (std::strcmp(argv[i], "--pi-output") == 0 && i + 1 < argc) {
          piOutputBytes = std::stoul(argv[++i]);
-} else if (std::strcmp(argv[i], "--pi-marker") == 0 && i + 1 < argc) {
-          piMarkerBytes = std::stoul(argv[++i]);
-       } else if (std::strcmp(argv[i], "--export-descriptor") == 0 && i + 1 < argc) {
-          exportDescriptorPath = argv[++i];
-       } else if (std::strcmp(argv[i], "--lib-id") == 0 && i + 1 < argc) {
-          libId = argv[++i];
-       } else if (std::strcmp(argv[i], "--lib-name") == 0 && i + 1 < argc) {
-          libName = argv[++i];
-       } else if (std::strcmp(argv[i], "--lib-version") == 0 && i + 1 < argc) {
-          libVersion = argv[++i];
-       } else if (std::strcmp(argv[i], "--lib-description") == 0 && i + 1 < argc) {
-          libDescription = argv[++i];
-       } else if (std::strcmp(argv[i], "--lib-dependency") == 0 && i + 1 < argc) {
-          dependencyFlags.push_back(argv[++i]);
-       } else if (argv[i][0] != '-') {
+      } else if (std::strcmp(argv[i], "--pi-marker") == 0 && i + 1 < argc) {
+         piMarkerBytes = std::stoul(argv[++i]);
+      } else if (std::strcmp(argv[i], "--export-descriptor") == 0 && i + 1 < argc) {
+         exportDescriptorPath = argv[++i];
+      } else if (std::strcmp(argv[i], "--lib-id") == 0 && i + 1 < argc) {
+         libId = argv[++i];
+      } else if (std::strcmp(argv[i], "--lib-name") == 0 && i + 1 < argc) {
+         libName = argv[++i];
+      } else if (std::strcmp(argv[i], "--lib-version") == 0 && i + 1 < argc) {
+         libVersion = argv[++i];
+      } else if (std::strcmp(argv[i], "--lib-description") == 0 && i + 1 < argc) {
+         libDescription = argv[++i];
+      } else if (std::strcmp(argv[i], "--lib-dependency") == 0 && i + 1 < argc) {
+         dependencyFlags.push_back(argv[++i]);
+      } else if (argv[i][0] != '-') {
          inputPath = argv[i];
       } else {
          std::cerr << "Unknown option: " << argv[i] << "\n";
@@ -813,8 +817,7 @@ size_t piMarkerBytes = 1024;
       for (const auto& dep : dependencyFlags) {
          size_t eq = dep.find('=');
          if (eq == std::string::npos || eq == 0 || eq + 1 == dep.size()) {
-            std::cerr << "Error: invalid --lib-dependency '" << dep
-                      << "' (expected <id>=<constraint>, e.g. timerlib=^1.0.0)\n";
+            std::cerr << "Error: invalid --lib-dependency '" << dep << "' (expected <id>=<constraint>, e.g. timerlib=^1.0.0)\n";
             return 1;
          }
          options.dependencyVersions[dep.substr(0, eq)] = dep.substr(eq + 1);
@@ -859,8 +862,8 @@ size_t piMarkerBytes = 1024;
             sourceName = inputPath;
          }
       } catch (const ParseError& e) {
-          printParseError(e);
-          return 1;
+         printParseError(e);
+         return 1;
       } catch (const std::exception& e) {
          std::cerr << "Error: " << e.what() << "\n";
          return 1;
@@ -874,8 +877,7 @@ size_t piMarkerBytes = 1024;
       }
 
       if (!result.descriptor) {
-         std::cerr << "Error: no library descriptor could be built; nothing written to "
-                   << exportDescriptorPath << "\n";
+         std::cerr << "Error: no library descriptor could be built; nothing written to " << exportDescriptorPath << "\n";
          return 1;
       }
 
@@ -890,12 +892,9 @@ size_t piMarkerBytes = 1024;
       std::cout << "  id: " << options.id << "\n";
       std::cout << "  name: " << options.name << "\n";
       std::cout << "  version: " << options.version << "\n";
-      std::cout << "  sections: enums=" << result.descriptor->enums.size()
-                << " types=" << result.descriptor->types.size()
-                << " constants=" << result.descriptor->constants.size()
-                << " globals=" << result.descriptor->globalVariables.size()
-                << " functions=" << result.descriptor->functions.size()
-                << " fbs=" << result.descriptor->functionBlocks.size()
+      std::cout << "  sections: enums=" << result.descriptor->enums.size() << " types=" << result.descriptor->types.size()
+                << " constants=" << result.descriptor->constants.size() << " globals=" << result.descriptor->globalVariables.size()
+                << " functions=" << result.descriptor->functions.size() << " fbs=" << result.descriptor->functionBlocks.size()
                 << " deps=" << result.descriptor->dependencies.size() << "\n";
 
       return result.ok() ? 0 : 1;
@@ -950,9 +949,9 @@ size_t piMarkerBytes = 1024;
             mergeTranslationUnit(mergedTu, tu);
 
             successCount++;
-          } catch (const ParseError& e) {
-             printParseError(e);
-             failCount++;
+         } catch (const ParseError& e) {
+            printParseError(e);
+            failCount++;
          } catch (const std::exception& e) {
             std::cerr << "  Error in " << file << ": " << e.what() << "\n";
             failCount++;
@@ -996,18 +995,18 @@ size_t piMarkerBytes = 1024;
       try {
          auto semanticInfo = runSemanticAnalysis(mergedTu, &libraryRegistry, workspacePath, "", &sources);
 
-       if (strictBlocksGeneration(semanticInfo)) {
-          reportGenerationBlocked(semanticInfo);
-          return 1;
-       }
+         if (strictBlocksGeneration(semanticInfo)) {
+            reportGenerationBlocked(semanticInfo);
+            return 1;
+         }
 
-       CodeGenerator gen;
-       gen.setNamespace(namespaceName);
-       gen.setRuntimeHeader(runtimeHeader);
-       gen.setCaseSensitive(caseSensitive);
-       gen.setProcessImageConfig(piConfig);
-       gen.setSemanticInfo(&semanticInfo);
-       auto files = gen.generateModularProject(mergedTu, outputDir);
+         CodeGenerator gen;
+         gen.setNamespace(namespaceName);
+         gen.setRuntimeHeader(runtimeHeader);
+         gen.setCaseSensitive(caseSensitive);
+         gen.setProcessImageConfig(piConfig);
+         gen.setSemanticInfo(&semanticInfo);
+         auto files = gen.generateModularProject(mergedTu, outputDir);
          writeGeneratedFiles(files, outputDir);
 
          std::cout << "\nProject generation complete!\n";
@@ -1092,14 +1091,14 @@ size_t piMarkerBytes = 1024;
             std::string headerFilename = baseName + ".hpp";
             std::string sourceFilename = baseName + ".cpp";
 
-std::map<std::string, std::string> oneSource{{file, std::move(fileSource)}};
-auto semanticInfo = runSemanticAnalysis(tu, &libraryRegistry, file, fileSource, &oneSource);
+            std::map<std::string, std::string> oneSource{{file, std::move(fileSource)}};
+            auto semanticInfo = runSemanticAnalysis(tu, &libraryRegistry, file, fileSource, &oneSource);
 
-             if (strictBlocksGeneration(semanticInfo)) {
-                reportGenerationBlocked(semanticInfo);
-                failCount++;
-                continue;
-             }
+            if (strictBlocksGeneration(semanticInfo)) {
+               reportGenerationBlocked(semanticInfo);
+               failCount++;
+               continue;
+            }
 
             CodeGenerator gen;
             gen.setProcessImageConfig(piConfig);
@@ -1115,9 +1114,9 @@ auto semanticInfo = runSemanticAnalysis(tu, &libraryRegistry, file, fileSource, 
             }
 
             successCount++;
-          } catch (const ParseError& e) {
-             printParseError(e);
-             failCount++;
+         } catch (const ParseError& e) {
+            printParseError(e);
+            failCount++;
          } catch (const std::exception& e) {
             std::cerr << "  Error: " << e.what() << "\n";
             failCount++;
@@ -1192,10 +1191,10 @@ auto semanticInfo = runSemanticAnalysis(tu, &libraryRegistry, file, fileSource, 
 
       auto semanticInfo = runSemanticAnalysis(tu, &libraryRegistry, inputPath, sourceText);
 
-       if (strictBlocksGeneration(semanticInfo)) {
-          reportGenerationBlocked(semanticInfo);
-          return 1;
-       }
+      if (strictBlocksGeneration(semanticInfo)) {
+         reportGenerationBlocked(semanticInfo);
+         return 1;
+      }
 
       CodeGenerator gen;
       gen.setProcessImageConfig(piConfig);
@@ -1210,9 +1209,9 @@ auto semanticInfo = runSemanticAnalysis(tu, &libraryRegistry, file, fileSource, 
       std::cout << "\nTo compile the output:\n";
       std::cout << "  g++ -std=c++17 -I<path-to-runtime/include> " << outputCpp << " -o your_program\n";
 
-    } catch (const ParseError& e) {
-       printParseError(e);
-       return 1;
+   } catch (const ParseError& e) {
+      printParseError(e);
+      return 1;
    } catch (const std::exception& e) {
       std::cerr << "Error: " << e.what() << "\n";
       return 1;

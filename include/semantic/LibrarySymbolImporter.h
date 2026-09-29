@@ -42,16 +42,16 @@ namespace st2cpp::semantic {
 /**
  * @brief Imports library symbols into a SymbolTable's external scope.
  */
-class LibrarySymbolImporter {
+class LibrarySymbolImporter
+{
 public:
-    /**
+   /**
      * @param symTab The symbol table to populate (external scope)
      * @param diag The diagnostics collector for import warnings/errors
      */
-    LibrarySymbolImporter(SymbolTable& symTab, Diagnostics& diag)
-        : symTab_(symTab), diag_(diag) {}
+   LibrarySymbolImporter(SymbolTable& symTab, Diagnostics& diag) : symTab_(symTab), diag_(diag) {}
 
-    /**
+   /**
      * @brief Import every library of the registry.
      * @details Libraries are processed in deterministic order
      * (LibraryRegistry::allOrdered, by uppercase id). When two libraries export
@@ -59,34 +59,34 @@ public:
      * (ExternalSymbolCollision) is emitted.
      * @param registry The registry of loaded libraries
      */
-    void import(const st2cpp::library::LibraryRegistry& registry);
+   void import(const st2cpp::library::LibraryRegistry& registry);
 
 private:
-    // ---- Per-entity importers ----
-    void importLibrary(const st2cpp::library::LibraryDescriptor& lib);
-    void importEnum(const st2cpp::library::EnumTypeDef& e, const st2cpp::library::LibraryDescriptor& owner);
-    void importStruct(const st2cpp::library::StructTypeDef& s, const st2cpp::library::LibraryDescriptor& owner);
-    void importFunction(const st2cpp::library::FunctionDef& f, const st2cpp::library::LibraryDescriptor& owner);
-    void importFunctionBlock(const st2cpp::library::FunctionBlockDef& fb, const st2cpp::library::LibraryDescriptor& owner);
-    void importConstant(const st2cpp::library::Constant& c, const st2cpp::library::LibraryDescriptor& owner);
-    void importGlobalVariable(const st2cpp::library::GlobalVariable& g, const st2cpp::library::LibraryDescriptor& owner);
+   // ---- Per-entity importers ----
+   void importLibrary(const st2cpp::library::LibraryDescriptor& lib);
+   void importEnum(const st2cpp::library::EnumTypeDef& e, const st2cpp::library::LibraryDescriptor& owner);
+   void importStruct(const st2cpp::library::StructTypeDef& s, const st2cpp::library::LibraryDescriptor& owner);
+   void importFunction(const st2cpp::library::FunctionDef& f, const st2cpp::library::LibraryDescriptor& owner);
+   void importFunctionBlock(const st2cpp::library::FunctionBlockDef& fb, const st2cpp::library::LibraryDescriptor& owner);
+   void importConstant(const st2cpp::library::Constant& c, const st2cpp::library::LibraryDescriptor& owner);
+   void importGlobalVariable(const st2cpp::library::GlobalVariable& g, const st2cpp::library::LibraryDescriptor& owner);
 
-    // ---- Type resolution ----
-    TypeId resolveLibraryType(const st2cpp::library::TypeRef& ref, const st2cpp::library::LibraryDescriptor& owner);
-    TypeId resolvePrimitiveType(st2cpp::library::TypeRefKind kind, BaseType primitive, const st2cpp::library::LibraryDescriptor& owner);
-    const st2cpp::library::LibraryDescriptor* findLibrary(const std::string& id) const;
+   // ---- Type resolution ----
+   TypeId resolveLibraryType(const st2cpp::library::TypeRef& ref, const st2cpp::library::LibraryDescriptor& owner);
+   TypeId resolvePrimitiveType(st2cpp::library::TypeRefKind kind, BaseType primitive, const st2cpp::library::LibraryDescriptor& owner);
+   const st2cpp::library::LibraryDescriptor* findLibrary(const std::string& id) const;
 
-    // ---- Helpers ----
-    static std::string cacheKey(const std::string& libId, const std::string& name);
-    ParamDir paramDirection(st2cpp::library::ParamDirection dir) const;
-    void reportCollision(const std::string& name, const st2cpp::library::LibraryDescriptor& lib);
-    SourceLocation makeLocation() const;
+   // ---- Helpers ----
+   static std::string cacheKey(const std::string& libId, const std::string& name);
+   ParamDir paramDirection(st2cpp::library::ParamDirection dir) const;
+   void reportCollision(const std::string& name, const st2cpp::library::LibraryDescriptor& lib);
+   SourceLocation makeLocation() const;
 
-    SymbolTable& symTab_;
-    Diagnostics& diag_;
-    const st2cpp::library::LibraryRegistry* registry_ = nullptr;
-    // Cache of imported types keyed by "<normalized lib id>::<normalized type name>".
-    std::unordered_map<std::string, TypeId> importedTypes_;
+   SymbolTable& symTab_;
+   Diagnostics& diag_;
+   const st2cpp::library::LibraryRegistry* registry_ = nullptr;
+   // Cache of imported types keyed by "<normalized lib id>::<normalized type name>".
+   std::unordered_map<std::string, TypeId> importedTypes_;
 };
 
 } // namespace st2cpp::semantic

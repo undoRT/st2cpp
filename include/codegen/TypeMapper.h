@@ -31,7 +31,8 @@ namespace st2cpp::codegen {
 /**
  * @brief The Structured Text to C++ type mapping.
  */
-class TypeMapper {
+class TypeMapper
+{
 public:
    /**
     * @param semantic    Read-only access to the analysis, for the qualified
@@ -39,10 +40,9 @@ public:
     * @param aliases     The alias table (TYPE Name : <type>; END_TYPE)
     * @param identifiers The identifier case policy names are spelled with
     */
-   TypeMapper(const SemanticBridge& semantic,
-              std::unordered_map<std::string, TypeRef>& aliases,
-              IdentifierPolicy identifiers)
-      : m_semantic(semantic), m_aliasTypes(aliases), m_identifiers(identifiers) {}
+   TypeMapper(const SemanticBridge& semantic, std::unordered_map<std::string, TypeRef>& aliases, IdentifierPolicy identifiers)
+      : m_semantic(semantic), m_aliasTypes(aliases), m_identifiers(identifiers)
+   {}
 
    // ===== elementary and named types =====
    std::string mapBaseType(BaseType base) const;

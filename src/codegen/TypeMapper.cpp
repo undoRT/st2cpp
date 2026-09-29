@@ -145,35 +145,35 @@ std::string TypeMapper::getArrayType(const std::string& baseType, const TypeRef&
  */
 std::string TypeMapper::mapType(const TypeRef& tr) const
 {
-    std::string base;
-    if (tr.base == BaseType::NAMED) {
-       base = normalizeType(tr.name);
-       // Semantic: resolve a project/symbol-table type to its C++ spelling.
-       // External structs/enums/FBs resolve through their descriptor binding
-       // (e.g. examplelib::Channel); local and primitive names are unchanged.
-       if (const auto* st = m_semantic.semanticSymTab()) {
-          const st2cpp::semantic::TypeId tid = st->getTypeIdByName(tr.name);
-          if (tid != 0) {
-             const st2cpp::semantic::TypeInfo* t = st->getType(tid);
-             // Named alias (TYPE Name : <type>; END_TYPE): the name resolves to
-             // a canonical type carrying a DIFFERENT name. Encode the canonical
-             // C++ type instead of the alias spelling, so aliases of arrays,
-             // pointers and scalars all emit the correct C++ declaration.
-             if (t != nullptr && st->normalizeKey(t->name) != st->normalizeKey(tr.name)) {
-                return mapTypeId(tid);
-             }
-             base = m_semantic.semanticTypeCppName(tid, base);
-          }
-       }
-       // Legacy alias resolution (no SemanticInfo attached): chase the alias
-       // chain in m_aliasTypes when the loop above could not help.
-       const std::string aliased = resolveAliasLegacy(base);
-       if (!aliased.empty()) {
-          base = aliased;
-       }
-    } else {
-       base = mapBaseType(tr.base);
-    }
+   std::string base;
+   if (tr.base == BaseType::NAMED) {
+      base = normalizeType(tr.name);
+      // Semantic: resolve a project/symbol-table type to its C++ spelling.
+      // External structs/enums/FBs resolve through their descriptor binding
+      // (e.g. examplelib::Channel); local and primitive names are unchanged.
+      if (const auto* st = m_semantic.semanticSymTab()) {
+         const st2cpp::semantic::TypeId tid = st->getTypeIdByName(tr.name);
+         if (tid != 0) {
+            const st2cpp::semantic::TypeInfo* t = st->getType(tid);
+            // Named alias (TYPE Name : <type>; END_TYPE): the name resolves to
+            // a canonical type carrying a DIFFERENT name. Encode the canonical
+            // C++ type instead of the alias spelling, so aliases of arrays,
+            // pointers and scalars all emit the correct C++ declaration.
+            if (t != nullptr && st->normalizeKey(t->name) != st->normalizeKey(tr.name)) {
+               return mapTypeId(tid);
+            }
+            base = m_semantic.semanticTypeCppName(tid, base);
+         }
+      }
+      // Legacy alias resolution (no SemanticInfo attached): chase the alias
+      // chain in m_aliasTypes when the loop above could not help.
+      const std::string aliased = resolveAliasLegacy(base);
+      if (!aliased.empty()) {
+         base = aliased;
+      }
+   } else {
+      base = mapBaseType(tr.base);
+   }
 
    if (tr.isPointer) {
       return base + "*";
@@ -343,8 +343,7 @@ std::string TypeMapper::resolveAliasLegacy(const std::string& name) const
          return ""; // cycle
       }
       const TypeRef& underlying = it->second;
-      if (underlying.base == BaseType::NAMED && underlying.arrayDims.empty() &&
-          !underlying.isPointer && !underlying.isRefTo) {
+      if (underlying.base == BaseType::NAMED && underlying.arrayDims.empty() && !underlying.isPointer && !underlying.isRefTo) {
          // Alias of another name → chase the chain.
          const std::string next = normalizeType(underlying.name);
          if (next == cur || m_aliasTypes.find(next) == m_aliasTypes.end()) {
@@ -480,7 +479,10 @@ std::string TypeMapper::normalizeType(const std::string& str) const
  * @param str Identifier to normalize
  * @return Normalized identifier
  */
-std::string TypeMapper::normalizeIdent(const std::string& str) const { return m_identifiers.ident(str); }
+std::string TypeMapper::normalizeIdent(const std::string& str) const
+{
+   return m_identifiers.ident(str);
+}
 
 /**
  * @brief Get the size of a type in bytes

@@ -23,16 +23,16 @@ using TypeId = uint32_t;
 using ScopeId = uint32_t;
 
 enum class SymbolKind {
-    Variable,
-    Type,
-    Function,
-    FunctionBlock,
-    Program,
-    Interface,
-    Method,
-    Enumerator,
-    StructMember,
-    Parameter
+   Variable,
+   Type,
+   Function,
+   FunctionBlock,
+   Program,
+   Interface,
+   Method,
+   Enumerator,
+   StructMember,
+   Parameter
 };
 
 /**
@@ -43,76 +43,80 @@ enum class SymbolKind {
  * supply a value.
  */
 enum class ParamDir {
-    None,   // not a parameter section (plain VAR / global)
-    Input,  // VAR_INPUT
-    Output, // VAR_OUTPUT
-    InOut   // VAR_IN_OUT
+   None,   // not a parameter section (plain VAR / global)
+   Input,  // VAR_INPUT
+   Output, // VAR_OUTPUT
+   InOut   // VAR_IN_OUT
 };
 
-struct Symbol {
-    SymbolId id = 0;
-    std::string name;
-    SymbolKind kind = SymbolKind::Variable;
-    TypeId typeId = 0;
-    ScopeId scopeId = 0;
-    SymbolId parentScopeId = 0;
-    std::vector<SymbolId> params;
-    TypeId returnTypeId = 0;
-    /// Where the declaration of this symbol starts, so a diagnostic about it can
-    /// point at the source. Zero when the declaration carried no position.
-    uint32_t line = 0;
-    uint32_t col = 0;
-    /// Source file the declaration came from. Empty when unknown.
-    std::string fileName;
-    bool isAbstract = false;
-    bool isFinal = false;
-    bool isOverride = false;
-    std::vector<SymbolId> members;
-    std::vector<SymbolId> enumerators;
-    SymbolId baseClassId = 0;
-    std::vector<SymbolId> implementedInterfaces;
-    bool isConstant = false;
-    bool isRetain = false;
-    std::string atAddress;
-    SymbolId containingFbId = 0;
-    // Parameter metadata: direction of the section the symbol was declared in
-    // and whether it carries an initial value (default).
-    ParamDir paramDir = ParamDir::None;
-    bool hasDefaultValue = false;
-    // True when the symbol was imported from an external library descriptor
-    // (lives in the external scope, never in the project global scope).
-    bool isExternal = false;
-    // Id of the owning library descriptor (isExternal == true), verbatim from
-    // the LibraryDescriptor. Empty for project-local symbols. Lets the
-    // CodeGenerator recover the C++ binding single source of truth without
-    // re-resolving the symbol by name (which would be ambiguous on collisions).
-    std::string externalLibraryId;
+struct Symbol
+{
+   SymbolId id = 0;
+   std::string name;
+   SymbolKind kind = SymbolKind::Variable;
+   TypeId typeId = 0;
+   ScopeId scopeId = 0;
+   SymbolId parentScopeId = 0;
+   std::vector<SymbolId> params;
+   TypeId returnTypeId = 0;
+   /// Where the declaration of this symbol starts, so a diagnostic about it can
+   /// point at the source. Zero when the declaration carried no position.
+   uint32_t line = 0;
+   uint32_t col = 0;
+   /// Source file the declaration came from. Empty when unknown.
+   std::string fileName;
+   bool isAbstract = false;
+   bool isFinal = false;
+   bool isOverride = false;
+   std::vector<SymbolId> members;
+   std::vector<SymbolId> enumerators;
+   SymbolId baseClassId = 0;
+   std::vector<SymbolId> implementedInterfaces;
+   bool isConstant = false;
+   bool isRetain = false;
+   std::string atAddress;
+   SymbolId containingFbId = 0;
+   // Parameter metadata: direction of the section the symbol was declared in
+   // and whether it carries an initial value (default).
+   ParamDir paramDir = ParamDir::None;
+   bool hasDefaultValue = false;
+   // True when the symbol was imported from an external library descriptor
+   // (lives in the external scope, never in the project global scope).
+   bool isExternal = false;
+   // Id of the owning library descriptor (isExternal == true), verbatim from
+   // the LibraryDescriptor. Empty for project-local symbols. Lets the
+   // CodeGenerator recover the C++ binding single source of truth without
+   // re-resolving the symbol by name (which would be ambiguous on collisions).
+   std::string externalLibraryId;
 };
 
-struct Scope {
-    ScopeId id = 0;
-    ScopeId parentId = 0;
-    std::string name;
-    std::unordered_map<std::string, SymbolId> symbols;
+struct Scope
+{
+   ScopeId id = 0;
+   ScopeId parentId = 0;
+   std::string name;
+   std::unordered_map<std::string, SymbolId> symbols;
 };
 
-class SymbolTable {
+class SymbolTable
+{
 public:
-    /**
+   /**
      * @brief IEC 61131-3 identifiers are case-insensitive
      * Normalizes a name to an uppercase key so declarations and lookups match
      * regardless of spelling (e.g. `Name` vs `name`).
      */
-    static std::string asciiUpper(const std::string& name) {
-        std::string key;
-        key.reserve(name.size());
-        for (unsigned char c : name) {
-            key.push_back(static_cast<char>(std::toupper(c)));
-        }
-        return key;
-    }
+   static std::string asciiUpper(const std::string& name)
+   {
+      std::string key;
+      key.reserve(name.size());
+      for (unsigned char c : name) {
+         key.push_back(static_cast<char>(std::toupper(c)));
+      }
+      return key;
+   }
 
-    /**
+   /**
      * @brief Case policy of the table, applied to every identifier key.
      * @details By default the table follows IEC 61131-3 and folds identifiers to
      * uppercase, so `name` and `Name` are the same symbol. With --caseSensitive
@@ -122,38 +126,37 @@ public:
      * through the uppercase spelling: off under --strict (the reference is
      * reported as undeclared, like C++), on in permissive mode.
      */
-    void setCaseSensitive(bool value) { caseSensitive_ = value; }
-    /**
+   void setCaseSensitive(bool value) { caseSensitive_ = value; }
+   /**
      * @brief Whether a mis-cased reference falls back to the uppercase spelling.
      * @param value true to keep resolving, false to reject the reference
      */
-    void setCaseFallback(bool value) { caseFallback_ = value; }
-    bool caseSensitive() const { return caseSensitive_; }
-    bool caseFallback() const { return caseFallback_; }
+   void setCaseFallback(bool value) { caseFallback_ = value; }
+   bool caseSensitive() const { return caseSensitive_; }
+   bool caseFallback() const { return caseFallback_; }
 
-    /**
+   /**
      * @brief The lookup key for an identifier under the current case policy.
      * @return The identifier verbatim in case-sensitive mode, uppercased otherwise
      */
-    std::string normalizeKey(const std::string& name) const {
-        return caseSensitive_ ? name : asciiUpper(name);
-    }
+   std::string normalizeKey(const std::string& name) const { return caseSensitive_ ? name : asciiUpper(name); }
 
-    /**
+   /**
      * @brief Compare two spellings under the current case policy.
      * @details Case-insensitive by default. In case-sensitive mode two different
      * spellings match only while the fallback is enabled, so that a permissively
      * resolved mis-cased reference still reaches the declaration it names.
      * @return true when a and b name the same identifier
      */
-    bool nameMatches(const std::string& a, const std::string& b) const {
-        if (a == b) {
-            return true;
-        }
-        return !caseSensitive_ || caseFallback_ ? asciiUpper(a) == asciiUpper(b) : false;
-    }
+   bool nameMatches(const std::string& a, const std::string& b) const
+   {
+      if (a == b) {
+         return true;
+      }
+      return !caseSensitive_ || caseFallback_ ? asciiUpper(a) == asciiUpper(b) : false;
+   }
 
-    /**
+   /**
      * @brief Resolve a name in one scope, honouring the case policy.
      * @details Tries the exact key first; when the fallback is enabled a miss
      * retries the uppercase spelling and records the mismatch, which
@@ -162,98 +165,103 @@ public:
      * @param name The identifier as written
      * @return The resolved SymbolId, or 0 when not found
      */
-    SymbolId findInScope(const Scope* scope, const std::string& name) const {
-        if (!scope) {
-            return 0;
-        }
-        auto it = scope->symbols.find(normalizeKey(name));
-        if (it != scope->symbols.end()) {
-            return it->second;
-        }
-        if (caseSensitive_ && caseFallback_) {
-            // In case-sensitive mode a declaration is stored under its verbatim
-            // spelling, so the miss cannot be retried with a second key: `Name`
-            // may have been declared `name` or `NAME`. Scan the scope instead.
-            const std::string upper = asciiUpper(name);
-            if (upper != name) {
-                SymbolId found = 0;
-                for (const auto& entry : scope->symbols) {
-                    if (asciiUpper(entry.first) != upper) {
-                        continue;
-                    }
-                    if (found != 0) {
-                        // Two declarations differ only by case: falling back
-                        // would pick one arbitrarily, so report neither and let
-                        // the reference fail rather than guess.
-                        return 0;
-                    }
-                    found = entry.second;
-                }
-                if (found != 0) {
-                    recordCaseMismatch(name, found);
-                    return found;
-                }
+   SymbolId findInScope(const Scope* scope, const std::string& name) const
+   {
+      if (!scope) {
+         return 0;
+      }
+      auto it = scope->symbols.find(normalizeKey(name));
+      if (it != scope->symbols.end()) {
+         return it->second;
+      }
+      if (caseSensitive_ && caseFallback_) {
+         // In case-sensitive mode a declaration is stored under its verbatim
+         // spelling, so the miss cannot be retried with a second key: `Name`
+         // may have been declared `name` or `NAME`. Scan the scope instead.
+         const std::string upper = asciiUpper(name);
+         if (upper != name) {
+            SymbolId found = 0;
+            for (const auto& entry : scope->symbols) {
+               if (asciiUpper(entry.first) != upper) {
+                  continue;
+               }
+               if (found != 0) {
+                  // Two declarations differ only by case: falling back
+                  // would pick one arbitrarily, so report neither and let
+                  // the reference fail rather than guess.
+                  return 0;
+               }
+               found = entry.second;
             }
-        }
-        return 0;
-    }
+            if (found != 0) {
+               recordCaseMismatch(name, found);
+               return found;
+            }
+         }
+      }
+      return 0;
+   }
 
-    /**
+   /**
      * @brief Identifier spellings that only matched through the case fallback.
      * @details Filled by findInScope() while the fallback is enabled; the
      * semantic analyzer turns each entry into a warning and clears the list.
      */
-    struct CaseMismatch {
-        std::string written;  // spelling used at the reference site
-        std::string declared; // spelling of the declaration it resolved to
-    };
-    const std::vector<CaseMismatch>& caseMismatches() const { return caseMismatches_; }
-    void clearCaseMismatches() { caseMismatches_.clear(); }
+   struct CaseMismatch
+   {
+      std::string written;  // spelling used at the reference site
+      std::string declared; // spelling of the declaration it resolved to
+   };
+   const std::vector<CaseMismatch>& caseMismatches() const { return caseMismatches_; }
+   void clearCaseMismatches() { caseMismatches_.clear(); }
 
-    SymbolTable() {
-        scopes_.reserve(256);
-        symbols_.reserve(4096);
-        types_.reserve(256);
-        types_.push_back(TypeInfo{});
-        symbols_.push_back(Symbol{});
-        scopes_.push_back(Scope{});
-        Scope globalScope;
-        globalScope.id = 1;
-        globalScope.parentId = 0;
-        globalScope.name = "global";
-        scopes_.push_back(std::move(globalScope));
-        globalScopeId_ = 1;
-        currentScopeId_ = 1;
-        registerBuiltins();
-        registerIecConversionFunctions();
-        // External library symbols (imported from LibraryDescriptor objects) live
-        // in a dedicated scope that is never consulted by the project-local
-        // lookups: it is reached explicitly as the final resolution fallback.
-        Scope externalScope;
-        externalScope.id = static_cast<ScopeId>(scopes_.size());
-        externalScope.parentId = 0;
-        externalScope.name = "external";
-        scopes_.push_back(std::move(externalScope));
-        externalScopeId_ = externalScope.id;
-    }
+   SymbolTable()
+   {
+      scopes_.reserve(256);
+      symbols_.reserve(4096);
+      types_.reserve(256);
+      types_.push_back(TypeInfo{});
+      symbols_.push_back(Symbol{});
+      scopes_.push_back(Scope{});
+      Scope globalScope;
+      globalScope.id = 1;
+      globalScope.parentId = 0;
+      globalScope.name = "global";
+      scopes_.push_back(std::move(globalScope));
+      globalScopeId_ = 1;
+      currentScopeId_ = 1;
+      registerBuiltins();
+      registerIecConversionFunctions();
+      // External library symbols (imported from LibraryDescriptor objects) live
+      // in a dedicated scope that is never consulted by the project-local
+      // lookups: it is reached explicitly as the final resolution fallback.
+      Scope externalScope;
+      externalScope.id = static_cast<ScopeId>(scopes_.size());
+      externalScope.parentId = 0;
+      externalScope.name = "external";
+      scopes_.push_back(std::move(externalScope));
+      externalScopeId_ = externalScope.id;
+   }
 
-    // ===== Scope Management =====
-    ScopeId pushScope(const std::string& name) {
-        ScopeId newId = static_cast<ScopeId>(scopes_.size());
-        Scope scope;
-        scope.id = newId;
-        scope.parentId = currentScopeId_;
-        scope.name = name;
-        scopes_.push_back(std::move(scope));
-        currentScopeId_ = newId;
-        return newId;
-    }
-    void popScope() {
-        if (currentScopeId_ != globalScopeId_) {
-            currentScopeId_ = scopes_[currentScopeId_].parentId;
-        }
-    }
-    /**
+   // ===== Scope Management =====
+   ScopeId pushScope(const std::string& name)
+   {
+      ScopeId newId = static_cast<ScopeId>(scopes_.size());
+      Scope scope;
+      scope.id = newId;
+      scope.parentId = currentScopeId_;
+      scope.name = name;
+      scopes_.push_back(std::move(scope));
+      currentScopeId_ = newId;
+      return newId;
+   }
+   void popScope()
+   {
+      if (currentScopeId_ != globalScopeId_) {
+         currentScopeId_ = scopes_[currentScopeId_].parentId;
+      }
+   }
+   /**
      * @brief Enter an already-created scope so declarations can be added later.
      * @details Used by the declaration visitor's second pass to re-enter scopes
      * opened during header registration (e.g. STRUCT_<name>, INTERFACE_<name>).
@@ -263,23 +271,29 @@ public:
      * @param id The scope to enter
      * @return the entered scope id, or 0 when invalid
      */
-    ScopeId enterScope(ScopeId id) {
-        if (id == 0 || id >= scopes_.size()) return 0;
-        scopeStack_.push_back(currentScopeId_);
-        currentScopeId_ = id;
-        return id;
-    }
-    /**
+   ScopeId enterScope(ScopeId id)
+   {
+      if (id == 0 || id >= scopes_.size()) {
+         return 0;
+      }
+      scopeStack_.push_back(currentScopeId_);
+      currentScopeId_ = id;
+      return id;
+   }
+   /**
      * @brief Restore the scope active before the matching enterScope.
      * @return true when a scope was restored
      */
-    bool exitScope() {
-        if (scopeStack_.empty()) return false;
-        currentScopeId_ = scopeStack_.back();
-        scopeStack_.pop_back();
-        return true;
-    }
-    /**
+   bool exitScope()
+   {
+      if (scopeStack_.empty()) {
+         return false;
+      }
+      currentScopeId_ = scopeStack_.back();
+      scopeStack_.pop_back();
+      return true;
+   }
+   /**
      * @brief Look up a name only in the global scope (the type namespace).
      * @details Declares the intended namespace for user type names: resolution
      * is not shadowed by variables or struct members carrying the same
@@ -287,17 +301,15 @@ public:
      * @param name The name to look up
      * @return the resolved SymbolId, or 0 when not found
      */
-    SymbolId lookupGlobal(const std::string& name) const {
-        return findInScope(getScope(globalScopeId_), name);
-    }
-    /**
+   SymbolId lookupGlobal(const std::string& name) const { return findInScope(getScope(globalScopeId_), name); }
+   /**
      * @brief Id of the external scope that holds library-imported symbols.
      * @details The external scope is never part of the local/global lookup
      * chain; it is consulted explicitly as the final fallback so that
      * project-local symbols always shadow external ones.
      */
-    ScopeId externalScope() const { return externalScopeId_; }
-    /**
+   ScopeId externalScope() const { return externalScopeId_; }
+   /**
      * @brief Declare a symbol in the external (library) scope.
      * @details Used by the library-symbol importer. The symbol is flagged
      * isExternal and never shadows a project-local declaration (local lookups
@@ -310,36 +322,36 @@ public:
      * @param libraryId The id of the owning library descriptor
      * @return The new SymbolId, or 0 on duplicate
      */
-    SymbolId declareExternal(const std::string& name, SymbolKind kind, TypeId typeId = 0,
-        const std::string& libraryId = "") {
-        Scope* scope = getScope(externalScopeId_);
-        if (!scope) return 0;
-        const std::string key = normalizeKey(name);
-        if (scope->symbols.find(key) != scope->symbols.end()) {
-            return 0;
-        }
-        SymbolId newId = static_cast<SymbolId>(symbols_.size());
-        Symbol sym;
-        sym.id = newId;
-        sym.name = name;
-        sym.kind = kind;
-        sym.typeId = typeId;
-        sym.scopeId = externalScopeId_;
-        sym.parentScopeId = 0;
-        sym.isExternal = true;
-        sym.externalLibraryId = libraryId;
-        scope->symbols[key] = newId;
-        symbols_.push_back(std::move(sym));
-        return newId;
-    }
-    /**
+   SymbolId declareExternal(const std::string& name, SymbolKind kind, TypeId typeId = 0, const std::string& libraryId = "")
+   {
+      Scope* scope = getScope(externalScopeId_);
+      if (!scope) {
+         return 0;
+      }
+      const std::string key = normalizeKey(name);
+      if (scope->symbols.find(key) != scope->symbols.end()) {
+         return 0;
+      }
+      SymbolId newId = static_cast<SymbolId>(symbols_.size());
+      Symbol sym;
+      sym.id = newId;
+      sym.name = name;
+      sym.kind = kind;
+      sym.typeId = typeId;
+      sym.scopeId = externalScopeId_;
+      sym.parentScopeId = 0;
+      sym.isExternal = true;
+      sym.externalLibraryId = libraryId;
+      scope->symbols[key] = newId;
+      symbols_.push_back(std::move(sym));
+      return newId;
+   }
+   /**
      * @brief Look up a name in the external (library) scope only.
      * @return The resolved SymbolId, or 0 when not found
      */
-    SymbolId lookupExternal(const std::string& name) const {
-        return findInScope(getScope(externalScopeId_), name);
-    }
-    /**
+   SymbolId lookupExternal(const std::string& name) const { return findInScope(getScope(externalScopeId_), name); }
+   /**
      * @brief Open a child scope of the external scope (STRUCT_<n>, FUNC_<n>,
      * FB_<n>) where the current scope is saved and restored by exitScope().
      * @details Mirrors enterScope semantics: the caller must balance it with
@@ -348,100 +360,115 @@ public:
      * @param name The scope name
      * @return The new ScopeId
      */
-    ScopeId pushExternalScope(const std::string& name) {
-        ScopeId newId = static_cast<ScopeId>(scopes_.size());
-        Scope scope;
-        scope.id = newId;
-        scope.parentId = externalScopeId_;
-        scope.name = name;
-        scopes_.push_back(std::move(scope));
-        scopeStack_.push_back(currentScopeId_);
-        currentScopeId_ = newId;
-        return newId;
-    }
-    ScopeId currentScope() const { return currentScopeId_; }
-    ScopeId globalScope() const { return globalScopeId_; }
-    const Scope* getScope(ScopeId id) const {
-        if (id == 0 || id >= scopes_.size()) return nullptr;
-        return &scopes_[id];
-    }
-    Scope* getScope(ScopeId id) {
-        if (id == 0 || id >= scopes_.size()) return nullptr;
-        return &scopes_[id];
-    }
+   ScopeId pushExternalScope(const std::string& name)
+   {
+      ScopeId newId = static_cast<ScopeId>(scopes_.size());
+      Scope scope;
+      scope.id = newId;
+      scope.parentId = externalScopeId_;
+      scope.name = name;
+      scopes_.push_back(std::move(scope));
+      scopeStack_.push_back(currentScopeId_);
+      currentScopeId_ = newId;
+      return newId;
+   }
+   ScopeId currentScope() const { return currentScopeId_; }
+   ScopeId globalScope() const { return globalScopeId_; }
+   const Scope* getScope(ScopeId id) const
+   {
+      if (id == 0 || id >= scopes_.size()) {
+         return nullptr;
+      }
+      return &scopes_[id];
+   }
+   Scope* getScope(ScopeId id)
+   {
+      if (id == 0 || id >= scopes_.size()) {
+         return nullptr;
+      }
+      return &scopes_[id];
+   }
 
-    // ===== Symbol Management =====
-    SymbolId declare(const std::string& name, SymbolKind kind, TypeId typeId = 0) {
-        Scope* scope = getScope(currentScopeId_);
-        if (!scope) return 0;
-        std::string key = normalizeKey(name);
-        auto it = scope->symbols.find(key);
-        if (it != scope->symbols.end()) {
-            return 0;
-        }
-        SymbolId newId = static_cast<SymbolId>(symbols_.size());
-        Symbol sym;
-        sym.id = newId;
-        sym.name = name;
-        sym.kind = kind;
-        sym.typeId = typeId;
-        sym.scopeId = currentScopeId_;
-        sym.parentScopeId = scope->parentId;
-        scope->symbols[key] = newId;
-        symbols_.push_back(std::move(sym));
-        return newId;
-    }
-    SymbolId lookup(const std::string& name) const {
-        return findInScope(getScope(currentScopeId_), name);
-    }
-    SymbolId lookupRecursive(const std::string& name) const {
-        ScopeId scopeId = currentScopeId_;
-        while (scopeId != 0) {
-            const SymbolId found = findInScope(getScope(scopeId), name);
-            if (found != 0) {
-                return found;
-            }
-            const Scope* scope = getScope(scopeId);
-            if (!scope) break;
-            scopeId = scope->parentId;
-        }
-        return 0;
-    }
+   // ===== Symbol Management =====
+   SymbolId declare(const std::string& name, SymbolKind kind, TypeId typeId = 0)
+   {
+      Scope* scope = getScope(currentScopeId_);
+      if (!scope) {
+         return 0;
+      }
+      std::string key = normalizeKey(name);
+      auto it = scope->symbols.find(key);
+      if (it != scope->symbols.end()) {
+         return 0;
+      }
+      SymbolId newId = static_cast<SymbolId>(symbols_.size());
+      Symbol sym;
+      sym.id = newId;
+      sym.name = name;
+      sym.kind = kind;
+      sym.typeId = typeId;
+      sym.scopeId = currentScopeId_;
+      sym.parentScopeId = scope->parentId;
+      scope->symbols[key] = newId;
+      symbols_.push_back(std::move(sym));
+      return newId;
+   }
+   SymbolId lookup(const std::string& name) const { return findInScope(getScope(currentScopeId_), name); }
+   SymbolId lookupRecursive(const std::string& name) const
+   {
+      ScopeId scopeId = currentScopeId_;
+      while (scopeId != 0) {
+         const SymbolId found = findInScope(getScope(scopeId), name);
+         if (found != 0) {
+            return found;
+         }
+         const Scope* scope = getScope(scopeId);
+         if (!scope) {
+            break;
+         }
+         scopeId = scope->parentId;
+      }
+      return 0;
+   }
 
-    // ===== Symbol/Type Access =====
-    TypeId registerArrayType(const TypeInfo& type) {
-        TypeId id = static_cast<TypeId>(types_.size());
-        TypeInfo t = type;
-        t.id = id;
-        types_.push_back(std::move(t));
-        typeNameToId_[normalizeKey(types_.back().name)] = id;
-        return id;
-    }
-    TypeId registerPointerType(const TypeInfo& type) {
-        TypeId id = static_cast<TypeId>(types_.size());
-        TypeInfo t = type;
-        t.id = id;
-        types_.push_back(std::move(t));
-        typeNameToId_[normalizeKey(types_.back().name)] = id;
-        return id;
-    }
-    TypeId registerReferenceType(const TypeInfo& type) {
-        TypeId id = static_cast<TypeId>(types_.size());
-        TypeInfo t = type;
-        t.id = id;
-        types_.push_back(std::move(t));
-        typeNameToId_[normalizeKey(types_.back().name)] = id;
-        return id;
-    }
-    TypeId registerType(const TypeInfo& type) {
-        TypeId id = static_cast<TypeId>(types_.size());
-        TypeInfo t = type;
-        t.id = id;
-        types_.push_back(std::move(t));
-        typeNameToId_[normalizeKey(types_.back().name)] = id;
-        return id;
-    }
-    /**
+   // ===== Symbol/Type Access =====
+   TypeId registerArrayType(const TypeInfo& type)
+   {
+      TypeId id = static_cast<TypeId>(types_.size());
+      TypeInfo t = type;
+      t.id = id;
+      types_.push_back(std::move(t));
+      typeNameToId_[normalizeKey(types_.back().name)] = id;
+      return id;
+   }
+   TypeId registerPointerType(const TypeInfo& type)
+   {
+      TypeId id = static_cast<TypeId>(types_.size());
+      TypeInfo t = type;
+      t.id = id;
+      types_.push_back(std::move(t));
+      typeNameToId_[normalizeKey(types_.back().name)] = id;
+      return id;
+   }
+   TypeId registerReferenceType(const TypeInfo& type)
+   {
+      TypeId id = static_cast<TypeId>(types_.size());
+      TypeInfo t = type;
+      t.id = id;
+      types_.push_back(std::move(t));
+      typeNameToId_[normalizeKey(types_.back().name)] = id;
+      return id;
+   }
+   TypeId registerType(const TypeInfo& type)
+   {
+      TypeId id = static_cast<TypeId>(types_.size());
+      TypeInfo t = type;
+      t.id = id;
+      types_.push_back(std::move(t));
+      typeNameToId_[normalizeKey(types_.back().name)] = id;
+      return id;
+   }
+   /**
      * @brief Register a named type alias (TYPE Name : <type>; END_TYPE).
      * @details An alias is not a type of its own: its name resolves to the SAME
      * canonical TypeId of the underlying type, so every semantic check and the
@@ -452,20 +479,27 @@ public:
      * @param typeId The canonical TypeId it resolves to
      * @return the aliased TypeId
      */
-    TypeId registerTypeAlias(const std::string& name, TypeId typeId) {
-        typeNameToId_[normalizeKey(name)] = typeId;
-        return typeId;
-    }
-    const Symbol* get(SymbolId id) const {
-        if (id == 0 || id >= symbols_.size()) return nullptr;
-        return &symbols_[id];
-    }
-    Symbol* get(SymbolId id) {
-        if (id == 0 || id >= symbols_.size()) return nullptr;
-        return &symbols_[id];
-    }
+   TypeId registerTypeAlias(const std::string& name, TypeId typeId)
+   {
+      typeNameToId_[normalizeKey(name)] = typeId;
+      return typeId;
+   }
+   const Symbol* get(SymbolId id) const
+   {
+      if (id == 0 || id >= symbols_.size()) {
+         return nullptr;
+      }
+      return &symbols_[id];
+   }
+   Symbol* get(SymbolId id)
+   {
+      if (id == 0 || id >= symbols_.size()) {
+         return nullptr;
+      }
+      return &symbols_[id];
+   }
 
-    /**
+   /**
      * @brief The call interface of a function block, inheritance included.
      * @details `Symbol::params` holds only the parameters declared by that very
      * block, but a block that EXTENDS another one is callable with the base's
@@ -477,117 +511,140 @@ public:
      * A parameter redeclared by a derived block replaces the inherited one
      * instead of appearing twice. Cycles in the base chain are guarded against.
      */
-    std::vector<SymbolId> effectiveParams(SymbolId fbId) const {
-        // Base chain, root ancestor first.
-        std::vector<const Symbol*> chain;
-        std::unordered_set<SymbolId> visited;
-        for (const Symbol* cursor = get(fbId);
-             cursor != nullptr && visited.insert(cursor->id).second;
-             cursor = (cursor->baseClassId != 0) ? get(cursor->baseClassId) : nullptr) {
-            chain.push_back(cursor);
-        }
-        std::reverse(chain.begin(), chain.end());
+   std::vector<SymbolId> effectiveParams(SymbolId fbId) const
+   {
+      // Base chain, root ancestor first.
+      std::vector<const Symbol*> chain;
+      std::unordered_set<SymbolId> visited;
+      for (const Symbol* cursor = get(fbId); cursor != nullptr && visited.insert(cursor->id).second;
+           cursor = (cursor->baseClassId != 0) ? get(cursor->baseClassId) : nullptr) {
+         chain.push_back(cursor);
+      }
+      std::reverse(chain.begin(), chain.end());
 
-        // First pass, most derived block first: the winning declaration of each
-        // name is the one in the nearest block that redeclares it.
-        std::unordered_map<std::string, SymbolId> winner;
-        for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
-            for (SymbolId paramId : (*it)->params) {
-                const Symbol* param = get(paramId);
-                if (param == nullptr) continue;
-                const std::string key = normalizeKey(param->name);
-                if (winner.count(key) != 0) continue; // a derived block already declared it
-                winner.emplace(key, paramId);
+      // First pass, most derived block first: the winning declaration of each
+      // name is the one in the nearest block that redeclares it.
+      std::unordered_map<std::string, SymbolId> winner;
+      for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+         for (SymbolId paramId : (*it)->params) {
+            const Symbol* param = get(paramId);
+            if (param == nullptr) {
+               continue;
             }
-        }
-
-        // Second pass, base first, so the base interface stays the prefix that
-        // positional calls bind against. Each name is emitted once.
-        std::vector<SymbolId> out;
-        std::unordered_set<std::string> emitted;
-        for (const Symbol* fb : chain) {
-            for (SymbolId paramId : fb->params) {
-                const Symbol* param = get(paramId);
-                if (param == nullptr) continue;
-                const std::string key = normalizeKey(param->name);
-                // Test the winner first: a shadowed declaration must not mark
-                // the name as taken, or the winning one below would be dropped.
-                auto win = winner.find(key);
-                if (win == winner.end() || win->second != paramId) continue;
-                if (!emitted.insert(key).second) continue;
-                out.push_back(paramId);
+            const std::string key = normalizeKey(param->name);
+            if (winner.count(key) != 0) {
+               continue; // a derived block already declared it
             }
-        }
-        return out;
-    }
-    const TypeInfo* getType(TypeId id) const {
-        if (id == 0 || id >= types_.size()) return nullptr;
-        return &types_[id];
-    }
-    TypeInfo* getType(TypeId id) {
-        if (id == 0 || id >= types_.size()) return nullptr;
-        return &types_[id];
-    }
-    TypeId getTypeIdByName(const std::string& name) const {
-        auto it = typeNameToId_.find(normalizeKey(name));
-        return (it != typeNameToId_.end()) ? it->second : 0;
-    }
+            winner.emplace(key, paramId);
+         }
+      }
 
-    // ===== Iteration =====
-    void forEachSymbol(std::function<void(const Symbol&)> fn) const {
-        for (const auto& sym : symbols_) {
-            if (sym.id != 0) fn(sym);
-        }
-    }
-    void forEachType(std::function<void(TypeId, const TypeInfo&)> fn) const {
-        for (TypeId i = 1; i < types_.size(); ++i) {
-            fn(i, types_[i]);
-        }
-    }
+      // Second pass, base first, so the base interface stays the prefix that
+      // positional calls bind against. Each name is emitted once.
+      std::vector<SymbolId> out;
+      std::unordered_set<std::string> emitted;
+      for (const Symbol* fb : chain) {
+         for (SymbolId paramId : fb->params) {
+            const Symbol* param = get(paramId);
+            if (param == nullptr) {
+               continue;
+            }
+            const std::string key = normalizeKey(param->name);
+            // Test the winner first: a shadowed declaration must not mark
+            // the name as taken, or the winning one below would be dropped.
+            auto win = winner.find(key);
+            if (win == winner.end() || win->second != paramId) {
+               continue;
+            }
+            if (!emitted.insert(key).second) {
+               continue;
+            }
+            out.push_back(paramId);
+         }
+      }
+      return out;
+   }
+   const TypeInfo* getType(TypeId id) const
+   {
+      if (id == 0 || id >= types_.size()) {
+         return nullptr;
+      }
+      return &types_[id];
+   }
+   TypeInfo* getType(TypeId id)
+   {
+      if (id == 0 || id >= types_.size()) {
+         return nullptr;
+      }
+      return &types_[id];
+   }
+   TypeId getTypeIdByName(const std::string& name) const
+   {
+      auto it = typeNameToId_.find(normalizeKey(name));
+      return (it != typeNameToId_.end()) ? it->second : 0;
+   }
 
-    // ===== Built-in Types =====
-    void registerBuiltins() {
-        registerBuiltin(TypeInfo::makeBool());
-        registerBuiltin(TypeInfo::makeInt(BaseType::SINT));
-        registerBuiltin(TypeInfo::makeInt(BaseType::INT));
-        registerBuiltin(TypeInfo::makeInt(BaseType::DINT));
-        registerBuiltin(TypeInfo::makeInt(BaseType::LINT));
-        registerBuiltin(TypeInfo::makeInt(BaseType::USINT));
-        registerBuiltin(TypeInfo::makeInt(BaseType::UINT));
-        registerBuiltin(TypeInfo::makeInt(BaseType::UDINT));
-        registerBuiltin(TypeInfo::makeInt(BaseType::ULINT));
-        registerBuiltin(TypeInfo::makeReal(BaseType::REAL));
-        registerBuiltin(TypeInfo::makeReal(BaseType::LREAL));
-        registerBuiltin(TypeInfo::makeBitString(BaseType::BYTE));
-        registerBuiltin(TypeInfo::makeBitString(BaseType::WORD));
-        registerBuiltin(TypeInfo::makeBitString(BaseType::DWORD));
-        registerBuiltin(TypeInfo::makeBitString(BaseType::LWORD));
-        registerBuiltin(TypeInfo::makeTime(BaseType::TIME));
-        registerBuiltin(TypeInfo::makeTime(BaseType::DATE));
-        registerBuiltin(TypeInfo::makeTime(BaseType::TOD));
-        registerBuiltin(TypeInfo::makeTime(BaseType::DT));
-        registerBuiltin(TypeInfo::makeString(BaseType::STRING));
-        registerBuiltin(TypeInfo::makeString(BaseType::WSTRING));
-        registerBuiltin(TypeInfo::makeVoid());
-    }
+   // ===== Iteration =====
+   void forEachSymbol(std::function<void(const Symbol&)> fn) const
+   {
+      for (const auto& sym : symbols_) {
+         if (sym.id != 0) {
+            fn(sym);
+         }
+      }
+   }
+   void forEachType(std::function<void(TypeId, const TypeInfo&)> fn) const
+   {
+      for (TypeId i = 1; i < types_.size(); ++i) {
+         fn(i, types_[i]);
+      }
+   }
 
-    // ===== Accessors =====
-    const std::vector<Scope>& getScopes() const { return scopes_; }
-    const std::vector<Symbol>& getSymbols() const { return symbols_; }
-    const std::vector<TypeInfo>& getTypes() const { return types_; }
-    ScopeId globalScopeId() const { return globalScopeId_; }
-    ScopeId currentScopeId() const { return currentScopeId_; }
+   // ===== Built-in Types =====
+   void registerBuiltins()
+   {
+      registerBuiltin(TypeInfo::makeBool());
+      registerBuiltin(TypeInfo::makeInt(BaseType::SINT));
+      registerBuiltin(TypeInfo::makeInt(BaseType::INT));
+      registerBuiltin(TypeInfo::makeInt(BaseType::DINT));
+      registerBuiltin(TypeInfo::makeInt(BaseType::LINT));
+      registerBuiltin(TypeInfo::makeInt(BaseType::USINT));
+      registerBuiltin(TypeInfo::makeInt(BaseType::UINT));
+      registerBuiltin(TypeInfo::makeInt(BaseType::UDINT));
+      registerBuiltin(TypeInfo::makeInt(BaseType::ULINT));
+      registerBuiltin(TypeInfo::makeReal(BaseType::REAL));
+      registerBuiltin(TypeInfo::makeReal(BaseType::LREAL));
+      registerBuiltin(TypeInfo::makeBitString(BaseType::BYTE));
+      registerBuiltin(TypeInfo::makeBitString(BaseType::WORD));
+      registerBuiltin(TypeInfo::makeBitString(BaseType::DWORD));
+      registerBuiltin(TypeInfo::makeBitString(BaseType::LWORD));
+      registerBuiltin(TypeInfo::makeTime(BaseType::TIME));
+      registerBuiltin(TypeInfo::makeTime(BaseType::DATE));
+      registerBuiltin(TypeInfo::makeTime(BaseType::TOD));
+      registerBuiltin(TypeInfo::makeTime(BaseType::DT));
+      registerBuiltin(TypeInfo::makeString(BaseType::STRING));
+      registerBuiltin(TypeInfo::makeString(BaseType::WSTRING));
+      registerBuiltin(TypeInfo::makeVoid());
+   }
+
+   // ===== Accessors =====
+   const std::vector<Scope>& getScopes() const { return scopes_; }
+   const std::vector<Symbol>& getSymbols() const { return symbols_; }
+   const std::vector<TypeInfo>& getTypes() const { return types_; }
+   ScopeId globalScopeId() const { return globalScopeId_; }
+   ScopeId currentScopeId() const { return currentScopeId_; }
 
 private:
-    TypeId registerBuiltin(const TypeInfo& type) {
-        TypeId id = registerType(type);
-        SymbolId symId = declare(types_[id].name, SymbolKind::Type, id);
-        if (Symbol* sym = get(symId)) {
-            sym->typeId = id;
-        }
-        return id;
-    }
-    /**
+   TypeId registerBuiltin(const TypeInfo& type)
+   {
+      TypeId id = registerType(type);
+      SymbolId symId = declare(types_[id].name, SymbolKind::Type, id);
+      if (Symbol* sym = get(symId)) {
+         sym->typeId = id;
+      }
+      return id;
+   }
+   /**
      * @brief Register the IEC 61131-3 conversion functions (X_TO_Y).
      * @details Each conversion is a global FUNCTION symbol named after the IEC
      * conversion (e.g. INT_TO_REAL, INT_TO_WORD) with one input parameter and
@@ -595,28 +652,28 @@ private:
      * inline helpers provided by the runtime conversions.hpp header, so the
      * code generator emits the function name as-is.
      */
-    void registerIecConversionFunctions();
-    std::vector<Scope> scopes_;
-    std::vector<Symbol> symbols_;
-    std::vector<TypeInfo> types_;
-    std::vector<ScopeId> scopeStack_;
-    std::unordered_map<std::string, TypeId> typeNameToId_;
-    mutable std::vector<CaseMismatch> caseMismatches_;
-    bool caseSensitive_ = false;
-    bool caseFallback_ = false;
-    ScopeId globalScopeId_ = 1;
-    ScopeId currentScopeId_ = 1;
-    ScopeId externalScopeId_ = 2;
+   void registerIecConversionFunctions();
+   std::vector<Scope> scopes_;
+   std::vector<Symbol> symbols_;
+   std::vector<TypeInfo> types_;
+   std::vector<ScopeId> scopeStack_;
+   std::unordered_map<std::string, TypeId> typeNameToId_;
+   mutable std::vector<CaseMismatch> caseMismatches_;
+   bool caseSensitive_ = false;
+   bool caseFallback_ = false;
+   ScopeId globalScopeId_ = 1;
+   ScopeId currentScopeId_ = 1;
+   ScopeId externalScopeId_ = 2;
 
-    /**
+   /**
      * @brief Note that a reference matched a declaration only by case.
      * @details Mutable because the lookups that observe the fallback are const.
      */
-    void recordCaseMismatch(const std::string& written, SymbolId id) const {
-        const Symbol* sym = get(id);
-        caseMismatches_.push_back(
-            CaseMismatch{written, (sym && !sym->name.empty()) ? sym->name : std::string()});
-    }
+   void recordCaseMismatch(const std::string& written, SymbolId id) const
+   {
+      const Symbol* sym = get(id);
+      caseMismatches_.push_back(CaseMismatch{written, (sym && !sym->name.empty()) ? sym->name : std::string()});
+   }
 };
 
 } // namespace st2cpp::semantic

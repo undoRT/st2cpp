@@ -35,7 +35,8 @@ namespace st2cpp::codegen {
 /**
  * @brief Read-only access to the semantic analysis for the code generator.
  */
-class SemanticBridge {
+class SemanticBridge
+{
 public:
    /**
     * @brief Bind the bridge to a semantic analysis result.
@@ -43,8 +44,8 @@ public:
     *        degrades to the legacy syntactic inference
     * @param identifiers The identifier case policy to spell results with
     */
-   SemanticBridge(st2cpp::semantic::SemanticInfo* info, IdentifierPolicy identifiers)
-      : m_semanticInfo(info), m_identifiers(identifiers) {}
+   SemanticBridge(st2cpp::semantic::SemanticInfo* info, IdentifierPolicy identifiers) : m_semanticInfo(info), m_identifiers(identifiers)
+   {}
 
    /// Whether a semantic analysis carrying a symbol table is attached.
    bool semanticAvailable() const;

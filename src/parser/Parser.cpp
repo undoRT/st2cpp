@@ -173,45 +173,45 @@ TranslationUnit Parser::parseTranslationUnit()
          // Save current position to backtrack if needed
          size_t savedPos = m_pos;
 
-// Read type name
-          if (!check(TokenType::IDENTIFIER)) {
-             throw error("Expected type name after TYPE");
-          }
-          uint32_t aliasLine = peek().line;
-          uint32_t aliasCol = peek().col;
-          std::string typeName = peek().text;
-          advance(); // consume type name
+         // Read type name
+         if (!check(TokenType::IDENTIFIER)) {
+            throw error("Expected type name after TYPE");
+         }
+         uint32_t aliasLine = peek().line;
+         uint32_t aliasCol = peek().col;
+         std::string typeName = peek().text;
+         advance(); // consume type name
 
-// Look ahead to determine if it's a STRUCT or ENUM
-          if (check(TokenType::COLON)) {
-             advance(); // consume ':'
-             if (check(TokenType::KW_STRUCT)) {
-                // It is a struct - backtrack and parse as struct
-                m_pos = savedPos;
-                tu.structs.push_back(parseStructType());
-             } else if (check(TokenType::LPAREN)) {
-                // It is an ENUM - backtrack and parse as enum
-                m_pos = savedPos;
-                tu.enums.push_back(parseEnumType());
-             } else {
-                // Named type alias / named array type:
-                //   TYPE Name : <TypeRef>; END_TYPE
-                // The name and ':' were already consumed; the underlying type
-                // reference (elementary, user type or ARRAY[...]) is parsed
-                // here and stored as a TypeAlias.
-TypeAlias alias;
-                 alias.name = typeName;
-                 alias.line = aliasLine;
-                 alias.col = aliasCol;
-                 alias.fileName = m_fileName;
-                 alias.type = parseTypeRef();
-                expect(TokenType::SEMICOLON, "Expected ';' at the end of the type alias");
-                expect(TokenType::KW_END_TYPE, "Expected END_TYPE after type alias");
-                tu.typeAliases.push_back(std::move(alias));
-             }
-          } else {
-             throw error("Expected ':' after type name");
-          }
+         // Look ahead to determine if it's a STRUCT or ENUM
+         if (check(TokenType::COLON)) {
+            advance(); // consume ':'
+            if (check(TokenType::KW_STRUCT)) {
+               // It is a struct - backtrack and parse as struct
+               m_pos = savedPos;
+               tu.structs.push_back(parseStructType());
+            } else if (check(TokenType::LPAREN)) {
+               // It is an ENUM - backtrack and parse as enum
+               m_pos = savedPos;
+               tu.enums.push_back(parseEnumType());
+            } else {
+               // Named type alias / named array type:
+               //   TYPE Name : <TypeRef>; END_TYPE
+               // The name and ':' were already consumed; the underlying type
+               // reference (elementary, user type or ARRAY[...]) is parsed
+               // here and stored as a TypeAlias.
+               TypeAlias alias;
+               alias.name = typeName;
+               alias.line = aliasLine;
+               alias.col = aliasCol;
+               alias.fileName = m_fileName;
+               alias.type = parseTypeRef();
+               expect(TokenType::SEMICOLON, "Expected ';' at the end of the type alias");
+               expect(TokenType::KW_END_TYPE, "Expected END_TYPE after type alias");
+               tu.typeAliases.push_back(std::move(alias));
+            }
+         } else {
+            throw error("Expected ':' after type name");
+         }
       } else {
          tu.pous.push_back(parsePOU());
       }
@@ -494,7 +494,8 @@ Method Parser::parseMethod()
             param.kind = VarKind::INPUT;
             param.initialValue = decl.initialValue;
             param.line = decl.line;
-            param.col = decl.col;            method.parameters.push_back(param);
+            param.col = decl.col;
+            method.parameters.push_back(param);
          }
       } else if (check(TokenType::KW_VAR_OUTPUT)) {
          advance();
@@ -506,7 +507,8 @@ Method Parser::parseMethod()
             param.kind = VarKind::OUTPUT;
             param.initialValue = decl.initialValue;
             param.line = decl.line;
-            param.col = decl.col;            method.parameters.push_back(param);
+            param.col = decl.col;
+            method.parameters.push_back(param);
          }
       } else if (check(TokenType::KW_VAR_IN_OUT)) {
          advance();
@@ -518,7 +520,8 @@ Method Parser::parseMethod()
             param.kind = VarKind::IN_OUT;
             param.initialValue = decl.initialValue;
             param.line = decl.line;
-            param.col = decl.col;            method.parameters.push_back(param);
+            param.col = decl.col;
+            method.parameters.push_back(param);
          }
       } else if (check(TokenType::KW_VAR) || check(TokenType::KW_VAR_TEMP)) {
          VarKind kind = check(TokenType::KW_VAR) ? VarKind::VAR : VarKind::TEMP;
@@ -1078,7 +1081,8 @@ TypeRef Parser::parseBaseTypeRef()
  */
 std::shared_ptr<Expr> Parser::parseArrayInitializer()
 {
-   uint32_t ln = peek().line; uint32_t col = peek().col;
+   uint32_t ln = peek().line;
+   uint32_t col = peek().col;
    expect(TokenType::LBRACKET, "Expected '[' for array initializer");
 
    std::vector<std::shared_ptr<Expr>> elements;

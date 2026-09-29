@@ -32,13 +32,12 @@ using json::JsonValue;
  * (e.g. "constants[1].type" or "functions[0].cppBinding");
  * `message` explains the problem in diagnostic terms.
  */
-struct LibraryLoadError {
-    std::string path;
-    std::string message;
+struct LibraryLoadError
+{
+   std::string path;
+   std::string message;
 
-    std::string toString() const {
-        return path.empty() ? message : path + ": " + message;
-    }
+   std::string toString() const { return path.empty() ? message : path + ": " + message; }
 };
 
 /**
@@ -46,33 +45,35 @@ struct LibraryLoadError {
  * @details The descriptor is produced best-effort; ok() is true only when it
  * is present AND no error was found (validated descriptor).
  */
-struct LibraryLoadResult {
-    std::optional<LibraryDescriptor> descriptor;
-    std::vector<LibraryLoadError> errors;
+struct LibraryLoadResult
+{
+   std::optional<LibraryDescriptor> descriptor;
+   std::vector<LibraryLoadError> errors;
 
-    bool ok() const { return descriptor.has_value() && errors.empty(); }
+   bool ok() const { return descriptor.has_value() && errors.empty(); }
 };
 
 /**
  * @brief JSON -> LibraryDescriptor loader with validation.
  */
-class LibraryLoader {
+class LibraryLoader
+{
 public:
-    /**
+   /**
      * @brief Load from a parsed JSON document.
      */
-    static LibraryLoadResult fromJson(const JsonValue& root);
+   static LibraryLoadResult fromJson(const JsonValue& root);
 
-    /**
+   /**
      * @brief Load from a JSON text string.
      * @details Malformed JSON is captured as a single error.
      */
-    static LibraryLoadResult fromString(const std::string& jsonText);
+   static LibraryLoadResult fromString(const std::string& jsonText);
 
-    /**
+   /**
      * @brief Load from a JSON file on disk.
      */
-    static LibraryLoadResult fromFile(const std::string& path);
+   static LibraryLoadResult fromFile(const std::string& path);
 };
 
 } // namespace st2cpp::library

@@ -89,14 +89,16 @@ struct EmissionContext
     */
    void rebuildSemanticComponents()
    {
-      m_semantic = st2cpp::codegen::SemanticBridge(m_semanticInfo,
-                                                   st2cpp::codegen::IdentifierPolicy{m_caseSensitive});
+      m_semantic = st2cpp::codegen::SemanticBridge(m_semanticInfo, st2cpp::codegen::IdentifierPolicy{m_caseSensitive});
       m_libraryIncludes = std::make_unique<st2cpp::codegen::LibraryIncludeTracker>(m_semantic);
-      m_dependencyOrdering = std::make_unique<st2cpp::codegen::DependencyOrdering>(
-         m_fbMap, m_isFB, m_structMembers, m_semantic,
-         st2cpp::codegen::IdentifierPolicy{m_caseSensitive});
-      m_typeMapper = std::make_unique<st2cpp::codegen::TypeMapper>(
-         m_semantic, m_aliasTypes, st2cpp::codegen::IdentifierPolicy{m_caseSensitive});
+      m_dependencyOrdering = std::make_unique<st2cpp::codegen::DependencyOrdering>(m_fbMap,
+                                                                                   m_isFB,
+                                                                                   m_structMembers,
+                                                                                   m_semantic,
+                                                                                   st2cpp::codegen::IdentifierPolicy{m_caseSensitive});
+      m_typeMapper = std::make_unique<st2cpp::codegen::TypeMapper>(m_semantic,
+                                                                   m_aliasTypes,
+                                                                   st2cpp::codegen::IdentifierPolicy{m_caseSensitive});
    }
 
    // ===== Indent helpers =====
@@ -110,28 +112,35 @@ struct EmissionContext
    bool semanticAvailable() const { return m_semantic.semanticAvailable(); }
    const st2cpp::semantic::SymbolTable* semanticSymTab() const { return m_semantic.semanticSymTab(); }
    const st2cpp::library::LibraryDescriptor* semanticDescriptorFor(const st2cpp::semantic::Symbol& sym) const
-   { return m_semantic.semanticDescriptorFor(sym); }
+   {
+      return m_semantic.semanticDescriptorFor(sym);
+   }
    void reportBindingIncomplete(const std::string& entity, const std::string& what) const
-   { m_semantic.reportBindingIncomplete(entity, what); }
+   {
+      m_semantic.reportBindingIncomplete(entity, what);
+   }
    std::string semanticTypeCppName(st2cpp::semantic::TypeId id, const std::string& fallback) const
-   { return m_semantic.semanticTypeCppName(id, fallback); }
+   {
+      return m_semantic.semanticTypeCppName(id, fallback);
+   }
    std::string semanticEnumeratorCppName(st2cpp::semantic::TypeId id, const std::string& member) const
-   { return m_semantic.semanticEnumeratorCppName(id, member); }
-   std::string semanticEnumNameForEnumerator(st2cpp::semantic::SymbolId id) const
-   { return m_semantic.semanticEnumNameForEnumerator(id); }
-   std::string semanticCallTargetName(const CallExpr& call) const
-   { return m_semantic.semanticCallTargetName(call); }
-   std::string semanticVariableBinding(const st2cpp::semantic::Symbol& sym) const
-   { return m_semantic.semanticVariableBinding(sym); }
-   st2cpp::codegen::ExternalFbCallInfo semanticFbCallInfo(const CallExpr& call) const
-   { return m_semantic.semanticFbCallInfo(call); }
+   {
+      return m_semantic.semanticEnumeratorCppName(id, member);
+   }
+   std::string semanticEnumNameForEnumerator(st2cpp::semantic::SymbolId id) const { return m_semantic.semanticEnumNameForEnumerator(id); }
+   std::string semanticCallTargetName(const CallExpr& call) const { return m_semantic.semanticCallTargetName(call); }
+   std::string semanticVariableBinding(const st2cpp::semantic::Symbol& sym) const { return m_semantic.semanticVariableBinding(sym); }
+   st2cpp::codegen::ExternalFbCallInfo semanticFbCallInfo(const CallExpr& call) const { return m_semantic.semanticFbCallInfo(call); }
    std::optional<FunctionSignature> semanticSignatureForCall(const CallExpr& call) const
-   { return m_semantic.semanticSignatureForCall(call); }
-   st2cpp::semantic::SymbolId semanticFbSymbolId(const POU& pou) const
-   { return m_semantic.semanticFbSymbolId(pou); }
+   {
+      return m_semantic.semanticSignatureForCall(call);
+   }
+   st2cpp::semantic::SymbolId semanticFbSymbolId(const POU& pou) const { return m_semantic.semanticFbSymbolId(pou); }
    std::string semanticBaseForFb(const POU& pou) const { return m_semantic.semanticBaseForFb(pou); }
    std::string declaredIdent(const std::string& written, st2cpp::semantic::SymbolId id) const
-   { return m_semantic.declaredIdent(written, id); }
+   {
+      return m_semantic.declaredIdent(written, id);
+   }
 
    /// The bridge, for the components that take it as a collaborator.
    const st2cpp::codegen::SemanticBridge& semanticBridge() const { return m_semantic; }
@@ -139,19 +148,24 @@ struct EmissionContext
    // ===== Dependency ordering (forwarded to DependencyOrdering) =====
 
    std::vector<std::string> orderedFbNamesFromSemantic() { return deps().orderedFbNamesFromSemantic(); }
-   std::unordered_map<std::string, std::unordered_set<std::string>>
-   buildFBDependencies(const TranslationUnit& tu) const { return deps().buildFBDependencies(tu); }
-   std::vector<std::string> topologicalSort(
-      const std::unordered_map<std::string, std::unordered_set<std::string>>& d) const
-   { return deps().topologicalSort(d); }
+   std::unordered_map<std::string, std::unordered_set<std::string>> buildFBDependencies(const TranslationUnit& tu) const
+   {
+      return deps().buildFBDependencies(tu);
+   }
+   std::vector<std::string> topologicalSort(const std::unordered_map<std::string, std::unordered_set<std::string>>& d) const
+   {
+      return deps().topologicalSort(d);
+   }
    bool structContainsFB(const std::string& structName, const TranslationUnit& tu) const
-   { return deps().structContainsFB(structName, tu); }
-   BuildStructDepType buildStructDependencies(const TranslationUnit& tu) const
-   { return deps().buildStructDependencies(tu); }
+   {
+      return deps().structContainsFB(structName, tu);
+   }
+   BuildStructDepType buildStructDependencies(const TranslationUnit& tu) const { return deps().buildStructDependencies(tu); }
    BuildStructDepType buildStructDependenciesForStructs(const std::vector<StructType>& structs) const
-   { return deps().buildStructDependenciesForStructs(structs); }
-   std::vector<std::string> topologicalSortStructs(const BuildStructDepType& d) const
-   { return deps().topologicalSortStructs(d); }
+   {
+      return deps().buildStructDependenciesForStructs(structs);
+   }
+   std::vector<std::string> topologicalSortStructs(const BuildStructDepType& d) const { return deps().topologicalSortStructs(d); }
    st2cpp::codegen::DependencyOrdering& deps() const { return *m_dependencyOrdering; }
 
    // ===== Type mapping (forwarded to TypeMapper) =====
@@ -170,7 +184,9 @@ struct EmissionContext
    bool isSemanticBoolType(st2cpp::semantic::TypeId id) const { return types().isSemanticBoolType(id); }
    bool isSemanticEnumType(st2cpp::semantic::TypeId id) const { return types().isSemanticEnumType(id); }
    std::string applySemanticAssignmentCast(const Expr& l, const Expr& r, const std::string& c) const
-   { return types().applySemanticAssignmentCast(l, r, c); }
+   {
+      return types().applySemanticAssignmentCast(l, r, c);
+   }
    st2cpp::codegen::TypeMapper& types() const { return *m_typeMapper; }
 
    // Identifier spelling, kept for the many existing call sites.
@@ -184,20 +200,32 @@ struct EmissionContext
    std::string libraryIncludeBlock() const { return m_libraryIncludes->libraryIncludeBlock(); }
    const std::vector<std::string>& libraryIncludeLines() const { return m_libraryIncludes->includeLines(); }
    void collectUsedLibrariesFromExpr(const Expr& e, std::unordered_set<std::string>& u) const
-   { m_libraryIncludes->collectUsedLibrariesFromExpr(e, u); }
+   {
+      m_libraryIncludes->collectUsedLibrariesFromExpr(e, u);
+   }
    void collectUsedLibrariesFromStmt(const Stmt& s, std::unordered_set<std::string>& u) const
-   { m_libraryIncludes->collectUsedLibrariesFromStmt(s, u); }
+   {
+      m_libraryIncludes->collectUsedLibrariesFromStmt(s, u);
+   }
    void collectUsedLibrariesFromTypeRef(const TypeRef& tr, std::unordered_set<std::string>& u) const
-   { m_libraryIncludes->collectUsedLibrariesFromTypeRef(tr, u); }
+   {
+      m_libraryIncludes->collectUsedLibrariesFromTypeRef(tr, u);
+   }
    void recordUsedLibraryForSymbol(const st2cpp::semantic::Symbol& sym, std::unordered_set<std::string>& u) const
-   { m_libraryIncludes->recordUsedLibraryForSymbol(sym, u); }
+   {
+      m_libraryIncludes->recordUsedLibraryForSymbol(sym, u);
+   }
    void recordUsedLibraryForTypeId(st2cpp::semantic::TypeId id, std::unordered_set<std::string>& u) const
-   { m_libraryIncludes->recordUsedLibraryForTypeId(id, u); }
+   {
+      m_libraryIncludes->recordUsedLibraryForTypeId(id, u);
+   }
 
    /// Order the members of a struct initializer the way the struct declares them.
    std::vector<StructInitExpr::MemberInit> orderStructMembers(const std::vector<StructInitExpr::MemberInit>& members,
                                                               const std::string& typeName) const
-   { return deps().orderStructMembers(members, typeName); }
+   {
+      return deps().orderStructMembers(members, typeName);
+   }
 
    // ===== Namespace, runtime header and generated file identity =====
 
@@ -221,7 +249,7 @@ struct EmissionContext
    st2cpp::semantic::SemanticInfo* m_semanticInfo = nullptr;
    // The read-only view over the semantic analysis, rebuilt whenever the
    // analysis is attached or the identifier policy changes.
-   st2cpp::codegen::SemanticBridge m_semantic {m_semanticInfo, {}};
+   st2cpp::codegen::SemanticBridge m_semantic{m_semanticInfo, {}};
    std::unique_ptr<st2cpp::codegen::LibraryIncludeTracker> m_libraryIncludes;
    // Holds references to the collected maps, filled by the declaration pass and
    // read by the ordering pass.
@@ -237,7 +265,7 @@ struct EmissionContext
    std::unordered_map<std::string, FunctionSignature> m_methodSignatures;
    std::unordered_map<std::string, bool> m_enumTypes; // enum name -> isScoped
    std::unordered_set<std::string> m_structTypes;
-   std::unordered_map<std::string, TypeRef> m_aliasTypes; // alias (uppercase) -> underlying TypeRef
+   std::unordered_map<std::string, TypeRef> m_aliasTypes;                     // alias (uppercase) -> underlying TypeRef
    std::unordered_map<std::string, std::vector<std::string>> m_structMembers; // struct -> ordered members
    std::string m_currentFunctionReturnType;                                   // Empty if void
    ProjectStyle m_projectStyle = ProjectStyle::FLAT;                          // Current mode

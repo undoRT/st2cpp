@@ -118,6 +118,7 @@ public:
     * @brief Check if the allocator has any allocations
     */
    bool hasAllocations() const { return !m_regions.empty(); }
+
 private:
    std::unordered_map<AddressExpr::AddressType, MemoryRegion> m_regions;
 

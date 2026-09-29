@@ -200,8 +200,9 @@ bool DependencyOrdering::structContainsFB(const std::string& structName, const T
    return structContainsFB(structName, tu, visited);
 }
 
-bool DependencyOrdering::structContainsFB(const std::string& structName, const TranslationUnit& tu,
-                                     std::unordered_set<std::string>& visited) const
+bool DependencyOrdering::structContainsFB(const std::string& structName,
+                                          const TranslationUnit& tu,
+                                          std::unordered_set<std::string>& visited) const
 {
    if (!visited.insert(structName).second) {
       return false;
@@ -330,7 +331,7 @@ std::vector<std::string> DependencyOrdering::topologicalSortStructs(const BuildS
  * @return Lista di membri ordinata
  */
 std::vector<StructInitExpr::MemberInit> DependencyOrdering::orderStructMembers(const std::vector<StructInitExpr::MemberInit>& members,
-                                                                          const std::string& structName) const
+                                                                               const std::string& structName) const
 {
    auto it = m_structMembers.find(structName);
    if (it == m_structMembers.end()) {

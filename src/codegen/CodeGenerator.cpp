@@ -22,8 +22,7 @@ CodegenResult CodeGenerator::generate(const TranslationUnit& tu,
    return m_project.generate(tu, headerName, namespaceName, runtimeHeader, caseSensitive);
 }
 
-std::vector<GeneratedFile> CodeGenerator::generateModularProject(const TranslationUnit& tu,
-                                                                 const std::string& outputDir)
+std::vector<GeneratedFile> CodeGenerator::generateModularProject(const TranslationUnit& tu, const std::string& outputDir)
 {
    return m_project.generateModularProject(tu, outputDir);
 }

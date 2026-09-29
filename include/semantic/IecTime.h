@@ -43,8 +43,7 @@ inline std::optional<int64_t> iecTimeLiteralToMilliseconds(const std::string& te
          return false;
       }
       for (size_t k = 0; k < len; ++k) {
-         if (std::tolower(static_cast<unsigned char>(text[i + k]))
-             != std::tolower(static_cast<unsigned char>(p[k]))) {
+         if (std::tolower(static_cast<unsigned char>(text[i + k])) != std::tolower(static_cast<unsigned char>(p[k]))) {
             return false;
          }
       }

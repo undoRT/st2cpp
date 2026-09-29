@@ -153,8 +153,8 @@ void LibraryIncludeTracker::recordUsedLibraryForTypeId(st2cpp::semantic::TypeId 
       recordUsedLibraryForTypeId(t->pointedTypeId, used);
       return;
    }
-   if (t->kind != st2cpp::semantic::TypeKind::Struct && t->kind != st2cpp::semantic::TypeKind::Enum &&
-       t->kind != st2cpp::semantic::TypeKind::FunctionBlock) {
+   if (t->kind != st2cpp::semantic::TypeKind::Struct && t->kind != st2cpp::semantic::TypeKind::Enum
+       && t->kind != st2cpp::semantic::TypeKind::FunctionBlock) {
       return;
    }
    const st2cpp::semantic::Symbol* sym = t->symbolId ? st->get(t->symbolId) : nullptr;
@@ -195,24 +195,42 @@ void LibraryIncludeTracker::collectUsedLibrariesFromExpr(const Expr& expr, std::
                }
             }
          } else if constexpr (std::is_same_v<T, BinaryExpr>) {
-            if (e.left) collectUsedLibrariesFromExpr(*e.left, used);
-            if (e.right) collectUsedLibrariesFromExpr(*e.right, used);
+            if (e.left) {
+               collectUsedLibrariesFromExpr(*e.left, used);
+            }
+            if (e.right) {
+               collectUsedLibrariesFromExpr(*e.right, used);
+            }
          } else if constexpr (std::is_same_v<T, UnaryExpr>) {
-            if (e.operand) collectUsedLibrariesFromExpr(*e.operand, used);
+            if (e.operand) {
+               collectUsedLibrariesFromExpr(*e.operand, used);
+            }
          } else if constexpr (std::is_same_v<T, MemberExpr>) {
-            if (e.object) collectUsedLibrariesFromExpr(*e.object, used);
+            if (e.object) {
+               collectUsedLibrariesFromExpr(*e.object, used);
+            }
          } else if constexpr (std::is_same_v<T, IndexExpr>) {
-            if (e.array) collectUsedLibrariesFromExpr(*e.array, used);
+            if (e.array) {
+               collectUsedLibrariesFromExpr(*e.array, used);
+            }
             for (const auto& idx : e.indices) {
-               if (idx) collectUsedLibrariesFromExpr(*idx, used);
+               if (idx) {
+                  collectUsedLibrariesFromExpr(*idx, used);
+               }
             }
          } else if constexpr (std::is_same_v<T, DerefExpr>) {
-            if (e.pointer) collectUsedLibrariesFromExpr(*e.pointer, used);
+            if (e.pointer) {
+               collectUsedLibrariesFromExpr(*e.pointer, used);
+            }
          } else if constexpr (std::is_same_v<T, CastExpr>) {
             collectUsedLibrariesFromTypeRef(e.targetType, used);
-            if (e.operand) collectUsedLibrariesFromExpr(*e.operand, used);
+            if (e.operand) {
+               collectUsedLibrariesFromExpr(*e.operand, used);
+            }
          } else if constexpr (std::is_same_v<T, AdrExpr>) {
-            if (e.operand) collectUsedLibrariesFromExpr(*e.operand, used);
+            if (e.operand) {
+               collectUsedLibrariesFromExpr(*e.operand, used);
+            }
          } else if constexpr (std::is_same_v<T, SizeofExpr>) {
             if (e.isType) {
                collectUsedLibrariesFromTypeRef(e.type, used);
@@ -221,11 +239,15 @@ void LibraryIncludeTracker::collectUsedLibrariesFromExpr(const Expr& expr, std::
             }
          } else if constexpr (std::is_same_v<T, ArrayInitExpr>) {
             for (const auto& el : e.elements) {
-               if (el) collectUsedLibrariesFromExpr(*el, used);
+               if (el) {
+                  collectUsedLibrariesFromExpr(*el, used);
+               }
             }
          } else if constexpr (std::is_same_v<T, StructInitExpr>) {
             for (const auto& m : e.members) {
-               if (m.value) collectUsedLibrariesFromExpr(*m.value, used);
+               if (m.value) {
+                  collectUsedLibrariesFromExpr(*m.value, used);
+               }
             }
          }
       },
@@ -237,41 +259,79 @@ void LibraryIncludeTracker::collectUsedLibrariesFromStmt(const Stmt& stmt, std::
    std::visit(
       [&](const auto& s) {
          using T = std::decay_t<decltype(s)>;
-          if constexpr (std::is_same_v<T, AssignStmt>) {
-             if (s.lhs) collectUsedLibrariesFromExpr(*s.lhs, used);
-             for (const auto& target : s.additionalTargets) {
-                if (target) collectUsedLibrariesFromExpr(*target, used);
-             }
-             if (s.rhs) collectUsedLibrariesFromExpr(*s.rhs, used);
+         if constexpr (std::is_same_v<T, AssignStmt>) {
+            if (s.lhs) {
+               collectUsedLibrariesFromExpr(*s.lhs, used);
+            }
+            for (const auto& target : s.additionalTargets) {
+               if (target) {
+                  collectUsedLibrariesFromExpr(*target, used);
+               }
+            }
+            if (s.rhs) {
+               collectUsedLibrariesFromExpr(*s.rhs, used);
+            }
          } else if constexpr (std::is_same_v<T, ExprStmt>) {
-            if (s.expr) collectUsedLibrariesFromExpr(*s.expr, used);
+            if (s.expr) {
+               collectUsedLibrariesFromExpr(*s.expr, used);
+            }
          } else if constexpr (std::is_same_v<T, ReturnStmt>) {
-            if (s.expr) collectUsedLibrariesFromExpr(*s.expr, used);
+            if (s.expr) {
+               collectUsedLibrariesFromExpr(*s.expr, used);
+            }
          } else if constexpr (std::is_same_v<T, IfStmt>) {
             for (const auto& b : s.branches) {
-               if (b.condition) collectUsedLibrariesFromExpr(*b.condition, used);
-               for (const auto& bs : b.body) collectUsedLibrariesFromStmt(*bs, used);
+               if (b.condition) {
+                  collectUsedLibrariesFromExpr(*b.condition, used);
+               }
+               for (const auto& bs : b.body) {
+                  collectUsedLibrariesFromStmt(*bs, used);
+               }
             }
          } else if constexpr (std::is_same_v<T, ForStmt>) {
-            if (s.from) collectUsedLibrariesFromExpr(*s.from, used);
-            if (s.to) collectUsedLibrariesFromExpr(*s.to, used);
-            if (s.by) collectUsedLibrariesFromExpr(*s.by, used);
-            for (const auto& b : s.body) collectUsedLibrariesFromStmt(*b, used);
+            if (s.from) {
+               collectUsedLibrariesFromExpr(*s.from, used);
+            }
+            if (s.to) {
+               collectUsedLibrariesFromExpr(*s.to, used);
+            }
+            if (s.by) {
+               collectUsedLibrariesFromExpr(*s.by, used);
+            }
+            for (const auto& b : s.body) {
+               collectUsedLibrariesFromStmt(*b, used);
+            }
          } else if constexpr (std::is_same_v<T, CaseStmt>) {
-            if (s.selector) collectUsedLibrariesFromExpr(*s.selector, used);
+            if (s.selector) {
+               collectUsedLibrariesFromExpr(*s.selector, used);
+            }
             for (const auto& cb : s.branches) {
                for (const auto& v : cb.values) {
-                  if (v.low) collectUsedLibrariesFromExpr(*v.low, used);
-                  if (v.high) collectUsedLibrariesFromExpr(*v.high, used);
+                  if (v.low) {
+                     collectUsedLibrariesFromExpr(*v.low, used);
+                  }
+                  if (v.high) {
+                     collectUsedLibrariesFromExpr(*v.high, used);
+                  }
                }
-               for (const auto& bs : cb.body) collectUsedLibrariesFromStmt(*bs, used);
+               for (const auto& bs : cb.body) {
+                  collectUsedLibrariesFromStmt(*bs, used);
+               }
             }
          } else if constexpr (std::is_same_v<T, WhileStmt>) {
-            if (s.condition) collectUsedLibrariesFromExpr(*s.condition, used);
-            for (const auto& b : s.body) collectUsedLibrariesFromStmt(*b, used);
+            if (s.condition) {
+               collectUsedLibrariesFromExpr(*s.condition, used);
+            }
+            for (const auto& b : s.body) {
+               collectUsedLibrariesFromStmt(*b, used);
+            }
          } else if constexpr (std::is_same_v<T, RepeatStmt>) {
-            if (s.condition) collectUsedLibrariesFromExpr(*s.condition, used);
-            for (const auto& b : s.body) collectUsedLibrariesFromStmt(*b, used);
+            if (s.condition) {
+               collectUsedLibrariesFromExpr(*s.condition, used);
+            }
+            for (const auto& b : s.body) {
+               collectUsedLibrariesFromStmt(*b, used);
+            }
          }
       },
       stmt.node);

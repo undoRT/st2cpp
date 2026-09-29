@@ -33,38 +33,39 @@ using json::JsonValue;
 /**
  * @brief JSON -> ProjectConfig loader with validation.
  */
-class ProjectConfigLoader {
+class ProjectConfigLoader
+{
 public:
-    /**
+   /**
      * @brief Load from a parsed JSON document (structure validation only).
      */
-    static ProjectConfigLoadResult fromJson(const JsonValue& root);
+   static ProjectConfigLoadResult fromJson(const JsonValue& root);
 
-    /**
+   /**
      * @brief Load from a JSON text string (structure validation only).
      * @details Malformed JSON is captured as a single error.
      */
-    static ProjectConfigLoadResult fromString(const std::string& jsonText);
+   static ProjectConfigLoadResult fromString(const std::string& jsonText);
 
-    /**
+   /**
      * @brief Load from a JSON file on disk.
      * @details Resolves every library relative path against the directory of
      * this file (LibraryEntry::resolvedPath).
      */
-    static ProjectConfigLoadResult fromFile(const std::string& path);
+   static ProjectConfigLoadResult fromFile(const std::string& path);
 
-    /**
+   /**
      * @brief Resolve a library path against a base directory.
      * @param baseDir Directory of the configuration file (may be empty)
      * @param path The declared (absolute or relative) path
      * @return The absolute path as-is, or baseDir joined with the relative path
      */
-    static std::string resolvePath(const std::string& baseDir, const std::string& path);
+   static std::string resolvePath(const std::string& baseDir, const std::string& path);
 
-    /**
+   /**
      * @brief Directory part of a file path ("" when empty, "." when bare).
      */
-    static std::string dirName(const std::string& path);
+   static std::string dirName(const std::string& path);
 };
 
 } // namespace st2cpp::project

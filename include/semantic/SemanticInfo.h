@@ -26,8 +26,8 @@ namespace st2cpp::semantic {
  * implicit-conversion rules as diagnostics.
  */
 enum class AnalysisStrictness : uint8_t {
-    Permissive,
-    Strict
+   Permissive,
+   Strict
 };
 
 /**
@@ -38,18 +38,17 @@ enum class AnalysisStrictness : uint8_t {
  * diagnostics: `preserved()` is true only when the analyzer ran and every
  * identifier reference was resolved.
  */
-struct PreservedSemantics {
-    bool semanticModeApplied = false;    // true: the analyzer ran and produced a SymbolTable
-    AnalysisStrictness strictness = AnalysisStrictness::Permissive;
-    size_t resolvedCount = 0;            // identifier references resolved during body analysis
-    size_t unresolvedCount = 0;          // identifier references left unresolved
+struct PreservedSemantics
+{
+   bool semanticModeApplied = false; // true: the analyzer ran and produced a SymbolTable
+   AnalysisStrictness strictness = AnalysisStrictness::Permissive;
+   size_t resolvedCount = 0;   // identifier references resolved during body analysis
+   size_t unresolvedCount = 0; // identifier references left unresolved
 
-    /**
+   /**
      * @brief True when the decorated AST is a complete semantic model
      */
-    bool preserved() const {
-        return semanticModeApplied && unresolvedCount == 0;
-    }
+   bool preserved() const { return semanticModeApplied && unresolvedCount == 0; }
 };
 
 /**
@@ -59,41 +58,43 @@ struct PreservedSemantics {
  * The SymbolTable is owned by the SemanticInfo so the result stays valid
  * even after the SemanticAnalyzer that produced it is destroyed.
  */
-struct SemanticInfo {
-    std::unique_ptr<SymbolTable> symbolTable;       // Owned
-    Diagnostics diagnostics;                        // Owned, move-only
-    
-    // Pre-computed orders for CodeGenerator (Phase 2 migration)
-    std::vector<SymbolId> fbTopoOrder;           // FunctionBlocks in dependency order
-    std::vector<SymbolId> structTopoOrder;       // STRUCTs in dependency order
-    std::unordered_map<SymbolId, SymbolId> fbBaseClass;  // fbId -> baseClassSymbolId
-    std::unordered_map<SymbolId, std::vector<SymbolId>> fbImplements;  // fbId -> interface IDs
-    
-    // Address allocation results (for AT placeholder resolution)
-    // Using string->string map to avoid dependency on AddressExpr from CodeGenerator
-    std::unordered_map<std::string, std::string> resolvedATAddresses;  // "FBName::varName" -> resolved address string
-    
-    // Process Image sizing (copied from CodeGenerator's ProcessImageConfig to avoid dependency)
-    struct ProcessImageConfig {
-        size_t inputBytes = 1024;
-        size_t outputBytes = 1024;
-        size_t markerBytes = 1024;
-        bool autoDetect = true;
-    };
-    ProcessImageConfig piConfig;
+struct SemanticInfo
+{
+   std::unique_ptr<SymbolTable> symbolTable; // Owned
+   Diagnostics diagnostics;                  // Owned, move-only
 
-    // Fase 6: strictness used and evidence that the semantic model was preserved
-    PreservedSemantics preservedSemantics;
+   // Pre-computed orders for CodeGenerator (Phase 2 migration)
+   std::vector<SymbolId> fbTopoOrder;                                // FunctionBlocks in dependency order
+   std::vector<SymbolId> structTopoOrder;                            // STRUCTs in dependency order
+   std::unordered_map<SymbolId, SymbolId> fbBaseClass;               // fbId -> baseClassSymbolId
+   std::unordered_map<SymbolId, std::vector<SymbolId>> fbImplements; // fbId -> interface IDs
 
-    // Library registry used by the analysis (nullable). Set by the analyzer
-    // overload that accepts a registry; kept as a non-owning pointer to the
-    // single source of truth of the C++ bindings, so the CodeGenerator can
-    // resolve external symbols (Symbol::externalLibraryId) back to their
-    // LibraryDescriptor without duplicating any binding data. The caller must
-    // keep the registry alive while consuming the SemanticInfo.
-    const st2cpp::library::LibraryRegistry* libraryRegistry = nullptr;
-    
-    bool empty() const { return symbolTable == nullptr; }
+   // Address allocation results (for AT placeholder resolution)
+   // Using string->string map to avoid dependency on AddressExpr from CodeGenerator
+   std::unordered_map<std::string, std::string> resolvedATAddresses; // "FBName::varName" -> resolved address string
+
+   // Process Image sizing (copied from CodeGenerator's ProcessImageConfig to avoid dependency)
+   struct ProcessImageConfig
+   {
+      size_t inputBytes = 1024;
+      size_t outputBytes = 1024;
+      size_t markerBytes = 1024;
+      bool autoDetect = true;
+   };
+   ProcessImageConfig piConfig;
+
+   // Fase 6: strictness used and evidence that the semantic model was preserved
+   PreservedSemantics preservedSemantics;
+
+   // Library registry used by the analysis (nullable). Set by the analyzer
+   // overload that accepts a registry; kept as a non-owning pointer to the
+   // single source of truth of the C++ bindings, so the CodeGenerator can
+   // resolve external symbols (Symbol::externalLibraryId) back to their
+   // LibraryDescriptor without duplicating any binding data. The caller must
+   // keep the registry alive while consuming the SemanticInfo.
+   const st2cpp::library::LibraryRegistry* libraryRegistry = nullptr;
+
+   bool empty() const { return symbolTable == nullptr; }
 };
 
 } // namespace st2cpp::semantic

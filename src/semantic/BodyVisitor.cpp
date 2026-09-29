@@ -235,13 +235,13 @@ void BodyVisitor::visitStatementList(const std::vector<std::shared_ptr<Stmt>>& s
  */
 void BodyVisitor::visitStatement(const Stmt& stmt)
 {
-if (auto p = std::get_if<AssignStmt>(&stmt.node)) {
+   if (auto p = std::get_if<AssignStmt>(&stmt.node)) {
       visitAssignStmt(*p, stmt.line, stmt.col);
-    } else if (auto p = std::get_if<ExprStmt>(&stmt.node)) {
+   } else if (auto p = std::get_if<ExprStmt>(&stmt.node)) {
       visitExprStmt(*p);
-    } else if (auto p = std::get_if<IfStmt>(&stmt.node)) {
+   } else if (auto p = std::get_if<IfStmt>(&stmt.node)) {
       visitIfStmt(*p);
-    } else if (auto p = std::get_if<ForStmt>(&stmt.node)) {
+   } else if (auto p = std::get_if<ForStmt>(&stmt.node)) {
       visitForStmt(*p, stmt.line, stmt.col);
    } else if (auto p = std::get_if<WhileStmt>(&stmt.node)) {
       visitWhileStmt(*p);
@@ -757,15 +757,15 @@ void BodyVisitor::visitIndexExpr(Expr& expr)
    for (size_t k = 0; k < index.indices.size() && curType; ++k) {
       // Object must be an array at every step.
       if (curType->kind != TypeKind::Array) {
-         diag_.addError(DiagnosticCode::InvalidArrayIndex,
-                        "index access requires array type, got " + curType->name, loc);
+         diag_.addError(DiagnosticCode::InvalidArrayIndex, "index access requires array type, got " + curType->name, loc);
          resolved = false;
          break;
       }
       const TypeInfo* idxType = symTab_.getType(index.indices[k]->resolvedTypeId);
       if (!idxType || !idxType->isNumeric || idxType->isReal) {
          diag_.addError(DiagnosticCode::InvalidArrayIndex,
-                        "array index must be an integer type, got " + (idxType ? idxType->name : "unknown"), loc);
+                        "array index must be an integer type, got " + (idxType ? idxType->name : "unknown"),
+                        loc);
          resolved = false;
          break;
       }

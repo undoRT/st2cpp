@@ -36,8 +36,8 @@ public:
    uint32_t endCol;
 
    ParseError(const std::string& msg, uint32_t ln, uint32_t c, const std::string& file = "", uint32_t endColumn = 0)
-      : std::runtime_error("Parse error at line " + std::to_string(ln) + ":" + std::to_string(c) + ": " + msg),
-        message(msg), fileName(file), line(ln), col(c), endCol(endColumn)
+      : std::runtime_error("Parse error at line " + std::to_string(ln) + ":" + std::to_string(c) + ": " + msg), message(msg),
+        fileName(file), line(ln), col(c), endCol(endColumn)
    {}
 };
 

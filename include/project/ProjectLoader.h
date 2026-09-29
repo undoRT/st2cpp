@@ -34,42 +34,46 @@ namespace st2cpp::project {
 /**
  * @brief A library-loading error with enough context for good diagnostics.
  */
-struct ProjectLibraryError {
-    std::string libraryId; // configured id (the offending entry)
-    std::string path;      // resolved descriptor path
-    std::string message;   // human-readable cause
+struct ProjectLibraryError
+{
+   std::string libraryId; // configured id (the offending entry)
+   std::string path;      // resolved descriptor path
+   std::string message;   // human-readable cause
 
-    std::string toString() const {
-        std::string out = "library '" + libraryId + "'";
-        if (!path.empty()) {
-            out += " (" + path + ")";
-        }
-        out += ": " + message;
-        return out;
-    }
+   std::string toString() const
+   {
+      std::string out = "library '" + libraryId + "'";
+      if (!path.empty()) {
+         out += " (" + path + ")";
+      }
+      out += ": " + message;
+      return out;
+   }
 };
 
 /**
  * @brief Result of loading the configured libraries.
  */
-struct ProjectLibraryResult {
-    library::LibraryRegistry registry;   // libraries actually loaded
-    std::vector<ProjectLibraryError> errors;
+struct ProjectLibraryResult
+{
+   library::LibraryRegistry registry; // libraries actually loaded
+   std::vector<ProjectLibraryError> errors;
 
-    bool ok() const { return errors.empty(); }
+   bool ok() const { return errors.empty(); }
 };
 
 /**
  * @brief ProjectConfig -> LibraryRegistry loader.
  */
-class ProjectLoader {
+class ProjectLoader
+{
 public:
-    /**
+   /**
      * @brief Load every configured library descriptor into a new registry.
      * @param config The validated project configuration
      * @return Registry with the loaded libraries plus aggregated errors
      */
-    static ProjectLibraryResult load(const ProjectConfig& config);
+   static ProjectLibraryResult load(const ProjectConfig& config);
 };
 
 } // namespace st2cpp::project

@@ -78,11 +78,10 @@ void SemanticBridge::reportBindingIncomplete(const std::string& entity, const st
    loc.fileName = "<library>";
    loc.line = 0;
    loc.column = 0;
-   m_semanticInfo->diagnostics.addWarning(
-       st2cpp::semantic::DiagnosticCode::ExternalBindingIncomplete,
-       "external symbol '" + entity + "': C++ binding field '" + what +
-           "' is missing or incomplete; falling back to the ST spelling",
-       loc);
+   m_semanticInfo->diagnostics.addWarning(st2cpp::semantic::DiagnosticCode::ExternalBindingIncomplete,
+                                          "external symbol '" + entity + "': C++ binding field '" + what
+                                             + "' is missing or incomplete; falling back to the ST spelling",
+                                          loc);
 }
 
 /**
@@ -191,8 +190,7 @@ std::string SemanticBridge::semanticEnumeratorCppName(st2cpp::semantic::TypeId e
       return m_identifiers.ident(stMemberName);
    }
    for (const auto& member : def->members) {
-      if (st2cpp::library::LibraryDescriptor::makeKey(member.name) ==
-          st2cpp::library::LibraryDescriptor::makeKey(stMemberName)) {
+      if (st2cpp::library::LibraryDescriptor::makeKey(member.name) == st2cpp::library::LibraryDescriptor::makeKey(stMemberName)) {
          return member.name;
       }
    }
@@ -445,8 +443,7 @@ std::optional<FunctionSignature> SemanticBridge::semanticSignatureForCall(const 
       // Marking every parameter as an input made an external VAR_OUTPUT receive
       // a setter call, and turned the "OUT without name" diagnostic in the call
       // emitter into dead code.
-      pi.isInput = (p->paramDir != st2cpp::semantic::ParamDir::Output
-         && p->paramDir != st2cpp::semantic::ParamDir::InOut);
+      pi.isInput = (p->paramDir != st2cpp::semantic::ParamDir::Output && p->paramDir != st2cpp::semantic::ParamDir::InOut);
       pi.isOutputVar = (p->paramDir == st2cpp::semantic::ParamDir::Output);
       const st2cpp::semantic::TypeInfo* pt = st->getType(p->typeId);
       pi.type.base = BaseType::NAMED;

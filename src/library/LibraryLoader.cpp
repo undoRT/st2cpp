@@ -468,8 +468,8 @@ private:
       }
       if (desc_.schemaVersion != kSchemaVersion10 && desc_.schemaVersion != kSchemaVersion11) {
          error("$schemaVersion",
-               "unsupported schemaVersion '" + desc_.schemaVersion + "'; supported versions are '"
-                   + std::string(kSchemaVersion10) + "' and '" + kSchemaVersion11 + "'");
+               "unsupported schemaVersion '" + desc_.schemaVersion + "'; supported versions are '" + std::string(kSchemaVersion10)
+                  + "' and '" + kSchemaVersion11 + "'");
       }
 
       requireString(root, "id", "id", desc_.id);
@@ -759,17 +759,17 @@ private:
             error(path, "expected an object");
             continue;
          }
-          FunctionDef f;
-          requireString(o, "name", path, f.name);
-          const JsonValue* cb = o.find("cppBinding");
-          if (cb) {
-             if (!cb->isObject()) {
-                error(path + ".cppBinding", "expected an object");
-             } else {
-                f.hasCppBinding = true;
-                parseFunctionBinding(*cb, path + ".cppBinding", f.cppBinding);
-             }
-          }
+         FunctionDef f;
+         requireString(o, "name", path, f.name);
+         const JsonValue* cb = o.find("cppBinding");
+         if (cb) {
+            if (!cb->isObject()) {
+               error(path + ".cppBinding", "expected an object");
+            } else {
+               f.hasCppBinding = true;
+               parseFunctionBinding(*cb, path + ".cppBinding", f.cppBinding);
+            }
+         }
          const JsonValue* rt = o.find("returnType");
          if (!rt || !rt->isObject()) {
             error(path, "missing required member 'returnType'");
@@ -814,19 +814,19 @@ private:
             error(path, "expected an object");
             continue;
          }
-          FunctionBlockDef fb;
-          requireString(o, "name", path, fb.name);
-          const JsonValue* cb = o.find("cppBinding");
-          if (cb) {
-             if (!cb->isObject()) {
-                error(path + ".cppBinding", "expected an object");
-             } else {
-                fb.hasCppBinding = true;
-                fb.cppBinding = FbCppBinding{};
-                requireString(*cb, "instanceType", path + ".cppBinding", fb.cppBinding.instanceType);
-                requireString(*cb, "call", path + ".cppBinding", fb.cppBinding.call);
-             }
-          }
+         FunctionBlockDef fb;
+         requireString(o, "name", path, fb.name);
+         const JsonValue* cb = o.find("cppBinding");
+         if (cb) {
+            if (!cb->isObject()) {
+               error(path + ".cppBinding", "expected an object");
+            } else {
+               fb.hasCppBinding = true;
+               fb.cppBinding = FbCppBinding{};
+               requireString(*cb, "instanceType", path + ".cppBinding", fb.cppBinding.instanceType);
+               requireString(*cb, "call", path + ".cppBinding", fb.cppBinding.call);
+            }
+         }
          const JsonValue* params = o.find("parameters");
          if (params) {
             if (!params->isArray()) {

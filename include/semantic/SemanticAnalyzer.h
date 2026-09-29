@@ -25,24 +25,25 @@ namespace semantic {
  * Produces SemanticInfo containing SymbolTable, Diagnostics, and pre-computed maps.
  * CodeGenerator can optionally use this for improved diagnostics and pre-computed data.
  */
-class SemanticAnalyzer {
+class SemanticAnalyzer
+{
 public:
-    enum class Strictness {
-        Permissive,   // Unknown constructs -> warning, continue
-        Strict        // Unknown constructs -> error
-    };
-    
-    SemanticAnalyzer() = default;
-    
-    /**
+   enum class Strictness {
+      Permissive, // Unknown constructs -> warning, continue
+      Strict      // Unknown constructs -> error
+   };
+
+   SemanticAnalyzer() = default;
+
+   /**
      * @brief Analyze a translation unit
      * @param tu Translation unit to analyze
      * @param strictness Error handling mode (default: Permissive for migration)
      * @return SemanticInfo with symbol table, diagnostics, and pre-computed data
      */
-    SemanticInfo analyze(const TranslationUnit& tu, Strictness strictness = Strictness::Permissive);
+   SemanticInfo analyze(const TranslationUnit& tu, Strictness strictness = Strictness::Permissive);
 
-    /**
+   /**
      * @brief Analyze a translation unit whose identifier resolution may fall
      * back to an external library registry.
      * @details The external symbols are imported into the analyzer's symbol
@@ -54,25 +55,26 @@ public:
      * @param strictness Error handling mode (default: Permissive for migration)
      * @return SemanticInfo with symbol table, diagnostics, and pre-computed data
      */
-    SemanticInfo analyze(const TranslationUnit& tu, const st2cpp::library::LibraryRegistry& registry,
-        Strictness strictness = Strictness::Permissive);
-    
-    // Access to symbol table for inspection (const)
-    const SymbolTable& getSymbolTable() const { return symTab_; }
-    SymbolTable& getSymbolTable() { return symTab_; }
-    
-    const Diagnostics& getDiagnostics() const { return diagnostics_; }
-    Diagnostics& getDiagnostics() { return diagnostics_; }
-    
-    /**
+   SemanticInfo analyze(const TranslationUnit& tu,
+                        const st2cpp::library::LibraryRegistry& registry,
+                        Strictness strictness = Strictness::Permissive);
+
+   // Access to symbol table for inspection (const)
+   const SymbolTable& getSymbolTable() const { return symTab_; }
+   SymbolTable& getSymbolTable() { return symTab_; }
+
+   const Diagnostics& getDiagnostics() const { return diagnostics_; }
+   Diagnostics& getDiagnostics() { return diagnostics_; }
+
+   /**
      * @brief Set the source file name attached to every reported diagnostic.
      * @details Used by the CLI/tools so diagnostics point at the real input file
      * instead of the default "<input>" placeholder.
      * @param name The source file name (may be a path)
      */
-    void setSourceName(const std::string& name) { sourceName_ = name; }
+   void setSourceName(const std::string& name) { sourceName_ = name; }
 
-    /**
+   /**
      * @brief Resolve identifiers case-sensitively, like C++.
      * @details Off by default, which follows IEC 61131-3 and folds identifiers
      * to uppercase so `name` and `Name` are the same symbol. When enabled the
@@ -83,31 +85,32 @@ public:
      * identifier, exactly as a C++ compiler would.
      * @param value true to enable case-sensitive identifier resolution
      */
-    void setCaseSensitive(bool value) { caseSensitive_ = value; }
-    bool caseSensitive() const { return caseSensitive_; }
-    
+   void setCaseSensitive(bool value) { caseSensitive_ = value; }
+   bool caseSensitive() const { return caseSensitive_; }
+
 private:
-    /**
+   /**
      * @brief Shared analysis pipeline; assumes symTab_/diagnostics_ are reset.
      */
-    SemanticInfo analyzeCore(const TranslationUnit& tu, Strictness strictness);
+   SemanticInfo analyzeCore(const TranslationUnit& tu, Strictness strictness);
 
-    /**
+   /**
      * @brief Apply the identifier case policy to the (freshly reset) table.
      * @details analyze() rebuilds symTab_ from scratch, so the policy has to be
      * re-applied every time rather than set once on the table.
      */
-    void applyCasePolicy(Strictness strictness) {
-        symTab_.setCaseSensitive(caseSensitive_);
-        symTab_.setCaseFallback(caseSensitive_ && strictness != Strictness::Strict);
-    }
+   void applyCasePolicy(Strictness strictness)
+   {
+      symTab_.setCaseSensitive(caseSensitive_);
+      symTab_.setCaseFallback(caseSensitive_ && strictness != Strictness::Strict);
+   }
 
-    SymbolTable symTab_;
-    Diagnostics diagnostics_;
-    std::string sourceName_ = "<input>";
-    bool caseSensitive_ = false;
+   SymbolTable symTab_;
+   Diagnostics diagnostics_;
+   std::string sourceName_ = "<input>";
+   bool caseSensitive_ = false;
 };
 
-} // namespace st2cpp::semantic
+} // namespace semantic
 
 } // namespace st2cpp

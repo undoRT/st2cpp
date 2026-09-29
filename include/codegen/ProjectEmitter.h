@@ -26,9 +26,7 @@ namespace st2cpp::codegen {
 class ProjectEmitter
 {
 public:
-   ProjectEmitter(EmissionContext& ctx, BodyEmitter& body, DeclEmitter& decl)
-      : m_ctx(ctx), m_body(body), m_decl(decl)
-   {}
+   ProjectEmitter(EmissionContext& ctx, BodyEmitter& body, DeclEmitter& decl) : m_ctx(ctx), m_body(body), m_decl(decl) {}
 
    CodegenResult generate(const TranslationUnit& tu,
                           const std::string& headerName,

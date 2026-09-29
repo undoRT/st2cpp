@@ -28,22 +28,22 @@ ProjectLibraryResult ProjectLoader::load(const ProjectConfig& config)
       const library::LibraryDescriptor& descriptor = *libResult.descriptor;
 
       if (library::LibraryDescriptor::makeKey(descriptor.id) != library::LibraryDescriptor::makeKey(entry.id)) {
-         result.errors.push_back({entry.id, path,
-            "descriptor id '" + descriptor.id + "' does not match the configured id '" + entry.id + "'"});
+         result.errors.push_back(
+            {entry.id, path, "descriptor id '" + descriptor.id + "' does not match the configured id '" + entry.id + "'"});
          continue;
       }
 
       if (entry.hasVersion) {
          const library::Version version = library::Version::parse(descriptor.version);
          if (!version.valid) {
-            result.errors.push_back({entry.id, path,
-               "descriptor declares an invalid version '" + descriptor.version + "'"});
+            result.errors.push_back({entry.id, path, "descriptor declares an invalid version '" + descriptor.version + "'"});
             continue;
          }
          if (!entry.version.matches(version)) {
-            result.errors.push_back({entry.id, path,
-               "version " + descriptor.version + " of the library does not satisfy constraint '"
-                  + entry.version.raw + "'"});
+            result.errors.push_back(
+               {entry.id,
+                path,
+                "version " + descriptor.version + " of the library does not satisfy constraint '" + entry.version.raw + "'"});
             continue;
          }
       }

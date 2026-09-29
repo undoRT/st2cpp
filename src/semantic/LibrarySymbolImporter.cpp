@@ -21,29 +21,52 @@ namespace {
 const char* baseTypeName(BaseType bt)
 {
    switch (bt) {
-   case BaseType::BOOL: return "BOOL";
-   case BaseType::SINT: return "SINT";
-   case BaseType::INT: return "INT";
-   case BaseType::DINT: return "DINT";
-   case BaseType::LINT: return "LINT";
-   case BaseType::USINT: return "USINT";
-   case BaseType::UINT: return "UINT";
-   case BaseType::UDINT: return "UDINT";
-   case BaseType::ULINT: return "ULINT";
-   case BaseType::REAL: return "REAL";
-   case BaseType::LREAL: return "LREAL";
-   case BaseType::BYTE: return "BYTE";
-   case BaseType::WORD: return "WORD";
-   case BaseType::DWORD: return "DWORD";
-   case BaseType::LWORD: return "LWORD";
-   case BaseType::STRING: return "STRING";
-   case BaseType::WSTRING: return "WSTRING";
-   case BaseType::TIME: return "TIME";
-   case BaseType::DATE: return "DATE";
-   case BaseType::DT: return "DT";
-   case BaseType::TOD: return "TOD";
-   case BaseType::VOID: return "VOID";
-   case BaseType::NAMED: return "VOID"; // unreachable for primitives
+   case BaseType::BOOL:
+      return "BOOL";
+   case BaseType::SINT:
+      return "SINT";
+   case BaseType::INT:
+      return "INT";
+   case BaseType::DINT:
+      return "DINT";
+   case BaseType::LINT:
+      return "LINT";
+   case BaseType::USINT:
+      return "USINT";
+   case BaseType::UINT:
+      return "UINT";
+   case BaseType::UDINT:
+      return "UDINT";
+   case BaseType::ULINT:
+      return "ULINT";
+   case BaseType::REAL:
+      return "REAL";
+   case BaseType::LREAL:
+      return "LREAL";
+   case BaseType::BYTE:
+      return "BYTE";
+   case BaseType::WORD:
+      return "WORD";
+   case BaseType::DWORD:
+      return "DWORD";
+   case BaseType::LWORD:
+      return "LWORD";
+   case BaseType::STRING:
+      return "STRING";
+   case BaseType::WSTRING:
+      return "WSTRING";
+   case BaseType::TIME:
+      return "TIME";
+   case BaseType::DATE:
+      return "DATE";
+   case BaseType::DT:
+      return "DT";
+   case BaseType::TOD:
+      return "TOD";
+   case BaseType::VOID:
+      return "VOID";
+   case BaseType::NAMED:
+      return "VOID"; // unreachable for primitives
    }
    return "UNKNOWN";
 }
@@ -61,16 +84,18 @@ SourceLocation LibrarySymbolImporter::makeLocation() const
 
 std::string LibrarySymbolImporter::cacheKey(const std::string& libId, const std::string& name)
 {
-   return st2cpp::library::LibraryDescriptor::makeKey(libId) + "::"
-        + st2cpp::library::LibraryDescriptor::makeKey(name);
+   return st2cpp::library::LibraryDescriptor::makeKey(libId) + "::" + st2cpp::library::LibraryDescriptor::makeKey(name);
 }
 
 ParamDir LibrarySymbolImporter::paramDirection(st2cpp::library::ParamDirection dir) const
 {
    switch (dir) {
-   case st2cpp::library::ParamDirection::In: return ParamDir::Input;
-   case st2cpp::library::ParamDirection::Out: return ParamDir::Output;
-   case st2cpp::library::ParamDirection::InOut: return ParamDir::InOut;
+   case st2cpp::library::ParamDirection::In:
+      return ParamDir::Input;
+   case st2cpp::library::ParamDirection::Out:
+      return ParamDir::Output;
+   case st2cpp::library::ParamDirection::InOut:
+      return ParamDir::InOut;
    }
    return ParamDir::Input;
 }
@@ -83,9 +108,9 @@ const st2cpp::library::LibraryDescriptor* LibrarySymbolImporter::findLibrary(con
 void LibrarySymbolImporter::reportCollision(const std::string& name, const st2cpp::library::LibraryDescriptor& lib)
 {
    diag_.addWarning(DiagnosticCode::ExternalSymbolCollision,
-      "external symbol '" + name + "' from library '" + lib.id
-         + "' is ignored: a symbol with the same name was already imported from an earlier library",
-      makeLocation());
+                    "external symbol '" + name + "' from library '" + lib.id
+                       + "' is ignored: a symbol with the same name was already imported from an earlier library",
+                    makeLocation());
 }
 
 void LibrarySymbolImporter::import(const st2cpp::library::LibraryRegistry& registry)
@@ -127,12 +152,12 @@ void LibrarySymbolImporter::importEnum(const st2cpp::library::EnumTypeDef& e, co
    if (importedTypes_.find(key) != importedTypes_.end()) {
       return;
    }
-const SymbolId symId = symTab_.declareExternal(e.name, SymbolKind::Type, 0, owner.id);
-    if (symId == 0) {
-       reportCollision(e.name, owner);
-       return;
-    }
-    Symbol* sym = symTab_.get(symId);
+   const SymbolId symId = symTab_.declareExternal(e.name, SymbolKind::Type, 0, owner.id);
+   if (symId == 0) {
+      reportCollision(e.name, owner);
+      return;
+   }
+   Symbol* sym = symTab_.get(symId);
 
    TypeInfo typeInfo;
    typeInfo.kind = TypeKind::Enum;
@@ -165,15 +190,15 @@ void LibrarySymbolImporter::importStruct(const st2cpp::library::StructTypeDef& s
    if (importedTypes_.find(key) != importedTypes_.end()) {
       return;
    }
-const SymbolId symId = symTab_.declareExternal(s.name, SymbolKind::Type, 0, owner.id);
-    if (symId == 0) {
-       reportCollision(s.name, owner);
-       return;
-    }
-    Symbol* sym = symTab_.get(symId);
+   const SymbolId symId = symTab_.declareExternal(s.name, SymbolKind::Type, 0, owner.id);
+   if (symId == 0) {
+      reportCollision(s.name, owner);
+      return;
+   }
+   Symbol* sym = symTab_.get(symId);
 
-    TypeInfo typeInfo;
-    typeInfo.kind = TypeKind::Struct;
+   TypeInfo typeInfo;
+   typeInfo.kind = TypeKind::Struct;
    typeInfo.name = s.name;
    typeInfo.symbolId = symId;
    const TypeId typeId = symTab_.registerType(typeInfo);
@@ -191,7 +216,8 @@ const SymbolId symId = symTab_.declareExternal(s.name, SymbolKind::Type, 0, owne
       const SymbolId fieldSymId = symTab_.declare(field.name, SymbolKind::StructMember, fieldTypeId);
       if (fieldSymId == 0) {
          diag_.addError(DiagnosticCode::DuplicateDeclaration,
-            "duplicate struct member '" + field.name + "' in type '" + s.name + "'", makeLocation());
+                        "duplicate struct member '" + field.name + "' in type '" + s.name + "'",
+                        makeLocation());
          continue;
       }
       if (Symbol* fieldSym = symTab_.get(fieldSymId)) {
@@ -228,7 +254,8 @@ void LibrarySymbolImporter::importFunction(const st2cpp::library::FunctionDef& f
       const SymbolId paramSymId = symTab_.declare(param.name, SymbolKind::Parameter, paramTypeId);
       if (paramSymId == 0) {
          diag_.addError(DiagnosticCode::DuplicateDeclaration,
-            "duplicate parameter '" + param.name + "' in function '" + f.name + "'", makeLocation());
+                        "duplicate parameter '" + param.name + "' in function '" + f.name + "'",
+                        makeLocation());
          continue;
       }
       if (Symbol* paramSym = symTab_.get(paramSymId)) {
@@ -244,7 +271,8 @@ void LibrarySymbolImporter::importFunction(const st2cpp::library::FunctionDef& f
    }
 }
 
-void LibrarySymbolImporter::importFunctionBlock(const st2cpp::library::FunctionBlockDef& fb, const st2cpp::library::LibraryDescriptor& owner)
+void LibrarySymbolImporter::importFunctionBlock(const st2cpp::library::FunctionBlockDef& fb,
+                                                const st2cpp::library::LibraryDescriptor& owner)
 {
    const SymbolId symId = symTab_.declareExternal(fb.name, SymbolKind::FunctionBlock, 0, owner.id);
    if (symId == 0) {
@@ -269,7 +297,8 @@ void LibrarySymbolImporter::importFunctionBlock(const st2cpp::library::FunctionB
       const SymbolId paramSymId = symTab_.declare(param.name, SymbolKind::Parameter, paramTypeId);
       if (paramSymId == 0) {
          diag_.addError(DiagnosticCode::DuplicateDeclaration,
-            "duplicate parameter '" + param.name + "' in function block '" + fb.name + "'", makeLocation());
+                        "duplicate parameter '" + param.name + "' in function block '" + fb.name + "'",
+                        makeLocation());
          continue;
       }
       if (Symbol* paramSym = symTab_.get(paramSymId)) {
@@ -290,13 +319,13 @@ void LibrarySymbolImporter::importFunctionBlock(const st2cpp::library::FunctionB
       const SymbolId memberSymId = symTab_.declare(member.name, SymbolKind::Variable, memberTypeId);
       if (memberSymId == 0) {
          diag_.addError(DiagnosticCode::DuplicateDeclaration,
-            "duplicate member '" + member.name + "' in function block '" + fb.name + "'", makeLocation());
+                        "duplicate member '" + member.name + "' in function block '" + fb.name + "'",
+                        makeLocation());
          continue;
       }
       if (Symbol* memberSym = symTab_.get(memberSymId)) {
          memberSym->typeId = memberTypeId;
-         memberSym->isConstant =
-            member.storage == st2cpp::library::FbMemberStorage::Constant;
+         memberSym->isConstant = member.storage == st2cpp::library::FbMemberStorage::Constant;
          memberSym->isRetain = member.storage == st2cpp::library::FbMemberStorage::Retain;
          memberSym->hasDefaultValue = member.initValue.kind != st2cpp::library::InitKind::None;
       }
@@ -326,7 +355,8 @@ void LibrarySymbolImporter::importFunctionBlock(const st2cpp::library::FunctionB
       const SymbolId methodSymId = symTab_.declare(method.name, SymbolKind::Method);
       if (methodSymId == 0) {
          diag_.addError(DiagnosticCode::DuplicateDeclaration,
-            "duplicate method '" + method.name + "' in function block '" + fb.name + "'", makeLocation());
+                        "duplicate method '" + method.name + "' in function block '" + fb.name + "'",
+                        makeLocation());
          continue;
       }
 
@@ -374,7 +404,7 @@ void LibrarySymbolImporter::importFunctionBlock(const st2cpp::library::FunctionB
          }
       }
    }
-   (void)stateIds;
+   (void) stateIds;
 
    // Cache the FB type under its library-qualified key so that repeated
    // references to this FB type (params, members, globals) resolve to the
@@ -384,28 +414,28 @@ void LibrarySymbolImporter::importFunctionBlock(const st2cpp::library::FunctionB
 
 void LibrarySymbolImporter::importConstant(const st2cpp::library::Constant& c, const st2cpp::library::LibraryDescriptor& owner)
 {
-const SymbolId symId = symTab_.declareExternal(c.name, SymbolKind::Variable, 0, owner.id);
-    if (symId == 0) {
-       reportCollision(c.name, owner);
-       return;
-    }
-    if (Symbol* sym = symTab_.get(symId)) {
-       sym->typeId = resolveLibraryType(c.type, owner);
-       sym->isConstant = true;
-    }
+   const SymbolId symId = symTab_.declareExternal(c.name, SymbolKind::Variable, 0, owner.id);
+   if (symId == 0) {
+      reportCollision(c.name, owner);
+      return;
+   }
+   if (Symbol* sym = symTab_.get(symId)) {
+      sym->typeId = resolveLibraryType(c.type, owner);
+      sym->isConstant = true;
+   }
 }
 
 void LibrarySymbolImporter::importGlobalVariable(const st2cpp::library::GlobalVariable& g, const st2cpp::library::LibraryDescriptor& owner)
 {
-const SymbolId symId = symTab_.declareExternal(g.name, SymbolKind::Variable, 0, owner.id);
-    if (symId == 0) {
-       reportCollision(g.name, owner);
-       return;
-    }
-    if (Symbol* sym = symTab_.get(symId)) {
-       sym->typeId = resolveLibraryType(g.type, owner);
-       sym->isConstant = g.constant;
-    }
+   const SymbolId symId = symTab_.declareExternal(g.name, SymbolKind::Variable, 0, owner.id);
+   if (symId == 0) {
+      reportCollision(g.name, owner);
+      return;
+   }
+   if (Symbol* sym = symTab_.get(symId)) {
+      sym->typeId = resolveLibraryType(g.type, owner);
+      sym->isConstant = g.constant;
+   }
 }
 
 TypeId LibrarySymbolImporter::resolveLibraryType(const st2cpp::library::TypeRef& ref, const st2cpp::library::LibraryDescriptor& owner)
@@ -443,8 +473,9 @@ TypeId LibrarySymbolImporter::resolveLibraryType(const st2cpp::library::TypeRef&
          lib = findLibrary(ref.library);
          if (!lib) {
             diag_.addError(DiagnosticCode::InvalidTypeName,
-               "unknown external library '" + ref.library + "' referenced by type '" + ref.name
-                  + "' of library '" + owner.id + "'", makeLocation());
+                           "unknown external library '" + ref.library + "' referenced by type '" + ref.name + "' of library '" + owner.id
+                              + "'",
+                           makeLocation());
             return 0;
          }
       }
@@ -465,21 +496,21 @@ TypeId LibrarySymbolImporter::resolveLibraryType(const st2cpp::library::TypeRef&
          importFunctionBlock(*fb, *lib);
          return importedTypes_[key];
       }
-      diag_.addError(DiagnosticCode::InvalidTypeName,
-         "unknown type '" + ref.name + "' in library '" + lib->id + "'",
-         makeLocation());
+      diag_.addError(DiagnosticCode::InvalidTypeName, "unknown type '" + ref.name + "' in library '" + lib->id + "'", makeLocation());
       return 0;
    }
    }
    return 0;
 }
 
-TypeId LibrarySymbolImporter::resolvePrimitiveType(st2cpp::library::TypeRefKind kind, BaseType primitive, const st2cpp::library::LibraryDescriptor& owner)
+TypeId LibrarySymbolImporter::resolvePrimitiveType(st2cpp::library::TypeRefKind kind,
+                                                   BaseType primitive,
+                                                   const st2cpp::library::LibraryDescriptor& owner)
 {
    if (kind != st2cpp::library::TypeRefKind::Primitive) {
       return 0;
    }
-   (void)owner;
+   (void) owner;
    return symTab_.getTypeIdByName(baseTypeName(primitive));
 }
 

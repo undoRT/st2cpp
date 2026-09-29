@@ -50,10 +50,14 @@ void addBool(JsonValue& obj, const std::string& key, bool value)
 const char* fbMemberStorageName(FbMemberStorage storage)
 {
    switch (storage) {
-      case FbMemberStorage::Var: return "VAR";
-      case FbMemberStorage::Temp: return "VAR_TEMP";
-      case FbMemberStorage::Retain: return "VAR RETAIN";
-      case FbMemberStorage::Constant: return "VAR CONSTANT";
+   case FbMemberStorage::Var:
+      return "VAR";
+   case FbMemberStorage::Temp:
+      return "VAR_TEMP";
+   case FbMemberStorage::Retain:
+      return "VAR RETAIN";
+   case FbMemberStorage::Constant:
+      return "VAR CONSTANT";
    }
    return "VAR";
 }
@@ -61,9 +65,12 @@ const char* fbMemberStorageName(FbMemberStorage storage)
 const char* fbMethodVisibilityName(FbMethodVisibility visibility)
 {
    switch (visibility) {
-      case FbMethodVisibility::Private: return "private";
-      case FbMethodVisibility::Protected: return "protected";
-      case FbMethodVisibility::Public: return "public";
+   case FbMethodVisibility::Private:
+      return "private";
+   case FbMethodVisibility::Protected:
+      return "protected";
+   case FbMethodVisibility::Public:
+      return "public";
    }
    return "public";
 }
@@ -449,17 +456,17 @@ JsonValue LibrarySerializer::toJsonValue(const LibraryDescriptor& desc)
       for (const FunctionDef& f : desc.functions) {
          JsonValue o;
          o.type = JsonType::Object;
-          addString(o, "name", f.name);
-          if (f.hasCppBinding) {
-             JsonValue cb;
-             cb.type = JsonType::Object;
-             addString(cb, "symbol", f.cppBinding.symbol);
-             addString(cb, "kind", f.cppBinding.kind == FunctionBindingKind::StaticMethod ? "staticMethod" : "freeFunction");
-             if (f.cppBinding.kind == FunctionBindingKind::StaticMethod) {
-                addString(cb, "owner", f.cppBinding.owner);
-             }
-             addMember(o, "cppBinding", std::move(cb));
-          }
+         addString(o, "name", f.name);
+         if (f.hasCppBinding) {
+            JsonValue cb;
+            cb.type = JsonType::Object;
+            addString(cb, "symbol", f.cppBinding.symbol);
+            addString(cb, "kind", f.cppBinding.kind == FunctionBindingKind::StaticMethod ? "staticMethod" : "freeFunction");
+            if (f.cppBinding.kind == FunctionBindingKind::StaticMethod) {
+               addString(cb, "owner", f.cppBinding.owner);
+            }
+            addMember(o, "cppBinding", std::move(cb));
+         }
          addMember(o, "returnType", typeRefToJson(f.returnType));
          JsonValue params;
          params.type = JsonType::Array;
@@ -479,14 +486,14 @@ JsonValue LibrarySerializer::toJsonValue(const LibraryDescriptor& desc)
       for (const FunctionBlockDef& fb : desc.functionBlocks) {
          JsonValue o;
          o.type = JsonType::Object;
-          addString(o, "name", fb.name);
-          if (fb.hasCppBinding) {
-             JsonValue cb;
-             cb.type = JsonType::Object;
-             addString(cb, "instanceType", fb.cppBinding.instanceType);
-             addString(cb, "call", fb.cppBinding.call);
-             addMember(o, "cppBinding", std::move(cb));
-          }
+         addString(o, "name", fb.name);
+         if (fb.hasCppBinding) {
+            JsonValue cb;
+            cb.type = JsonType::Object;
+            addString(cb, "instanceType", fb.cppBinding.instanceType);
+            addString(cb, "call", fb.cppBinding.call);
+            addMember(o, "cppBinding", std::move(cb));
+         }
          JsonValue params;
          params.type = JsonType::Array;
          for (const FunParam& p : fb.parameters) {

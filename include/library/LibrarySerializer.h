@@ -24,20 +24,21 @@ namespace st2cpp::library {
 /**
  * @brief LibraryDescriptor -> JSON converter.
  */
-class LibrarySerializer {
+class LibrarySerializer
+{
 public:
-    /**
+   /**
      * @brief Build the JSON document (st2cpp::json::JsonValue) for a descriptor.
      */
-    static json::JsonValue toJsonValue(const LibraryDescriptor& desc);
+   static json::JsonValue toJsonValue(const LibraryDescriptor& desc);
 
-    /**
+   /**
      * @brief Serialize the descriptor to JSON text.
      * @param desc The descriptor to serialize
      * @param indent Indentation width per nesting level
      * @return The JSON text
      */
-    static std::string toJson(const LibraryDescriptor& desc, int indent = 2);
+   static std::string toJson(const LibraryDescriptor& desc, int indent = 2);
 };
 
 } // namespace st2cpp::library

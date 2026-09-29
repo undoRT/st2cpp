@@ -12,25 +12,23 @@
 #include <algorithm>
 #include <queue>
 
-
 namespace st2cpp::codegen {
 
-
 CodegenResult ProjectEmitter::generate(const TranslationUnit& tu,
-                                      const std::string& headerName,
-                                      const std::string& namespaceName,
-                                      const std::string& runtimeHeader,
-                                      bool caseSensitive)
+                                       const std::string& headerName,
+                                       const std::string& namespaceName,
+                                       const std::string& runtimeHeader,
+                                       bool caseSensitive)
 {
-m_ctx.m_hdrName = headerName;
-    m_ctx.m_namespace = namespaceName;
-    m_ctx.m_runtimeHeader = runtimeHeader;
-    m_ctx.m_caseSensitive = caseSensitive;
+   m_ctx.m_hdrName = headerName;
+   m_ctx.m_namespace = namespaceName;
+   m_ctx.m_runtimeHeader = runtimeHeader;
+   m_ctx.m_caseSensitive = caseSensitive;
    m_ctx.rebuildSemanticComponents();
 
-    // Pre-scan the TU for the libraries actually used (types + symbol refs)
-    // so their descriptor includes can be emitted right after the runtime header.
-    m_ctx.computeLibraryIncludeLines(tu);
+   // Pre-scan the TU for the libraries actually used (types + symbol refs)
+   // so their descriptor includes can be emitted right after the runtime header.
+   m_ctx.computeLibraryIncludeLines(tu);
 
    // Build header guard from filename
    std::string guard = headerName;
@@ -199,15 +197,15 @@ m_ctx.m_hdrName = headerName;
    // Generate Global process image
    if (m_ctx.m_hasAddresses) {
       m_ctx.m_hdr << "// Global Process Image instance\n";
-      m_ctx.m_hdr << "inline ProcessImage<" << m_ctx.m_piConfig.inputBytes << ", " << m_ctx.m_piConfig.outputBytes << ", " << m_ctx.m_piConfig.markerBytes << "> "
-            << m_ctx.m_piConfig.instanceName << ";\n\n";
+      m_ctx.m_hdr << "inline ProcessImage<" << m_ctx.m_piConfig.inputBytes << ", " << m_ctx.m_piConfig.outputBytes << ", "
+                  << m_ctx.m_piConfig.markerBytes << "> " << m_ctx.m_piConfig.instanceName << ";\n\n";
    }
 
-// Resolve TYPE aliases before any variable type is mapped.
-    m_ctx.registerTypeAliases(tu.typeAliases);
+   // Resolve TYPE aliases before any variable type is mapped.
+   m_ctx.registerTypeAliases(tu.typeAliases);
 
-    // Initialize the global scope
-    m_ctx.m_scope.pushScope();
+   // Initialize the global scope
+   m_ctx.m_scope.pushScope();
 
    // Register global variables in the global scope
    for (const auto& sec : tu.globals) {
@@ -446,13 +444,13 @@ std::vector<GeneratedFile> ProjectEmitter::generateModular(const TranslationUnit
    // Pre-scan the TU so the modular headers can include the libraries used.
    m_ctx.computeLibraryIncludeLines(tu);
 
-// Resolve TYPE aliases before any variable type is mapped.
-    m_ctx.registerTypeAliases(tu.typeAliases);
+   // Resolve TYPE aliases before any variable type is mapped.
+   m_ctx.registerTypeAliases(tu.typeAliases);
 
-    // Step 1: Collect all signatures FIRST (before generating anything)
-    for (const auto& pou : tu.pous) {
-       m_decl.collectSignature(pou);
-    }
+   // Step 1: Collect all signatures FIRST (before generating anything)
+   for (const auto& pou : tu.pous) {
+      m_decl.collectSignature(pou);
+   }
 
    // Step 2: Register enum types and their enumerators
    for (const auto& et : tu.enums) {
@@ -647,8 +645,8 @@ std::vector<GeneratedFile> ProjectEmitter::generateModular(const TranslationUnit
       }
 
       piHeader << "// Global Process Image instance\n";
-      piHeader << "inline ProcessImage<" << m_ctx.m_piConfig.inputBytes << ", " << m_ctx.m_piConfig.outputBytes << ", " << m_ctx.m_piConfig.markerBytes
-               << "> " << m_ctx.m_piConfig.instanceName << ";\n\n";
+      piHeader << "inline ProcessImage<" << m_ctx.m_piConfig.inputBytes << ", " << m_ctx.m_piConfig.outputBytes << ", "
+               << m_ctx.m_piConfig.markerBytes << "> " << m_ctx.m_piConfig.instanceName << ";\n\n";
 
       if (!m_ctx.m_namespace.empty()) {
          piHeader << "} // namespace " << m_ctx.m_namespace << "\n";

@@ -531,12 +531,12 @@ void ProcessImageAnalyzer::findAddresses(const std::shared_ptr<Stmt>& stmt)
       [this](const auto& s) {
          using T = std::decay_t<decltype(s)>;
 
-          if constexpr (std::is_same_v<T, AssignStmt>) {
-             findAddressesInExpr(s.lhs);
-             for (const auto& target : s.additionalTargets) {
-                findAddressesInExpr(target);
-             }
-             findAddressesInExpr(s.rhs);
+         if constexpr (std::is_same_v<T, AssignStmt>) {
+            findAddressesInExpr(s.lhs);
+            for (const auto& target : s.additionalTargets) {
+               findAddressesInExpr(target);
+            }
+            findAddressesInExpr(s.rhs);
          } else if constexpr (std::is_same_v<T, ExprStmt>) {
             findAddressesInExpr(s.expr);
          } else if constexpr (std::is_same_v<T, IfStmt>) {

@@ -25,7 +25,8 @@ namespace st2cpp::codegen {
 /**
  * @brief How identifiers are spelled in the generated C++.
  */
-struct IdentifierPolicy {
+struct IdentifierPolicy
+{
    /// true preserves the original case, false folds every identifier to uppercase
    bool caseSensitive = false;
 
@@ -34,7 +35,8 @@ struct IdentifierPolicy {
     * @param str The identifier as written in the ST source
     * @return The spelling to emit in the generated C++
     */
-   std::string apply(const std::string& str) const {
+   std::string apply(const std::string& str) const
+   {
       if (caseSensitive) {
          return str;
       }

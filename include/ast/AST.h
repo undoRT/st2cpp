@@ -81,7 +81,7 @@ struct TypeRef
    std::optional<int> stringLen;    ///< Length for STRING[n]
    uint32_t line = 0;               ///< Where the type name starts (0 = unknown)
    uint32_t col = 0;
-   TypeId resolvedTypeId = 0;       // Semantic analysis: resolved canonical type
+   TypeId resolvedTypeId = 0; // Semantic analysis: resolved canonical type
 };
 
 /**
@@ -528,7 +528,7 @@ struct POU
    std::vector<std::string> implements;
    bool isAbstract = false;
    bool isFinal = false;
-   std::string fileName; // source .st file this POU was declared in
+   std::string fileName;                     // source .st file this POU was declared in
    SymbolId symbolId = 0;                    // Semantic analysis: link to symbol table
    SymbolId baseClassSymbolId = 0;           // EXTENDS resolved
    std::vector<SymbolId> interfaceSymbolIds; // IMPLEMENTS resolved

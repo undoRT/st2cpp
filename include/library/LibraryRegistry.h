@@ -25,52 +25,53 @@ namespace st2cpp::library {
  * @brief Contains the registered libraries, retrievable by id
  * (case-insensitive, IEC 61131-3 style).
  */
-class LibraryRegistry {
+class LibraryRegistry
+{
 public:
-    /**
+   /**
      * @brief Register a library.
      * @param descriptor The validated library descriptor to register
      * @param error Receives a description when registration fails
      * @return true on success; false when the id is already registered
      */
-    bool registerLibrary(LibraryDescriptor descriptor, std::string& error);
+   bool registerLibrary(LibraryDescriptor descriptor, std::string& error);
 
-    bool registerLibrary(LibraryDescriptor descriptor);
+   bool registerLibrary(LibraryDescriptor descriptor);
 
-    /**
+   /**
      * @brief Look up a library by id (case-insensitive).
      * @return pointer to the descriptor, or nullptr when not present
      */
-    const LibraryDescriptor* get(const std::string& id) const;
+   const LibraryDescriptor* get(const std::string& id) const;
 
-    bool contains(const std::string& id) const;
+   bool contains(const std::string& id) const;
 
-    bool remove(const std::string& id);
+   bool remove(const std::string& id);
 
-    void clear() { byId_.clear(); }
+   void clear() { byId_.clear(); }
 
-    size_t size() const { return byId_.size(); }
+   size_t size() const { return byId_.size(); }
 
-    std::vector<std::string> ids() const;
+   std::vector<std::string> ids() const;
 
-    std::vector<const LibraryDescriptor*> all() const;
+   std::vector<const LibraryDescriptor*> all() const;
 
-    /**
+   /**
      * @brief All registered libraries ordered by normalized id.
      * @details Iteration order of `all()` is unspecified (hash map); this
      * helper gives the deterministic order used by the semantic importer so
      * that symbol collisions between libraries resolve consistently.
      * @return descriptors sorted by uppercase id
      */
-    std::vector<const LibraryDescriptor*> allOrdered() const;
+   std::vector<const LibraryDescriptor*> allOrdered() const;
 
-    /**
+   /**
      * @brief Ids of dependencies declared by `lib` that are not registered.
      */
-    std::vector<std::string> missingDependencies(const LibraryDescriptor& lib) const;
+   std::vector<std::string> missingDependencies(const LibraryDescriptor& lib) const;
 
 private:
-    std::unordered_map<std::string, LibraryDescriptor> byId_;
+   std::unordered_map<std::string, LibraryDescriptor> byId_;
 };
 
 } // namespace st2cpp::library

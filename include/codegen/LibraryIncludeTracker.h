@@ -33,7 +33,8 @@ class SemanticBridge;
 /**
  * @brief Collects the external libraries a translation unit depends on.
  */
-class LibraryIncludeTracker {
+class LibraryIncludeTracker
+{
 public:
    /**
     * @param semantic Read-only access to the analysis that resolves a name to
@@ -63,10 +64,8 @@ public:
    void collectUsedLibrariesFromExpr(const Expr& expr, std::unordered_set<std::string>& used) const;
    void collectUsedLibrariesFromStmt(const Stmt& stmt, std::unordered_set<std::string>& used) const;
    void collectUsedLibrariesFromTypeRef(const TypeRef& tr, std::unordered_set<std::string>& used) const;
-   void recordUsedLibraryForSymbol(const st2cpp::semantic::Symbol& sym,
-                                   std::unordered_set<std::string>& used) const;
-   void recordUsedLibraryForTypeId(st2cpp::semantic::TypeId typeId,
-                                   std::unordered_set<std::string>& used) const;
+   void recordUsedLibraryForSymbol(const st2cpp::semantic::Symbol& sym, std::unordered_set<std::string>& used) const;
+   void recordUsedLibraryForTypeId(st2cpp::semantic::TypeId typeId, std::unordered_set<std::string>& used) const;
 
 private:
    const SemanticBridge& m_semantic;

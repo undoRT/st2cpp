@@ -48,14 +48,15 @@ namespace st2cpp::semantic {
  * value = version constraint text (e.g. "^1.0.0"). Versions are never
  * invented: a used external library without a policy entry is an export error.
  */
-struct LibraryExportOptions {
-    std::string id;          // required, non-empty
-    std::string name;        // required, non-empty
-    std::string version;     // required, semantic version string
-    std::string description; // optional
+struct LibraryExportOptions
+{
+   std::string id;          // required, non-empty
+   std::string name;        // required, non-empty
+   std::string version;     // required, semantic version string
+   std::string description; // optional
 
-    /// External library id (case-insensitive) -> version constraint text.
-    std::map<std::string, std::string> dependencyVersions;
+   /// External library id (case-insensitive) -> version constraint text.
+   std::map<std::string, std::string> dependencyVersions;
 };
 
 /**
@@ -65,13 +66,12 @@ struct LibraryExportOptions {
  * "function block Ton", "global gCounter", "options", "dependencies");
  * `message` explains why it cannot be exported.
  */
-struct LibraryExportError {
-    std::string entity;
-    std::string message;
+struct LibraryExportError
+{
+   std::string entity;
+   std::string message;
 
-    std::string toString() const {
-        return entity.empty() ? message : entity + ": " + message;
-    }
+   std::string toString() const { return entity.empty() ? message : entity + ": " + message; }
 };
 
 /**
@@ -79,22 +79,24 @@ struct LibraryExportError {
  * @details The descriptor is produced best-effort; ok() is true only when it
  * is present AND no error was found. Mirrors LibraryLoadResult semantics.
  */
-struct LibraryExportResult {
-    std::optional<st2cpp::library::LibraryDescriptor> descriptor;
-    std::vector<LibraryExportError> errors;
+struct LibraryExportResult
+{
+   std::optional<st2cpp::library::LibraryDescriptor> descriptor;
+   std::vector<LibraryExportError> errors;
 
-    bool ok() const { return descriptor.has_value() && errors.empty(); }
+   bool ok() const { return descriptor.has_value() && errors.empty(); }
 };
 
 /**
  * @brief TranslationUnit + SemanticInfo -> LibraryDescriptor converter.
  */
-class LibraryDescriptorBuilder {
+class LibraryDescriptorBuilder
+{
 private:
-    struct Impl;
+   struct Impl;
 
 public:
-    /**
+   /**
      * @brief Build a semantic-only LibraryDescriptor for an ST library.
      * @details Entities are emitted in TranslationUnit declaration order
      * (per descriptor section); dependencies are derived from the external
@@ -109,9 +111,7 @@ public:
      * @param options Library identity and dependency version policy
      * @return The export result (descriptor + collected errors)
      */
-    static LibraryExportResult build(const TranslationUnit& tu,
-                                     const SemanticInfo& info,
-                                     const LibraryExportOptions& options);
+   static LibraryExportResult build(const TranslationUnit& tu, const SemanticInfo& info, const LibraryExportOptions& options);
 };
 
 } // namespace st2cpp::semantic

@@ -62,8 +62,7 @@ void parseLibraryEntry(const JsonValue& node, size_t index, std::vector<ProjectC
       } else {
          out.version = library::VersionConstraint::parse(versionNode->text);
          if (!out.version.valid) {
-            errors.push_back({prefix + ".version",
-               "invalid version constraint '" + versionNode->text + "'"});
+            errors.push_back({prefix + ".version", "invalid version constraint '" + versionNode->text + "'"});
          } else {
             out.hasVersion = true;
          }
@@ -98,8 +97,8 @@ ProjectConfigLoadResult ProjectConfigLoader::fromJson(const JsonValue& root)
    } else if (!schemaNode->isString()) {
       result.errors.push_back({"$schemaVersion", "must be a string"});
    } else if (schemaNode->text != kSupportedSchemaVersion) {
-      result.errors.push_back({"$schemaVersion",
-         "unsupported schema version '" + schemaNode->text + "' (supported: " + kSupportedSchemaVersion + ")"});
+      result.errors.push_back(
+         {"$schemaVersion", "unsupported schema version '" + schemaNode->text + "' (supported: " + kSupportedSchemaVersion + ")"});
    } else {
       cfg.schemaVersion = schemaNode->text;
    }

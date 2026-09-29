@@ -12,9 +12,7 @@
 #include <algorithm>
 #include <queue>
 
-
 namespace st2cpp::codegen {
-
 
 static std::string extractArrayElementType(const std::string& arrayType)
 {
@@ -63,49 +61,49 @@ void BodyEmitter::genStmt(const Stmt& stmt)
       [&](const auto& s) {
          using T = std::decay_t<decltype(s)>;
 
-          if constexpr (std::is_same_v<T, AssignStmt>) {
-             std::string chainValue;
-             if (!s.additionalTargets.empty()) {
-                chainValue = "_st2cpp_chain_" + std::to_string(m_ctx.m_scope.getNextTempCounter("chain_assignment"));
-                m_ctx.m_src << m_ctx.ind() << "auto " << chainValue << " = " << genExpr(*s.rhs) << ";\n";
-             }
+         if constexpr (std::is_same_v<T, AssignStmt>) {
+            std::string chainValue;
+            if (!s.additionalTargets.empty()) {
+               chainValue = "_st2cpp_chain_" + std::to_string(m_ctx.m_scope.getNextTempCounter("chain_assignment"));
+               m_ctx.m_src << m_ctx.ind() << "auto " << chainValue << " = " << genExpr(*s.rhs) << ";\n";
+            }
 
-             auto emitAssignment = [&](const std::shared_ptr<Expr>& lhsExpr) {
-                if (!lhsExpr) {
-                   return;
-                }
+            auto emitAssignment = [&](const std::shared_ptr<Expr>& lhsExpr) {
+               if (!lhsExpr) {
+                  return;
+               }
 
-                std::string lhsStr = genExpr(*lhsExpr);
-                std::string rhsStr = chainValue.empty() ? genExpr(*s.rhs) : chainValue;
+               std::string lhsStr = genExpr(*lhsExpr);
+               std::string rhsStr = chainValue.empty() ? genExpr(*s.rhs) : chainValue;
 
-                std::string varName;
-                if (lhsStr.rfind("getPi_", 0) == 0 && lhsStr.length() > 6 && lhsStr.back() == ')') {
-                   varName = lhsStr.substr(6, lhsStr.length() - 8);
-                   auto atOpt = m_ctx.m_scope.lookupATAddress(varName);
-                   if (atOpt) {
-                      m_ctx.m_src << m_ctx.ind() << "setPi_" << varName << "(" << rhsStr << ");\n";
-                      return;
-                   }
-                }
+               std::string varName;
+               if (lhsStr.rfind("getPi_", 0) == 0 && lhsStr.length() > 6 && lhsStr.back() == ')') {
+                  varName = lhsStr.substr(6, lhsStr.length() - 8);
+                  auto atOpt = m_ctx.m_scope.lookupATAddress(varName);
+                  if (atOpt) {
+                     m_ctx.m_src << m_ctx.ind() << "setPi_" << varName << "(" << rhsStr << ");\n";
+                     return;
+                  }
+               }
 
-                if (auto* addr = std::get_if<AddressExpr>(&lhsExpr->node)) {
-                   std::string writeAccess = generateAddressWrite(*addr, rhsStr);
-                   m_ctx.m_src << m_ctx.ind() << writeAccess << ";\n";
-                   return;
-                }
+               if (auto* addr = std::get_if<AddressExpr>(&lhsExpr->node)) {
+                  std::string writeAccess = generateAddressWrite(*addr, rhsStr);
+                  m_ctx.m_src << m_ctx.ind() << writeAccess << ";\n";
+                  return;
+               }
 
-                if (lhsStr == m_ctx.m_currentFunctionName) {
-                   lhsStr = m_ctx.m_currentFunctionName + "_ret";
-                }
-                rhsStr = m_ctx.applySemanticAssignmentCast(*lhsExpr, *s.rhs, rhsStr);
-                m_ctx.m_src << m_ctx.ind() << lhsStr << " = " << rhsStr << ";\n";
-             };
+               if (lhsStr == m_ctx.m_currentFunctionName) {
+                  lhsStr = m_ctx.m_currentFunctionName + "_ret";
+               }
+               rhsStr = m_ctx.applySemanticAssignmentCast(*lhsExpr, *s.rhs, rhsStr);
+               m_ctx.m_src << m_ctx.ind() << lhsStr << " = " << rhsStr << ";\n";
+            };
 
-             emitAssignment(s.lhs);
-             for (const auto& target : s.additionalTargets) {
-                emitAssignment(target);
-             }
-          } else if constexpr (std::is_same_v<T, ExprStmt>) {
+            emitAssignment(s.lhs);
+            for (const auto& target : s.additionalTargets) {
+               emitAssignment(target);
+            }
+         } else if constexpr (std::is_same_v<T, ExprStmt>) {
             // Expression statement (often a function call)
             if (auto* call = std::get_if<CallExpr>(&s.expr->node)) {
                std::string calleeName = genExpr(*call->callee);
@@ -184,7 +182,8 @@ void BodyEmitter::genStmt(const Stmt& stmt)
                               }
                               std::string value = genExpr(*call->args[idx].value);
                               // Use calleeName (includes array index) for the actual call
-                              m_ctx.m_src << m_ctx.ind() << calleeName << ".set_" << m_ctx.normalizeIdent(param.name) << "(" << value << ");\n";
+                              m_ctx.m_src << m_ctx.ind() << calleeName << ".set_" << m_ctx.normalizeIdent(param.name) << "(" << value
+                                          << ");\n";
                               idx++;
                            }
                         }
@@ -202,7 +201,8 @@ void BodyEmitter::genStmt(const Stmt& stmt)
                                   << ": Mixed reference and positional parameters in call to function block '" << calleeName << "'";
                               throw std::runtime_error(oss.str());
                            }
-                           m_ctx.m_src << m_ctx.ind() << calleeName << ".set_" << m_ctx.normalizeIdent(arg.name) << "(" << value << ");\n";
+                           m_ctx.m_src << m_ctx.ind() << calleeName << ".set_" << m_ctx.normalizeIdent(arg.name) << "(" << value
+                                       << ");\n";
                         }
                      }
                   }
@@ -235,7 +235,8 @@ void BodyEmitter::genStmt(const Stmt& stmt)
                      for (const auto& arg : call->args) {
                         std::string value = genExpr(*arg.value);
                         if (arg.isOutput) {
-                           m_ctx.m_src << m_ctx.ind() << value << " = " << calleeName << ".get_" << m_ctx.normalizeIdent(arg.name) << "();\n";
+                           m_ctx.m_src << m_ctx.ind() << value << " = " << calleeName << ".get_" << m_ctx.normalizeIdent(arg.name)
+                                       << "();\n";
                         }
                      }
                   }
@@ -471,12 +472,12 @@ void BodyEmitter::genFor(const ForStmt& s)
 
    if (isNegativeStep) {
       // Negative step: loop while var >= to
-      m_ctx.m_src << m_ctx.ind() << "for (" << loopVarDecl << normalizedVar << " = " << fromExpr << "; " << normalizedVar << " >= " << toExpr << "; "
-            << normalizedVar << " += " << byExpr << ") {\n";
+      m_ctx.m_src << m_ctx.ind() << "for (" << loopVarDecl << normalizedVar << " = " << fromExpr << "; " << normalizedVar
+                  << " >= " << toExpr << "; " << normalizedVar << " += " << byExpr << ") {\n";
    } else {
       // Positive step: loop while var <= to
-      m_ctx.m_src << m_ctx.ind() << "for (" << loopVarDecl << normalizedVar << " = " << fromExpr << "; " << normalizedVar << " <= " << toExpr << "; "
-            << normalizedVar << " += " << byExpr << ") {\n";
+      m_ctx.m_src << m_ctx.ind() << "for (" << loopVarDecl << normalizedVar << " = " << fromExpr << "; " << normalizedVar
+                  << " <= " << toExpr << "; " << normalizedVar << " += " << byExpr << ") {\n";
    }
    m_ctx.push();
    for (const auto& st : s.body) {
@@ -617,19 +618,19 @@ std::string BodyEmitter::genExpr(const Expr& expr, BaseType typeHint)
                return "0" + oct;
             }
 
-// Convert string literal quotes for C++:
-             // STRING (std::string): '...' -> "..."
-             // WSTRING (std::wstring): "..." -> L"..."
-             if (value.size() >= 2) {
-                if (value.front() == '\'' && value.back() == '\'') {
-                   value = "\"" + value.substr(1, value.size() - 2) + "\"";
-                } else if (typeHint == BaseType::WSTRING && value.front() == '"' && value.back() == '"') {
-                   value = "L" + value;
-                }
-             }
+            // Convert string literal quotes for C++:
+            // STRING (std::string): '...' -> "..."
+            // WSTRING (std::wstring): "..." -> L"..."
+            if (value.size() >= 2) {
+               if (value.front() == '\'' && value.back() == '\'') {
+                  value = "\"" + value.substr(1, value.size() - 2) + "\"";
+               } else if (typeHint == BaseType::WSTRING && value.front() == '"' && value.back() == '"') {
+                  value = "L" + value;
+               }
+            }
 
-             return value;
-          } else if constexpr (std::is_same_v<T, BoolLitExpr>) {
+            return value;
+         } else if constexpr (std::is_same_v<T, BoolLitExpr>) {
             return e.value ? "true" : "false";
          } else if constexpr (std::is_same_v<T, IdentExpr>) {
             std::string varName = m_ctx.declaredIdent(e.name, e.symbolId);

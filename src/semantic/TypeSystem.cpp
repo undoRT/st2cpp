@@ -731,7 +731,8 @@ bool checkCallArguments(const std::vector<SymbolId>& paramSymbols,
    // Excess arguments are always an error for every callee kind.
    if (args.size() > paramSymbols.size()) {
       diag.addError(DiagnosticCode::WrongArgumentCount,
-                    "expected " + std::to_string(paramSymbols.size()) + " arguments, got " + std::to_string(args.size()), loc);
+                    "expected " + std::to_string(paramSymbols.size()) + " arguments, got " + std::to_string(args.size()),
+                    loc);
       return false;
    }
 

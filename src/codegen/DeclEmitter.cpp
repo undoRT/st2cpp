@@ -12,9 +12,7 @@
 #include <algorithm>
 #include <queue>
 
-
 namespace st2cpp::codegen {
-
 
 void DeclEmitter::collectSignature(const POU& pou)
 {
@@ -170,11 +168,13 @@ void DeclEmitter::genFunctionBlock(const POU& pou)
          std::string upperName_inst = m_ctx.normalizeIdent(d.name);
          if (sec.kind == VarKind::IN_OUT) {
             m_ctx.m_hdr << m_ctx.ind() << "inline void set_" << upperName_inst << "(" << ctype << "& refVal) { " << upperName_inst
-                  << " = refVal; }\n";
+                        << " = refVal; }\n";
          } else if (sec.kind == VarKind::INPUT) {
-            m_ctx.m_hdr << m_ctx.ind() << "inline void set_" << upperName_inst << "(" << ctype << " val) { " << upperName_inst << " = val; }\n";
+            m_ctx.m_hdr << m_ctx.ind() << "inline void set_" << upperName_inst << "(" << ctype << " val) { " << upperName_inst
+                        << " = val; }\n";
          } else if (sec.kind == VarKind::OUTPUT) {
-            m_ctx.m_hdr << m_ctx.ind() << "inline " << ctype << " get_" << upperName_inst << "() const { return " << upperName_inst << "; }\n";
+            m_ctx.m_hdr << m_ctx.ind() << "inline " << ctype << " get_" << upperName_inst << "() const { return " << upperName_inst
+                        << "; }\n";
          }
       }
    }
