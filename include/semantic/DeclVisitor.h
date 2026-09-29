@@ -108,6 +108,11 @@ private:
     // --- Type Resolution ---
     TypeId resolveTypeRef(const TypeRef& typeRef, uint32_t line = 0, uint32_t col = 0);
     TypeId resolveBaseType(BaseType baseType);
+    /**
+     * @brief Report a built-in type whose spelling differs from its IEC name.
+     * @details No-op unless the identifier case policy is case-sensitive.
+     */
+    void checkBuiltinTypeSpelling(const TypeRef& typeRef, uint32_t line, uint32_t col);
     std::string baseTypeName(BaseType baseType);
     TypeId resolveNamedType(const std::string& name, uint32_t line = 0, uint32_t col = 0);
     

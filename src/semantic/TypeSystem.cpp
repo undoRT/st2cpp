@@ -940,7 +940,7 @@ MemberResult checkMemberAccess(
       }
       for (SymbolId eId : enumSym->enumerators) {
          Symbol* eSym = symTab.get(eId);
-         if (eSym && SymbolTable::normalizeKey(eSym->name) == SymbolTable::normalizeKey(member)) {
+         if (eSym && symTab.nameMatches(eSym->name, member)) {
             result.symbolId = eId;
             result.typeId = eSym->typeId;
             return result;
@@ -968,7 +968,7 @@ MemberResult checkMemberAccess(
 
    for (SymbolId memberId : sym->members) {
       Symbol* memberSym = symTab.get(memberId);
-      if (memberSym && SymbolTable::normalizeKey(memberSym->name) == SymbolTable::normalizeKey(member)) {
+      if (memberSym && symTab.nameMatches(memberSym->name, member)) {
          result.symbolId = memberId;
          result.typeId = memberSym->typeId;
          return result;
@@ -987,7 +987,7 @@ MemberResult checkMemberAccess(
             if (fbs) {
                for (const auto& [fname, fsymId] : fbs->symbols) {
                   Symbol* fsym = symTab.get(fsymId);
-                  if (!fsym || SymbolTable::normalizeKey(fsym->name) != SymbolTable::normalizeKey(member)) {
+                  if (!fsym || !symTab.nameMatches(fsym->name, member)) {
                      continue;
                   }
                   if (fsym->kind != SymbolKind::Method && fsym->kind != SymbolKind::Variable && fsym->kind != SymbolKind::Parameter
@@ -1017,7 +1017,7 @@ MemberResult checkMemberAccess(
          }
          for (SymbolId memberId : ifaceSym->members) {
             Symbol* memberSym = symTab.get(memberId);
-            if (memberSym && SymbolTable::normalizeKey(memberSym->name) == SymbolTable::normalizeKey(member)) {
+            if (memberSym && symTab.nameMatches(memberSym->name, member)) {
                result.symbolId = memberId;
                result.typeId = (memberSym->kind == SymbolKind::Method) ? memberSym->returnTypeId : memberSym->typeId;
                return result;

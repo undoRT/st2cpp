@@ -216,7 +216,7 @@ In-repository technical documentation lives in [`docs/`](docs/README.md):
 | `--namespace <name>` | Set C++ namespace for generated code (default: undoCore) |
 | `--runtime <file>` | Custom runtime header file (default: undoCore/undoCore.hpp) |
 | `--tokens` | Dump token list and exit |
-| `--caseSensitive` | Preserve original case (default: convert to uppercase) |
+| `--caseSensitive` | Preserve original case and resolve identifiers case-sensitively. Under `--strict`, a reference whose case differs from the declaration is undeclared, like in C++ (default: IEC 61131-3, case-insensitive) |
 | `--workspace <path>` | Process all .st files in workspace (recursive) |
 | `--ext-libs <file.json>` | Load external libraries listed in the given Project Configuration JSON (`project.json`) |
 | `--project-style` | Generate modular project structure (separate files for each FB) |

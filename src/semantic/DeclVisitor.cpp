@@ -194,7 +194,7 @@ void DeclVisitor::registerStructHeader(const StructType& st) {
 
     // Open the struct scope now so its ScopeId is stable; members are declared
     // in it during Pass B. The scope is left inactive until then.
-    structScopes_[SymbolTable::normalizeKey(st.name)] = symTab_.pushScope("STRUCT_" + st.name);
+    structScopes_[symTab_.normalizeKey(st.name)] = symTab_.pushScope("STRUCT_" + st.name);
     symTab_.popScope();
 }
 
@@ -213,7 +213,7 @@ void DeclVisitor::registerStructBody(const StructType& st) {
     Symbol* structSym = symTab_.get(structSymId);
     if (!structSym) return;
 
-    auto scopeIt = structScopes_.find(SymbolTable::normalizeKey(st.name));
+    auto scopeIt = structScopes_.find(symTab_.normalizeKey(st.name));
     if (scopeIt == structScopes_.end() || !symTab_.enterScope(scopeIt->second)) {
         return;
     }
@@ -412,7 +412,7 @@ void DeclVisitor::registerInterfaceHeader(const Interface& iface) {
 
     // Open the interface scope now so its ScopeId is stable; methods are
     // declared in it during Pass B. The scope is left inactive until then.
-    interfaceScopes_[SymbolTable::normalizeKey(iface.name)] = symTab_.pushScope("INTERFACE_" + iface.name);
+    interfaceScopes_[symTab_.normalizeKey(iface.name)] = symTab_.pushScope("INTERFACE_" + iface.name);
     symTab_.popScope();
 }
 
@@ -431,7 +431,7 @@ void DeclVisitor::registerInterfaceBody(const Interface& iface) {
     Symbol* ifaceSym = symTab_.get(ifaceSymId);
     if (!ifaceSym) return;
 
-    auto scopeIt = interfaceScopes_.find(SymbolTable::normalizeKey(iface.name));
+    auto scopeIt = interfaceScopes_.find(symTab_.normalizeKey(iface.name));
     if (scopeIt == interfaceScopes_.end() || !symTab_.enterScope(scopeIt->second)) {
         return;
     }
@@ -1417,6 +1417,7 @@ TypeId DeclVisitor::resolveTypeRef(const TypeRef& typeRef, uint32_t line, uint32
         if (typeRef.base == BaseType::NAMED) {
             elementTypeId = resolveNamedType(typeRef.name, line, col);
         } else {
+            checkBuiltinTypeSpelling(typeRef, line, col);
             elementTypeId = resolveBaseType(typeRef.base);
         }
         // Create proper Array TypeInfo
@@ -1458,6 +1459,7 @@ TypeId DeclVisitor::resolveTypeRef(const TypeRef& typeRef, uint32_t line, uint32
     
     // Handle base types
     if (typeRef.base != BaseType::NAMED) {
+        checkBuiltinTypeSpelling(typeRef, line, col);
         return resolveBaseType(typeRef.base);
     }
     
@@ -1470,6 +1472,35 @@ TypeId DeclVisitor::resolveTypeRef(const TypeRef& typeRef, uint32_t line, uint32
  * @param baseType The base type enumerator
  * @return The TypeId of the built-in type, or 0 when unknown
  */
+/**
+ * @brief Check that a built-in type was spelled the way IEC declares it.
+ * @details The parser maps every spelling of a type keyword to the same
+ * BaseType enumerator, so `dint` and `DINT` would otherwise be indistinguishable
+ * and --caseSensitive would be blind to elementary types. TypeRef::name keeps
+ * the spelling as written, which is what is checked here. Silent unless the
+ * identifier case policy is case-sensitive; an error when the policy is
+ * enforcing (--strict), a warning while a mis-cased spelling still resolves.
+ * @param typeRef The type reference being resolved
+ * @param line Line of the type name, for the diagnostic
+ * @param col Column of the type name, for the diagnostic
+ */
+void DeclVisitor::checkBuiltinTypeSpelling(const TypeRef& typeRef, uint32_t line, uint32_t col) {
+    if (!symTab_.caseSensitive() || typeRef.name.empty()) {
+        return;
+    }
+    const std::string canonical = baseTypeName(typeRef.base);
+    if (canonical.empty() || typeRef.name == canonical) {
+        return;
+    }
+    const std::string message = "type name '" + typeRef.name
+        + "' differs in case from the built-in type '" + canonical + "'";
+    if (symTab_.caseFallback()) {
+        diag_.addWarning(DiagnosticCode::CaseMismatch, message, makeLocation(line, col));
+    } else {
+        reportError(DiagnosticCode::InvalidTypeName, message, makeLocation(line, col));
+    }
+}
+
 TypeId DeclVisitor::resolveBaseType(BaseType baseType) {
     static const std::unordered_map<BaseType, std::string> baseTypeNames = {
         {BaseType::BOOL, "BOOL"}, {BaseType::SINT, "SINT"}, {BaseType::INT, "INT"},

@@ -61,6 +61,7 @@ SemanticInfo SemanticAnalyzer::analyze(const TranslationUnit& tu, Strictness str
     diagnostics_ = Diagnostics{};
     diagnostics_.setSourceName(sourceName_);
     symTab_ = SymbolTable{};
+    applyCasePolicy(strictness);
     return analyzeCore(tu, strictness);
 }
 
@@ -80,6 +81,7 @@ SemanticInfo SemanticAnalyzer::analyze(const TranslationUnit& tu,
     diagnostics_ = Diagnostics{};
     diagnostics_.setSourceName(sourceName_);
     symTab_ = SymbolTable{};
+    applyCasePolicy(strictness);
 
     // Phase 0: import external library symbols before any project declaration.
     // Colliding imports become warnings (ExternalSymbolCollision), never errors.
@@ -106,6 +108,21 @@ SemanticInfo SemanticAnalyzer::analyzeCore(const TranslationUnit& tu, Strictness
         bodyVisitor.setStrict(true);
     }
     bodyVisitor.visitTranslationUnit(tu);
+
+    // Every reference that reached its declaration only through the
+    // case-insensitive fallback is a spelling mistake worth reporting, even
+    // though permissive mode still accepted it.
+    if (!symTab_.caseMismatches().empty()) {
+        SourceLocation loc;
+        loc.fileName = sourceName_;
+        for (const auto& mismatch : symTab_.caseMismatches()) {
+            diagnostics_.addWarning(DiagnosticCode::CaseMismatch,
+                "identifier '" + mismatch.written + "' differs in case from the declaration '"
+                   + mismatch.declared + "'",
+                loc);
+        }
+        symTab_.clearCaseMismatches();
+    }
     
     // Build SemanticInfo (the symbol table is moved into the result so that
     // it outlives this analyzer instance)

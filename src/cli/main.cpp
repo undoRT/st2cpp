@@ -35,6 +35,22 @@ namespace fs = std::filesystem;
 
 static bool verbose = false;
 static bool strictMode = false;
+// --caseSensitive: identifiers resolve like in C++, so a reference whose case
+// differs from the declaration is undeclared under --strict. It also governs
+// how the workspace is merged, where two spellings that IEC would fold together
+// are two different declarations.
+static bool caseSensitiveMode = false;
+
+/**
+ * @brief Whether a diagnostic must reach the user regardless of the verbosity gate.
+ * @details Case mismatches are a direct consequence of an explicitly requested
+ * --caseSensitive run, so they are reported even when the run is quiet, instead
+ * of being silently accepted.
+ */
+static bool alwaysReport(const st2cpp::semantic::Diagnostic& d)
+{
+   return d.code == st2cpp::semantic::DiagnosticCode::CaseMismatch;
+}
 
 static bool hasUnresolvableCircularDependency(const st2cpp::semantic::SemanticInfo& info)
 {
@@ -76,6 +92,7 @@ static st2cpp::semantic::SemanticInfo runSemanticAnalysis(
    if (!sourceName.empty()) {
       analyzer.setSourceName(sourceName);
    }
+   analyzer.setCaseSensitive(caseSensitiveMode);
    st2cpp::semantic::SemanticInfo info;
    if (registry != nullptr && registry->size() > 0) {
       info = analyzer.analyze(tu, *registry, strictness);
@@ -83,7 +100,11 @@ static st2cpp::semantic::SemanticInfo runSemanticAnalysis(
       info = analyzer.analyze(tu, strictness);
    }
     const bool fatalCycle = hasUnresolvableCircularDependency(info);
-    if (verbose || strictMode || fatalCycle) {
+    bool hasCaseMismatch = false;
+    for (const auto& d : info.diagnostics.all()) {
+      if (alwaysReport(d)) { hasCaseMismatch = true; break; }
+    }
+    if (verbose || strictMode || fatalCycle || hasCaseMismatch) {
        if (info.diagnostics.totalCount() > 0) {
           info.diagnostics.setSourceText(sourceText);
           // Register every workspace file so a diagnostic can print the
@@ -242,7 +263,10 @@ static void printUsage(const char* prog)
                 "  --tokens             Dump token list and exit\n"
                 "  --strict             Strict IEC 61131-3 mode: block generation on semantic errors\n"
                 "                      (default: permissive, errors never block generation)\n"
-                "  --caseSensitive      Preserve original case (default: convert to uppercase)\n"
+                "  --caseSensitive      Preserve original case in the output and resolve identifiers\n"
+                "                       case-sensitively: under --strict, a reference whose case\n"
+                "                       differs from the declaration is undeclared\n"
+                "                       (default: IEC 61131-3, case-insensitive)\n"
                 "  --workspace <path>   Process all .st files in workspace (recursive)\n"
                 "  --ext-libs <file>    Project JSON listing the external libraries to load\n"
                 "  --project-style      Generate modular project structure (separate files for each FB)\n"
@@ -335,6 +359,8 @@ static void writeFile(const std::string& path, const std::string& content)
  *
  * IEC 61131-3 identifiers are case-insensitive and may be decorated with
  * surrounding whitespace, so workspace merging must compare them ignoring case.
+ * Under --caseSensitive the folding is dropped, so `name` and `Name` are two
+ * distinct declarations and must not be merged into one.
  */
 static std::string normalizedKey(const std::string& name)
 {
@@ -342,7 +368,11 @@ static std::string normalizedKey(const std::string& name)
    key.reserve(name.size());
    for (unsigned char c : name) {
       if (!std::isspace(c)) {
-         key.push_back(static_cast<char>(std::toupper(c)));
+         if (caseSensitiveMode) {
+            key.push_back(static_cast<char>(c));
+         } else {
+            key.push_back(static_cast<char>(std::toupper(c)));
+         }
       }
    }
    return key;
@@ -669,6 +699,7 @@ size_t piMarkerBytes = 1024;
          outputCpp = argv[++i];
       } else if (std::strcmp(argv[i], "--caseSensitive") == 0) {
          caseSensitive = true;
+         caseSensitiveMode = true;
       } else if (std::strcmp(argv[i], "-H") == 0 && i + 1 < argc) {
          outputHpp = argv[++i];
       } else if (std::strcmp(argv[i], "--runtime") == 0 && i + 1 < argc) {

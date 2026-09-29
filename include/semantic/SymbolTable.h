@@ -103,7 +103,7 @@ public:
      * Normalizes a name to an uppercase key so declarations and lookups match
      * regardless of spelling (e.g. `Name` vs `name`).
      */
-    static std::string normalizeKey(const std::string& name) {
+    static std::string asciiUpper(const std::string& name) {
         std::string key;
         key.reserve(name.size());
         for (unsigned char c : name) {
@@ -111,6 +111,104 @@ public:
         }
         return key;
     }
+
+    /**
+     * @brief Case policy of the table, applied to every identifier key.
+     * @details By default the table follows IEC 61131-3 and folds identifiers to
+     * uppercase, so `name` and `Name` are the same symbol. With --caseSensitive
+     * the key is the identifier verbatim and the two become distinct symbols,
+     * which is what makes a mis-cased reference fail to resolve. In that mode
+     * setCaseFallback() decides whether a mis-cased reference still resolves
+     * through the uppercase spelling: off under --strict (the reference is
+     * reported as undeclared, like C++), on in permissive mode.
+     */
+    void setCaseSensitive(bool value) { caseSensitive_ = value; }
+    /**
+     * @brief Whether a mis-cased reference falls back to the uppercase spelling.
+     * @param value true to keep resolving, false to reject the reference
+     */
+    void setCaseFallback(bool value) { caseFallback_ = value; }
+    bool caseSensitive() const { return caseSensitive_; }
+    bool caseFallback() const { return caseFallback_; }
+
+    /**
+     * @brief The lookup key for an identifier under the current case policy.
+     * @return The identifier verbatim in case-sensitive mode, uppercased otherwise
+     */
+    std::string normalizeKey(const std::string& name) const {
+        return caseSensitive_ ? name : asciiUpper(name);
+    }
+
+    /**
+     * @brief Compare two spellings under the current case policy.
+     * @details Case-insensitive by default. In case-sensitive mode two different
+     * spellings match only while the fallback is enabled, so that a permissively
+     * resolved mis-cased reference still reaches the declaration it names.
+     * @return true when a and b name the same identifier
+     */
+    bool nameMatches(const std::string& a, const std::string& b) const {
+        if (a == b) {
+            return true;
+        }
+        return !caseSensitive_ || caseFallback_ ? asciiUpper(a) == asciiUpper(b) : false;
+    }
+
+    /**
+     * @brief Resolve a name in one scope, honouring the case policy.
+     * @details Tries the exact key first; when the fallback is enabled a miss
+     * retries the uppercase spelling and records the mismatch, which
+     * SemanticAnalyzer drains into a warning.
+     * @param scope The scope to search
+     * @param name The identifier as written
+     * @return The resolved SymbolId, or 0 when not found
+     */
+    SymbolId findInScope(const Scope* scope, const std::string& name) const {
+        if (!scope) {
+            return 0;
+        }
+        auto it = scope->symbols.find(normalizeKey(name));
+        if (it != scope->symbols.end()) {
+            return it->second;
+        }
+        if (caseSensitive_ && caseFallback_) {
+            // In case-sensitive mode a declaration is stored under its verbatim
+            // spelling, so the miss cannot be retried with a second key: `Name`
+            // may have been declared `name` or `NAME`. Scan the scope instead.
+            const std::string upper = asciiUpper(name);
+            if (upper != name) {
+                SymbolId found = 0;
+                for (const auto& entry : scope->symbols) {
+                    if (asciiUpper(entry.first) != upper) {
+                        continue;
+                    }
+                    if (found != 0) {
+                        // Two declarations differ only by case: falling back
+                        // would pick one arbitrarily, so report neither and let
+                        // the reference fail rather than guess.
+                        return 0;
+                    }
+                    found = entry.second;
+                }
+                if (found != 0) {
+                    recordCaseMismatch(name, found);
+                    return found;
+                }
+            }
+        }
+        return 0;
+    }
+
+    /**
+     * @brief Identifier spellings that only matched through the case fallback.
+     * @details Filled by findInScope() while the fallback is enabled; the
+     * semantic analyzer turns each entry into a warning and clears the list.
+     */
+    struct CaseMismatch {
+        std::string written;  // spelling used at the reference site
+        std::string declared; // spelling of the declaration it resolved to
+    };
+    const std::vector<CaseMismatch>& caseMismatches() const { return caseMismatches_; }
+    void clearCaseMismatches() { caseMismatches_.clear(); }
 
     SymbolTable() {
         scopes_.reserve(256);
@@ -190,10 +288,7 @@ public:
      * @return the resolved SymbolId, or 0 when not found
      */
     SymbolId lookupGlobal(const std::string& name) const {
-        const Scope* scope = getScope(globalScopeId_);
-        if (!scope) return 0;
-        auto it = scope->symbols.find(normalizeKey(name));
-        return (it != scope->symbols.end()) ? it->second : 0;
+        return findInScope(getScope(globalScopeId_), name);
     }
     /**
      * @brief Id of the external scope that holds library-imported symbols.
@@ -242,10 +337,7 @@ public:
      * @return The resolved SymbolId, or 0 when not found
      */
     SymbolId lookupExternal(const std::string& name) const {
-        const Scope* scope = getScope(externalScopeId_);
-        if (!scope) return 0;
-        auto it = scope->symbols.find(normalizeKey(name));
-        return (it != scope->symbols.end()) ? it->second : 0;
+        return findInScope(getScope(externalScopeId_), name);
     }
     /**
      * @brief Open a child scope of the external scope (STRUCT_<n>, FUNC_<n>,
@@ -300,21 +392,17 @@ public:
         return newId;
     }
     SymbolId lookup(const std::string& name) const {
-        const Scope* scope = getScope(currentScopeId_);
-        if (!scope) return 0;
-        auto it = scope->symbols.find(normalizeKey(name));
-        return (it != scope->symbols.end()) ? it->second : 0;
+        return findInScope(getScope(currentScopeId_), name);
     }
     SymbolId lookupRecursive(const std::string& name) const {
-        std::string key = normalizeKey(name);
         ScopeId scopeId = currentScopeId_;
         while (scopeId != 0) {
+            const SymbolId found = findInScope(getScope(scopeId), name);
+            if (found != 0) {
+                return found;
+            }
             const Scope* scope = getScope(scopeId);
             if (!scope) break;
-            auto it = scope->symbols.find(key);
-            if (it != scope->symbols.end()) {
-                return it->second;
-            }
             scopeId = scope->parentId;
         }
         return 0;
@@ -513,9 +601,22 @@ private:
     std::vector<TypeInfo> types_;
     std::vector<ScopeId> scopeStack_;
     std::unordered_map<std::string, TypeId> typeNameToId_;
+    mutable std::vector<CaseMismatch> caseMismatches_;
+    bool caseSensitive_ = false;
+    bool caseFallback_ = false;
     ScopeId globalScopeId_ = 1;
     ScopeId currentScopeId_ = 1;
     ScopeId externalScopeId_ = 2;
+
+    /**
+     * @brief Note that a reference matched a declaration only by case.
+     * @details Mutable because the lookups that observe the fallback are const.
+     */
+    void recordCaseMismatch(const std::string& written, SymbolId id) const {
+        const Symbol* sym = get(id);
+        caseMismatches_.push_back(
+            CaseMismatch{written, (sym && !sym->name.empty()) ? sym->name : std::string()});
+    }
 };
 
 } // namespace st2cpp::semantic

@@ -169,6 +169,7 @@ if(BUILD_TESTS)
         tests/semantic/test_decl_visitor.cpp
         tests/semantic/test_body_visitor.cpp
         tests/semantic/test_iec_time.cpp
+        tests/semantic/test_case_sensitivity.cpp
         tests/semantic/test_codegen_semantic.cpp
         tests/library/test_json.cpp
         tests/library/test_library_loader.cpp

@@ -79,7 +79,7 @@ TEST_F(BodyVisitorTest, LocalVariableResolution) {
     const Scope* fbScope = symTab.getScope(fbSym->scopeId);
     ASSERT_NE(fbScope, nullptr);
     
-    SymbolId aSymId = fbScope->symbols.find(SymbolTable::normalizeKey("A")) != fbScope->symbols.end() 
+    SymbolId aSymId = fbScope->symbols.find(symTab.normalizeKey("A")) != fbScope->symbols.end() 
         ? fbScope->symbols.at("A") : 0;
     EXPECT_NE(aSymId, 0u);
     
@@ -203,7 +203,7 @@ TEST_F(BodyVisitorTest, ShadowingGlobal) {
     const Scope* fbScope = symTab.getScope(fbSym->scopeId);
     ASSERT_NE(fbScope, nullptr);
     
-    auto it = fbScope->symbols.find(SymbolTable::normalizeKey("Value"));
+    auto it = fbScope->symbols.find(symTab.normalizeKey("Value"));
     EXPECT_NE(it, fbScope->symbols.end());
     
     const Symbol* localSym = symTab.get(it->second);
@@ -246,7 +246,7 @@ TEST_F(BodyVisitorTest, MethodToFBScope) {
     const Scope* fbScope = symTab.getScope(fbSym->scopeId);
     ASSERT_NE(fbScope, nullptr);
     
-    bool foundSpeed = fbScope->symbols.find(SymbolTable::normalizeKey("Speed")) != fbScope->symbols.end();
+    bool foundSpeed = fbScope->symbols.find(symTab.normalizeKey("Speed")) != fbScope->symbols.end();
     EXPECT_TRUE(foundSpeed);
     
     // Check method exists in FB's members (methods are stored in members)
@@ -349,9 +349,9 @@ TEST_F(BodyVisitorTest, NestedIf) {
     const Scope* fbScope = symTab.getScope(fbSym->scopeId);
     ASSERT_NE(fbScope, nullptr);
     
-    bool foundA = fbScope->symbols.find(SymbolTable::normalizeKey("A")) != fbScope->symbols.end();
-    bool foundB = fbScope->symbols.find(SymbolTable::normalizeKey("B")) != fbScope->symbols.end();
-    bool foundC = fbScope->symbols.find(SymbolTable::normalizeKey("C")) != fbScope->symbols.end();
+    bool foundA = fbScope->symbols.find(symTab.normalizeKey("A")) != fbScope->symbols.end();
+    bool foundB = fbScope->symbols.find(symTab.normalizeKey("B")) != fbScope->symbols.end();
+    bool foundC = fbScope->symbols.find(symTab.normalizeKey("C")) != fbScope->symbols.end();
     
     EXPECT_TRUE(foundA);
     EXPECT_TRUE(foundB);
@@ -387,8 +387,8 @@ TEST_F(BodyVisitorTest, ForLoop) {
     const Scope* fbScope = symTab.getScope(fbSym->scopeId);
     ASSERT_NE(fbScope, nullptr);
     
-    bool foundSum = fbScope->symbols.find(SymbolTable::normalizeKey("Sum")) != fbScope->symbols.end();
-    bool foundI = fbScope->symbols.find(SymbolTable::normalizeKey("I")) != fbScope->symbols.end();
+    bool foundSum = fbScope->symbols.find(symTab.normalizeKey("Sum")) != fbScope->symbols.end();
+    bool foundI = fbScope->symbols.find(symTab.normalizeKey("I")) != fbScope->symbols.end();
     
     EXPECT_TRUE(foundSum);
     EXPECT_TRUE(foundI);
@@ -423,8 +423,8 @@ TEST_F(BodyVisitorTest, WhileLoop) {
     const Scope* fbScope = symTab.getScope(fbSym->scopeId);
     ASSERT_NE(fbScope, nullptr);
     
-    bool foundCounter = fbScope->symbols.find(SymbolTable::normalizeKey("Counter")) != fbScope->symbols.end();
-    bool foundLimit = fbScope->symbols.find(SymbolTable::normalizeKey("Limit")) != fbScope->symbols.end();
+    bool foundCounter = fbScope->symbols.find(symTab.normalizeKey("Counter")) != fbScope->symbols.end();
+    bool foundLimit = fbScope->symbols.find(symTab.normalizeKey("Limit")) != fbScope->symbols.end();
     
     EXPECT_TRUE(foundCounter);
     EXPECT_TRUE(foundLimit);
@@ -493,9 +493,9 @@ TEST_F(BodyVisitorTest, BinaryExpression) {
     const Scope* fbScope = symTab.getScope(fbSym->scopeId);
     ASSERT_NE(fbScope, nullptr);
     
-    bool foundA = fbScope->symbols.find(SymbolTable::normalizeKey("A")) != fbScope->symbols.end();
-    bool foundB = fbScope->symbols.find(SymbolTable::normalizeKey("B")) != fbScope->symbols.end();
-    bool foundC = fbScope->symbols.find(SymbolTable::normalizeKey("C")) != fbScope->symbols.end();
+    bool foundA = fbScope->symbols.find(symTab.normalizeKey("A")) != fbScope->symbols.end();
+    bool foundB = fbScope->symbols.find(symTab.normalizeKey("B")) != fbScope->symbols.end();
+    bool foundC = fbScope->symbols.find(symTab.normalizeKey("C")) != fbScope->symbols.end();
     
     EXPECT_TRUE(foundA);
     EXPECT_TRUE(foundB);
@@ -583,7 +583,7 @@ TEST_F(BodyVisitorTest, NestedScopeShadowing) {
     const Scope* outerScope = symTab.getScope(outerSym->scopeId);
     ASSERT_NE(outerScope, nullptr);
     
-    bool foundOuterX = outerScope->symbols.find(SymbolTable::normalizeKey("X")) != outerScope->symbols.end();
+    bool foundOuterX = outerScope->symbols.find(symTab.normalizeKey("X")) != outerScope->symbols.end();
     EXPECT_TRUE(foundOuterX);
     
     // Check method's local X
@@ -603,7 +603,7 @@ TEST_F(BodyVisitorTest, NestedScopeShadowing) {
     const Scope* methodScope = symTab.getScope(methodSym->scopeId);
     ASSERT_NE(methodScope, nullptr);
     
-    bool foundMethodX = methodScope->symbols.find(SymbolTable::normalizeKey("X")) != methodScope->symbols.end();
+    bool foundMethodX = methodScope->symbols.find(symTab.normalizeKey("X")) != methodScope->symbols.end();
     EXPECT_TRUE(foundMethodX);
 }
 
@@ -798,7 +798,7 @@ TEST_F(BodyVisitorTest, IdentifierTypePropagation) {
     const Scope* fbScope = symTab.getScope(fbSym->scopeId);
     ASSERT_NE(fbScope, nullptr);
     
-    auto it = fbScope->symbols.find(SymbolTable::normalizeKey("LocalReal"));
+    auto it = fbScope->symbols.find(symTab.normalizeKey("LocalReal"));
     EXPECT_NE(it, fbScope->symbols.end());
     
     const Symbol* localRealSym = symTab.get(it->second);
@@ -1269,7 +1269,7 @@ TEST_F(BodyVisitorTest, ParameterInitializerScopeVisible) {
     ASSERT_NE(methodScope, nullptr);
     
     // MethodParam should be in method scope
-    EXPECT_NE(methodScope->symbols.find(SymbolTable::normalizeKey("MethodParam")), methodScope->symbols.end());
+    EXPECT_NE(methodScope->symbols.find(symTab.normalizeKey("MethodParam")), methodScope->symbols.end());
     // Param (FB parameter) is in FB scope - verify the scope chain works
     // by checking no UndeclaredIdentifier errors in the analysis
     bool hasUndeclaredErrors = false;
@@ -1332,9 +1332,9 @@ TEST_F(BodyVisitorTest, ForLoopDeclaredVariableResolved) {
     ASSERT_NE(fbScope, nullptr);
     
     // I should be in FB scope
-    EXPECT_NE(fbScope->symbols.find(SymbolTable::normalizeKey("I")), fbScope->symbols.end());
+    EXPECT_NE(fbScope->symbols.find(symTab.normalizeKey("I")), fbScope->symbols.end());
     // Sum should be in FB scope
-    EXPECT_NE(fbScope->symbols.find(SymbolTable::normalizeKey("Sum")), fbScope->symbols.end());
+    EXPECT_NE(fbScope->symbols.find(symTab.normalizeKey("Sum")), fbScope->symbols.end());
 }
 
 TEST_F(BodyVisitorTest, ShadowingVerifiedThroughAST) {
@@ -1362,7 +1362,7 @@ TEST_F(BodyVisitorTest, ShadowingVerifiedThroughAST) {
     const Scope* fbScope = symTab.getScope(fbSym->scopeId);
     
     // Local Value should be found in FB scope
-    auto localIt = fbScope->symbols.find(SymbolTable::normalizeKey("Value"));
+    auto localIt = fbScope->symbols.find(symTab.normalizeKey("Value"));
     ASSERT_NE(localIt, fbScope->symbols.end());
     const Symbol* localSym = symTab.get(localIt->second);
     const TypeInfo* localType = symTab.getType(localSym->typeId);
@@ -1427,8 +1427,8 @@ TEST_F(BodyVisitorTest, MethodIsolationVerifiedThroughAST) {
             ASSERT_NE(methodScope, nullptr);
             
             // Local1 or Local2 should be in the scope
-            bool hasLocal = methodScope->symbols.find(SymbolTable::normalizeKey("Local1")) != methodScope->symbols.end() ||
-                           methodScope->symbols.find(SymbolTable::normalizeKey("Local2")) != methodScope->symbols.end();
+            bool hasLocal = methodScope->symbols.find(symTab.normalizeKey("Local1")) != methodScope->symbols.end() ||
+                           methodScope->symbols.find(symTab.normalizeKey("Local2")) != methodScope->symbols.end();
             EXPECT_TRUE(hasLocal);
         }
     }

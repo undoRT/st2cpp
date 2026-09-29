@@ -107,6 +107,7 @@ enum class DiagnosticCode : uint16_t {
     UnsupportedConstruct         = 9004,
     InvalidTimeLiteral           = 9005,
     SyntaxError                  = 9006,
+    CaseMismatch                  = 9007,
     InternalError                = 9999
 };
 
@@ -164,6 +165,7 @@ inline std::string diagnosticCodeToString(DiagnosticCode code) {
         case DiagnosticCode::UnsupportedConstruct:         return "UnsupportedConstruct";
         case DiagnosticCode::InvalidTimeLiteral:           return "InvalidTimeLiteral";
         case DiagnosticCode::SyntaxError:                  return "SyntaxError";
+        case DiagnosticCode::CaseMismatch:                 return "CaseMismatch";
         case DiagnosticCode::InternalError:                return "InternalError";
         default: return "UnknownCode(" + std::to_string(static_cast<uint16_t>(code)) + ")";
     }

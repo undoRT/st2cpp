@@ -94,6 +94,19 @@ END_TYPE
 (* FUNCTION                                                      *)
 (*****************************************************************)
 
+(* NOTE: the reference to 'vAlue' below is deliberately spelled with a
+   different case than the 'value' parameter declared right below. It is a
+   regression sample for the identifier case policy, not a typo.
+
+     st2cpp stComplex.st                      -> accepted, no diagnostic
+     st2cpp stComplex.st --caseSensitive      -> warning [CaseMismatch]
+                                                  "identifier 'vAlue' differs
+                                                   in case from the
+                                                   declaration 'value'"
+
+   The generated C++ always spells the declared name, so the output compiles
+   in both modes. *)
+
 FUNCTION ClampValue : REAL
     VAR_INPUT
         value : REAL;
@@ -106,7 +119,7 @@ FUNCTION ClampValue : REAL
     ELSIF value > maxValue THEN
         ClampValue := maxValue;
     ELSE
-        ClampValue := value;
+        ClampValue := vAlue;
     END_IF;
 
 END_FUNCTION

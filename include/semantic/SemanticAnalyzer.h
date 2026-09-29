@@ -71,6 +71,20 @@ public:
      * @param name The source file name (may be a path)
      */
     void setSourceName(const std::string& name) { sourceName_ = name; }
+
+    /**
+     * @brief Resolve identifiers case-sensitively, like C++.
+     * @details Off by default, which follows IEC 61131-3 and folds identifiers
+     * to uppercase so `name` and `Name` are the same symbol. When enabled the
+     * symbol table keys identifiers verbatim, so the two become distinct
+     * symbols and a mis-cased reference only resolves when it can fall back to
+     * the uppercase spelling. Combined with Strictness::Strict no fallback is
+     * allowed, and a mis-cased reference is reported as an undeclared
+     * identifier, exactly as a C++ compiler would.
+     * @param value true to enable case-sensitive identifier resolution
+     */
+    void setCaseSensitive(bool value) { caseSensitive_ = value; }
+    bool caseSensitive() const { return caseSensitive_; }
     
 private:
     /**
@@ -78,9 +92,20 @@ private:
      */
     SemanticInfo analyzeCore(const TranslationUnit& tu, Strictness strictness);
 
+    /**
+     * @brief Apply the identifier case policy to the (freshly reset) table.
+     * @details analyze() rebuilds symTab_ from scratch, so the policy has to be
+     * re-applied every time rather than set once on the table.
+     */
+    void applyCasePolicy(Strictness strictness) {
+        symTab_.setCaseSensitive(caseSensitive_);
+        symTab_.setCaseFallback(caseSensitive_ && strictness != Strictness::Strict);
+    }
+
     SymbolTable symTab_;
     Diagnostics diagnostics_;
     std::string sourceName_ = "<input>";
+    bool caseSensitive_ = false;
 };
 
 } // namespace st2cpp::semantic

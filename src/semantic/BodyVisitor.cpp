@@ -1145,9 +1145,12 @@ SymbolId BodyVisitor::lookupInScopeChain(const std::string& name) const
          continue;
       }
 
-      auto itSym = scope->symbols.find(SymbolTable::normalizeKey(name));
+      auto itSym = scope->symbols.find(symTab_.normalizeKey(name));
       if (itSym != scope->symbols.end()) {
          return itSym->second;
+      }
+      if (const SymbolId fallback = symTab_.findInScope(scope, name); fallback != 0) {
+         return fallback;
       }
 
       ScopeId parentId = scope->parentId;
@@ -1156,9 +1159,12 @@ SymbolId BodyVisitor::lookupInScopeChain(const std::string& name) const
          if (!parentScope) {
             break;
          }
-         auto itParent = parentScope->symbols.find(SymbolTable::normalizeKey(name));
+         auto itParent = parentScope->symbols.find(symTab_.normalizeKey(name));
          if (itParent != parentScope->symbols.end()) {
             return itParent->second;
+         }
+         if (const SymbolId fallback = symTab_.findInScope(parentScope, name); fallback != 0) {
+            return fallback;
          }
          parentId = parentScope->parentId;
       }
@@ -1179,9 +1185,12 @@ SymbolId BodyVisitor::lookupInScopeChain(const std::string& name) const
             if (baseSym->scopeId != 0) {
                const Scope* bs = symTab_.getScope(baseSym->scopeId);
                if (bs) {
-                  auto bit = bs->symbols.find(SymbolTable::normalizeKey(name));
+                  auto bit = bs->symbols.find(symTab_.normalizeKey(name));
                   if (bit != bs->symbols.end()) {
                      return bit->second;
+                  }
+                  if (const SymbolId fallback = symTab_.findInScope(bs, name); fallback != 0) {
+                     return fallback;
                   }
                }
             }

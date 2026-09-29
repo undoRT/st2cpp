@@ -980,7 +980,7 @@ TEST_F(DeclVisitorTest, FbTopoOrderIncludesComposition) {
     ASSERT_NE(outerSym, nullptr);
     const Scope* outerScope = symTab.getScope(outerSym->scopeId);
     ASSERT_NE(outerScope, nullptr);
-    auto varIt = outerScope->symbols.find(SymbolTable::normalizeKey("inner"));
+    auto varIt = outerScope->symbols.find(symTab.normalizeKey("inner"));
     ASSERT_NE(varIt, outerScope->symbols.end());
     outerVarId = varIt->second;
     const Symbol* innerVarSym = symTab.get(outerVarId);
@@ -1142,7 +1142,7 @@ TEST_F(DeclVisitorTest, ForwardFBToStruct) {
         // The FB variable st must carry SLate's TypeId
         const Scope* fbScope = symTab.getScope(symTab.get(fbId)->scopeId);
         ASSERT_NE(fbScope, nullptr);
-        auto it = fbScope->symbols.find(st2cpp::semantic::SymbolTable::normalizeKey("st"));
+        auto it = fbScope->symbols.find(symTab.normalizeKey("st"));
         ASSERT_NE(it, fbScope->symbols.end());
         const Symbol* stVar = symTab.get(it->second);
         ASSERT_NE(stVar, nullptr);
