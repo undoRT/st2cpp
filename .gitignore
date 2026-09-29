@@ -83,3 +83,5 @@ examples/semantics/st2cpp
 examples/semantics/generated/
 examples/semantics/test_semantics.cpp
 examples/semantics/test_semantics.hpp
+# ctest artifacts
+Testing/

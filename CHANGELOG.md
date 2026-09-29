@@ -1,5 +1,111 @@
 # Changelog
 
+## [0.4.5] - 2026-09-29
+
+### Changed
+- The code generator is no longer one 7200-line translation unit. It has been
+  split into focused components, each a pure move verified against a golden
+  corpus of generated output: the C++ emitted for every sample is byte-identical
+  before and after, in every mode. The three emitters sit on top of a shared
+  `EmissionContext` and call only into one another, never into each other's guts:
+  - `EmissionContext` owns the state a single run shares: the two output
+    streams, the indent, the scope stack, the maps collected while walking the
+    translation unit, and the collaborators built from the semantic analysis.
+    It emits no line; it only holds what the emitters read and write.
+  - `ProjectEmitter` assembles the files: the flat translation unit and the
+    modular project, one file per function block, function, program and global
+    list, plus the master headers.
+  - `DeclEmitter` emits declarations: function blocks, functions, programs,
+    structs, interfaces, enums, globals and methods, and collects the
+    signatures the bodies need.
+  - `BodyEmitter` emits the statements and expressions that fill a body, and
+    the address read/write and ordered struct-initializer helpers they share.
+  - `SemanticBridge` owns every query the generator makes over the semantic
+    analysis (symbol table, C++ spelling of a type or an enumerator, the
+    callable a call targets, the interface of an external function block, the
+    diagnostic for an incomplete descriptor binding). It only reads: it never
+    touches the output streams, the indent or the scope stack.
+  - `LibraryIncludeTracker` decides which external library headers a
+    translation unit actually needs, and emits them deduplicated in library
+    load order.
+  - `DependencyOrdering` returns the order function blocks and structs must be
+    emitted in, preferring the order the semantic analysis computed and falling
+    back to a topological sort of a name-level dependency graph.
+  - `TypeMapper` turns a Structured Text type into its C++ spelling: the
+    elementary and the named types, how an array or a pointer decorates them,
+    alias resolution, the layout a value takes and the assignment cast a numeric
+    store needs. It deliberately keeps the mixed-case spelling of the runtime
+    aliases (`Int16`, `Float`, ...) and lets only user-defined names follow the
+    identifier policy.
+  - `ProcessImage` holds the AT address allocator (fixed addresses marked
+    occupied, placeholders handed the first free aligned slot, regions grown on
+    demand), the analyzer that sizes each memory area from the addresses a
+    translation unit actually uses, and the IEC address parser both share.
+  - `ScopeManager` owns the symbol scope stack: the C++ type and AT address of
+    each variable, the output-parameter temporary counters, and the base class a
+    `SUPER^` resolves through. Lookup walks from the innermost scope outward.
+
+  `CodeGenerator` is now only the facade: it owns the context and the three
+  emitters and forwards its public entry points to them, so no call site outside
+  the generator moved. `CodegenTypes.h` holds the call-interface value types and
+  the generated-file descriptors, and `IdentifierPolicy.h` holds the identifier
+  case policy, so every component can spell an identifier the same way without
+  sharing state.
+
+### Added
+- `scripts/golden.sh`, the gate that guards the generator split. It compiles
+  every sample under `tests/st_samples` and `examples` in all four modes
+  (default, `--strict`, `--caseSensitive`, modular) and prints one SHA-256 per
+  generated file, header and source alike, plus a hash of the diagnostics.
+  A refactor that changes one byte of output, or moves one diagnostic, breaks
+  the diff. The header used to go unverified: the CLI writes it to the current
+  directory unless `-H` is given, so the harness now pins it explicitly.
+- `examples/complex_example/stComplex.st` doubles as the case-policy sample: one
+  function refers to its `value` parameter as `vAlue`, so `--caseSensitive`
+  reports a `CaseMismatch` warning on a file that compiles cleanly by default.
+- `--caseSensitive` now governs identifier resolution in the semantic phase and
+  no longer only the spelling of the generated code. In that mode identifiers
+  are keyed verbatim, so `name` and `Name` are two distinct symbols and a
+  mis-cased reference is rejected the way a C++ compiler rejects it. The
+  policy covers variables, function and function block names, parameters,
+  struct and interface members, enumerators, user-defined types, the elementary
+  types and the IEC base conversion functions.
+- The elementary types needed a dedicated check: the parser folds every spelling
+  of a type keyword to the same `BaseType` enumerator, so `dint` and `DINT` were
+  indistinguishable and `--caseSensitive` was blind to them. `TypeRef::name`
+  keeps the spelling as written, which is now verified against the IEC name.
+- The three modes are kept apart: the default still follows IEC 61131-3 and folds
+  identifiers to uppercase; `--caseSensitive` alone resolves a mis-cased
+  reference and reports a `CaseMismatch` warning; `--caseSensitive --strict`
+  reports it as an error and blocks generation.
+- A mis-cased reference that permissive mode still resolves is emitted with the
+  declaration's own spelling, so the generated C++ compiles instead of carrying
+  forward a name no declaration introduced.
+- `CaseMismatch` (9007) diagnostic, reported even when the run is otherwise
+  quiet, since it is a direct consequence of an explicitly requested
+  `--caseSensitive`.
+- Workspace merging follows the same policy: under `--caseSensitive` two
+  declarations that differ only in case are no longer merged into one.
+
+### Fixed
+- The signature of an external function block marked every parameter as an
+  input, because the direction recorded on the symbol was discarded. A
+  `VAR_OUTPUT` therefore received a `set_` call instead of being read back, a
+  `VAR_IN_OUT` was treated as a by-value argument, and the "called VAR_OUTPUT
+  without naming it" diagnostic was unreachable. Parameters now bind by their
+  declared direction, and an `OUTPUT` takes a reference type, matching the
+  mapping the code generator builds from the AST for a project-local block.
+- `LibrarySymbolImporter` held a `Symbol*` across the `declare()` calls that
+  populate a function or function block. Symbols are stored in a `std::vector`,
+  so the pointer could dangle once the vector reallocated. The symbol is now
+  re-resolved by id at every write point.
+
+### Known issues
+- In single-file mode `--output-dir` is ignored: both the header and the source
+  are written to the current directory, whatever the flag says. It is honoured
+  only in modular project mode. Use `-H` and `-o` to place the two files, as
+  `scripts/golden.sh` does. Unchanged in this release.
+
 ## [0.4.4] - 2026-09-26
 
 ### Fixed
