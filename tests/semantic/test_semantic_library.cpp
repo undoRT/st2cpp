@@ -360,7 +360,7 @@ TEST(SemanticLibraryImportTest, ImportedFunctionBlockExposesMembersAndMethods)
         "END_FUNCTION_BLOCK\n";
 
     Lexer lexer(st, "motor.st");
-    Parser parser(std::move(lexer.tokenize()), "motor.st");
+    Parser parser(lexer.tokenize(), "motor.st");
     TranslationUnit tu = parser.parseTranslationUnit();
 
     st2cpp::semantic::SemanticAnalyzer analyzer;
@@ -386,7 +386,7 @@ TEST(SemanticLibraryImportTest, ImportedFunctionBlockExposesMembersAndMethods)
         "END_VAR\n"
         "END_PROGRAM\n";
     Lexer clexer(consumer, "main.st");
-    Parser cparser(std::move(clexer.tokenize()), "main.st");
+    Parser cparser(clexer.tokenize(), "main.st");
     TranslationUnit ctu = cparser.parseTranslationUnit();
 
     st2cpp::semantic::SemanticAnalyzer canalyzer;

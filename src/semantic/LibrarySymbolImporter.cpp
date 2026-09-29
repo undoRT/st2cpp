@@ -208,15 +208,20 @@ const SymbolId symId = symTab_.declareExternal(s.name, SymbolKind::Type, 0, owne
 
 void LibrarySymbolImporter::importFunction(const st2cpp::library::FunctionDef& f, const st2cpp::library::LibraryDescriptor& owner)
 {
-const SymbolId symId = symTab_.declareExternal(f.name, SymbolKind::Function, 0, owner.id);
-    if (symId == 0) {
-       reportCollision(f.name, owner);
-       return;
-    }
-    Symbol* sym = symTab_.get(symId);
-    sym->returnTypeId = resolveLibraryType(f.returnType, owner);
+   const SymbolId symId = symTab_.declareExternal(f.name, SymbolKind::Function, 0, owner.id);
+   if (symId == 0) {
+      reportCollision(f.name, owner);
+      return;
+   }
+   // Symbols live in a std::vector: never keep a Symbol* across a declare()
+   // or resolveLibraryType() call, since the container may reallocate and leave
+   // the pointer dangling. Re-resolve by id at every write point instead.
+   const TypeId returnTypeId = resolveLibraryType(f.returnType, owner);
+   if (Symbol* sym = symTab_.get(symId)) {
+      sym->returnTypeId = returnTypeId;
+   }
 
-   const ScopeId funcScope = symTab_.pushExternalScope("FUNC_" + f.name);
+   symTab_.pushExternalScope("FUNC_" + f.name);
    std::vector<SymbolId> paramIds;
    for (const auto& param : f.parameters) {
       const TypeId paramTypeId = resolveLibraryType(param.type, owner);
@@ -234,24 +239,28 @@ const SymbolId symId = symTab_.declareExternal(f.name, SymbolKind::Function, 0, 
       paramIds.push_back(paramSymId);
    }
    symTab_.exitScope();
-   sym->params = std::move(paramIds);
+   if (Symbol* sym = symTab_.get(symId)) {
+      sym->params = std::move(paramIds);
+   }
 }
 
 void LibrarySymbolImporter::importFunctionBlock(const st2cpp::library::FunctionBlockDef& fb, const st2cpp::library::LibraryDescriptor& owner)
 {
-const SymbolId symId = symTab_.declareExternal(fb.name, SymbolKind::FunctionBlock, 0, owner.id);
-    if (symId == 0) {
-       reportCollision(fb.name, owner);
-       return;
-    }
-    Symbol* sym = symTab_.get(symId);
-
+   const SymbolId symId = symTab_.declareExternal(fb.name, SymbolKind::FunctionBlock, 0, owner.id);
+   if (symId == 0) {
+      reportCollision(fb.name, owner);
+      return;
+   }
+   // Re-resolved by id at every write point: the declaration loops below push
+   // into the symbol vector and would dangle a pointer held across them.
    TypeInfo fbType;
    fbType.kind = TypeKind::FunctionBlock;
    fbType.name = fb.name;
    fbType.symbolId = symId;
    const TypeId typeId = symTab_.registerType(fbType);
-   sym->typeId = typeId;
+   if (Symbol* sym = symTab_.get(symId)) {
+      sym->typeId = typeId;
+   }
 
    const ScopeId fbScope = symTab_.pushExternalScope("FB_" + fb.name);
    std::vector<SymbolId> paramIds;
@@ -294,11 +303,13 @@ const SymbolId symId = symTab_.declareExternal(fb.name, SymbolKind::FunctionBloc
       stateIds.push_back(memberSymId);
    }
    symTab_.exitScope();
-   sym->params = std::move(paramIds);
    // DeclVisitor records the scope on the block symbol; doing the same here is
    // what makes the imported members and methods reachable by scope, the way a
    // block declared in source is.
-   sym->scopeId = fbScope;
+   if (Symbol* sym = symTab_.get(symId)) {
+      sym->params = std::move(paramIds);
+      sym->scopeId = fbScope;
+   }
 
    // Methods, each with its own nested scope holding its parameters, mirroring
    // how DeclVisitor lays out a block declared in source. An override replaces
@@ -306,7 +317,7 @@ const SymbolId symId = symTab_.declareExternal(fb.name, SymbolKind::FunctionBloc
    std::vector<SymbolId> methodIds;
    std::vector<std::string> methodNames;
    for (const auto& method : fb.methods) {
-      const std::string key = SymbolTable::normalizeKey(method.name);
+      const std::string key = symTab_.normalizeKey(method.name);
       if (std::find(methodNames.begin(), methodNames.end(), key) != methodNames.end()) {
          continue;
       }
@@ -349,14 +360,18 @@ const SymbolId symId = symTab_.declareExternal(fb.name, SymbolKind::FunctionBloc
    }
    // DeclVisitor stores an FB's methods in `members`; keep the same shape so a
    // consumer walking the symbol table finds them the same way either way.
-   sym->members = std::move(methodIds);
+   if (Symbol* sym = symTab_.get(symId)) {
+      sym->members = std::move(methodIds);
+   }
 
    // The base block, when the descriptor named one, so that inherited
    // parameters and state resolve through the same chain as in source.
    if (!fb.baseType.empty()) {
       const SymbolId baseSymId = symTab_.lookupGlobal(fb.baseType);
       if (baseSymId != 0) {
-         sym->baseClassId = baseSymId;
+         if (Symbol* sym = symTab_.get(symId)) {
+            sym->baseClassId = baseSymId;
+         }
       }
    }
    (void)stateIds;

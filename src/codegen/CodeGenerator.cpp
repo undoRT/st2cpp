@@ -3256,10 +3256,22 @@ std::optional<FunctionSignature> CodeGenerator::semanticSignatureForCall(const C
       }
       ParameterInfo pi;
       pi.name = normalizeIdent(p->name);
-      pi.isInput = true;
+      // The declared direction drives how a call site binds the argument, and it
+      // must match the mapping collectSignature() builds from the AST: only
+      // VAR_INPUT is passed by value, VAR_OUTPUT is read back through a getter
+      // (and takes a reference), VAR_IN_OUT is a required by-reference argument.
+      // Marking every parameter as an input made an external VAR_OUTPUT receive
+      // a setter call, and turned the "OUT without name" diagnostic in the call
+      // emitter into dead code.
+      pi.isInput = (p->paramDir != st2cpp::semantic::ParamDir::Output
+         && p->paramDir != st2cpp::semantic::ParamDir::InOut);
+      pi.isOutputVar = (p->paramDir == st2cpp::semantic::ParamDir::Output);
       const st2cpp::semantic::TypeInfo* pt = st->getType(p->typeId);
       pi.type.base = BaseType::NAMED;
       pi.type.name = pt ? pt->name : "";
+      if (pi.isOutputVar) {
+         pi.type.isRefTo = true;
+      }
       sig.parameters.push_back(pi);
    }
    return sig;

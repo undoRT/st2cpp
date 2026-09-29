@@ -273,3 +273,86 @@ TEST_F(CodegenExternalLibraryTest, ModularHeadersIncludeUsedLibraries)
    EXPECT_TRUE(gvlsSeen);
    EXPECT_TRUE(progSeen);
 }
+// ============================================================================
+// Test — external FB parameter direction drives how a call binds.
+// ============================================================================
+// The signature of an external function block is recovered from the symbol
+// table rather than from the AST, so the declared direction of every parameter
+// is what decides the emitted binding. Marking all of them as inputs made a
+// VAR_OUTPUT receive a setter call and turned the "must be named" diagnostic
+// into dead code.
+
+TEST_F(CodegenExternalLibraryTest, PositionalCallBindsOnlyInputParameters)
+{
+   LibraryRegistry registry = loadRegistry("two_lib_config.json");
+
+   // TON declares IN, PT as inputs and Q, ET as outputs. A positional call
+   // carrying only the two inputs must bind exactly those two.
+   std::string st =
+      "PROGRAM PosInputs\n"
+      "    VAR\n"
+      "        TON : TON;\n"
+      "        Flag : BOOL;\n"
+      "    END_VAR\n"
+      "    TON(TRUE, T#100ms);\n"
+      "END_PROGRAM\n";
+
+   auto code = TestHelper::generateFromSTWithLibraries(st, registry);
+   expectSource(code.source, R"(TON\.set_IN\(true\);)");
+   expectSource(code.source, R"(TON\.set_PT\()");
+   // The outputs are not inputs, and the call carries no argument for them.
+   EXPECT_FALSE(hasMatch(code.source, R"(TON\.set_Q\()"))
+      << "a VAR_OUTPUT must not be bound with a setter\n" << code.source;
+   EXPECT_FALSE(hasMatch(code.source, R"(TON\.set_ET\()"))
+      << "a VAR_OUTPUT must not be bound with a setter\n" << code.source;
+}
+
+TEST_F(CodegenExternalLibraryTest, PositionalCallRejectsUnnamedOutputParameter)
+{
+   LibraryRegistry registry = loadRegistry("two_lib_config.json");
+
+   // A third positional argument lands on Q, which is VAR_OUTPUT. Treating it
+   // as an input would silently emit a setter for a read-only result.
+   std::string st =
+      "PROGRAM PosOutput\n"
+      "    VAR\n"
+      "        TON : TON;\n"
+      "        Flag : BOOL;\n"
+      "    END_VAR\n"
+      "    TON(TRUE, T#100ms, Flag);\n"
+      "END_PROGRAM\n";
+
+   bool rejected = false;
+   try {
+      TestHelper::generateFromSTWithLibraries(st, registry);
+   } catch (const std::exception&) {
+      rejected = true;
+   }
+   EXPECT_TRUE(rejected)
+      << "a positional argument landing on a VAR_OUTPUT must be rejected";
+}
+
+TEST_F(CodegenExternalLibraryTest, PositionalCallRejectsUnnamedInOutParameter)
+{
+   LibraryRegistry registry = loadRegistry("two_lib_config.json");
+
+   // ChannelReader's first parameter is VAR_IN_OUT, which ST requires to be
+   // passed by reference and therefore named at the call site.
+   std::string st =
+      "PROGRAM PosInOut\n"
+      "    VAR\n"
+      "        Reader : ChannelReader;\n"
+      "        Bank : ChannelBank;\n"
+      "    END_VAR\n"
+      "    Reader(Bank, 0);\n"
+      "END_PROGRAM\n";
+
+   bool rejected = false;
+   try {
+      TestHelper::generateFromSTWithLibraries(st, registry);
+   } catch (const std::exception&) {
+      rejected = true;
+   }
+   EXPECT_TRUE(rejected)
+      << "a VAR_IN_OUT passed positionally must be rejected, like in ST";
+}

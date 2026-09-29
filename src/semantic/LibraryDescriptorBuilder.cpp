@@ -724,7 +724,7 @@ SymbolId LibraryDescriptorBuilder::Impl::lookupInScope(ScopeId scopeId, const st
    if (scope == nullptr) {
       return 0;
    }
-   auto it = scope->symbols.find(SymbolTable::normalizeKey(name));
+   auto it = scope->symbols.find(st.normalizeKey(name));
    return (it != scope->symbols.end()) ? it->second : 0;
 }
 
