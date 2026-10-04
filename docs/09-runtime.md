@@ -1,14 +1,14 @@
 # Runtime (`undoCore`)
 
-`undoCore` is a **header-only C++ runtime** shipped with the repository at
-`st2cpp_includes/undoCore/include/undoCore/`. st2cpp maps IEC 61131-3
-elementary types onto these C++ aliases so generated code is plain, portable
-C++17.
+`undoCore` is a **header-only C++ runtime** shipped inside the undoPLC submodule
+at `st2cpp_includes/undoPLC/third_party/undoCore/include/undoCore/`. st2cpp maps
+IEC 61131-3 elementary types onto these C++ aliases so generated code is plain,
+portable C++17.
 
 ## Header layout
 
 ```
-st2cpp_includes/undoCore/include/undoCore/
+st2cpp_includes/undoPLC/third_party/undoCore/include/undoCore/
   undoCore.hpp   # umbrella header (include this in generated code)
   types.hpp      # elementary-type aliases, VAR_IN_OUT wrapper, named types
   memory.cpp     # (conditionally compiled) buffer/IEC-call primitives
@@ -60,15 +60,23 @@ so `T#5s`-style literals lower to plain runtime calls or `constexpr` values.
 
 ## Integration
 
-- **As a submodule**: CMake `add_subdirectory(undoCore)` (header-only).
-- **Externally**: set `ST2CPP_USE_EXTERNAL_UNDOCORE=ON` — requires
-  `find_package(undoCore)`; install/bundle via `ST2CPP_BUNDLE_UNDOCORE`.
-- **Header-only fallback**: when no undoCore CMake project is present, st2cpp
-  toolchains into header-only mode (warns), consuming
-  `st2cpp_includes/undoCore/include` directly.
+- **As a submodule**: `st2cpp_includes/undoPLC`, which carries undoCore as its
+  own nested submodule (`git submodule update --init --recursive`). undoCore is
+  header-only, so nothing needs to be built for it.
+- **Externally**: set `ST2CPP_USE_EXTERNAL_UNDOPLC=ON` — requires
+  `find_package(undoPLC)`; install/bundle via `ST2CPP_BUNDLE_UNDOPLC`.
 
 The generated C++ includes `undoCore/undoCore.hpp` first, then any external
 library headers the descriptors declared (`cppHeader`). The end-to-end examples
 validate the result by compiling the generated translation units with
-`g++ -std=c++17 -fsyntax-only` against the mock library headers and the
+`g++ -std=c++20 -fsyntax-only` against the mock library headers and the
 runtime.
+
+## Beyond `undoCore`: the undoPLC runtime
+
+`undoCore` gives generated code its types. Making it a *running PLC* needs more:
+a scheduler, a logger and real-time threading, which is what undoPLC provides
+and what the generated `Runtime.cpp` (`--tasks`, see
+[`16-task-configuration-spec.md`](16-task-configuration-spec.md)) is built on.
+That runtime is compiled and linked against `libundoPLC.a` — `undoCore` alone
+cannot host it.

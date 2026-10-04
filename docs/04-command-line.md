@@ -17,6 +17,7 @@ st2cpp <input.st> [options]
 | `--caseSensitive` | Preserve original case (default: convert to uppercase) |
 | `--workspace <path>` | Process all `.st` files in a workspace (recursive) |
 | `--ext-libs <file.json>` | Project JSON listing the external libraries to load |
+| `--tasks <tasks.json>` | Task Configuration: which cyclic task runs which programs. Emits an undoPLC runtime (`Runtime.cpp`). Requires `--workspace` and `--project-style` |
 | `--project-style` | Generate a modular project structure (separate files per FB) |
 | `--output-dir <dir>` | Output directory (default: `generated`) |
 | `--pi-auto` | Auto-detect Process Image sizes (default) |
@@ -94,7 +95,31 @@ the modes above. Errors in the project JSON or descriptor loading are printed
 with the full diagnostic list and exit code `1`. See
 `11-external-libraries.md`.
 
-### 5. Export a JSON Library Descriptor
+### 5. PLC runtime (tasks)
+
+```bash
+st2cpp --workspace ./plc --project-style --tasks tasks.json --output-dir build
+```
+
+`--tasks` loads the Task Configuration JSON and, together with the modular
+project, emits one additional file:
+
+```
+build/Runtime.cpp      Master/Worker classes, main(), CPU resolution, shutdown
+```
+
+One `UndoMasterTaskBase` per distinct `plc`, one `UndoWorkerTaskBase` per task,
+each calling the `run()` of its programs in the declared order. The Master runs
+at the finest cycle of its tasks and one priority above all of them.
+
+Requires `--workspace` and `--project-style`, because `Runtime.cpp` includes the
+modular `Programs.hpp`; without them the option is a usage error. A `programs`
+entry that is not a `PROGRAM` POU of the workspace, or a `tasks.json` that fails
+validation, is reported in full and exits `1` with nothing written. The
+generated binary takes `--log2console` to mirror the undoPLC logger to stdout.
+See `16-task-configuration-spec.md`.
+
+### 6. Export a JSON Library Descriptor
 
 ```bash
 st2cpp lib.st --export-descriptor lib.json \
@@ -126,7 +151,7 @@ Exit codes:
 | Code | Meaning |
 |------|---------|
 | `0` | success (also `--help`/`--version`) |
-| `1` | usage error, parse error, generation error, strict-mode block, invalid `--ext-libs` JSON, export errors |
+| `1` | usage error, parse error, generation error, strict-mode block, invalid `--ext-libs` JSON, invalid `--tasks` JSON, unknown program in `--tasks`, export errors |
 
 Workspace and project-style runs return `1` if any file failed, `0` otherwise.
 
@@ -152,6 +177,9 @@ st2cpp --workspace ./plc --project-style --output-dir build
 
 # External libraries (project JSON drives everything)
 st2cpp --workspace . --ext-libs project.json --output-dir generated
+
+# Modular project plus the undoPLC runtime (tasks.json drives the schedule)
+st2cpp --workspace ./plc --project-style --tasks tasks.json --output-dir build
 
 # Export a reusable library descriptor from ST
 st2cpp lib.st --export-descriptor lib.json --lib-id timerlib \

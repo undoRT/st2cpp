@@ -2,28 +2,50 @@
 
 ## Requirements
 
-- Compiler with C++17: GCC ≥ 11, Clang ≥ 15 (or equivalent).
+- Compiler with C++17: GCC ≥ 7, Clang ≥ 5 (or equivalent). undoPLC, the tests
+  and the generated PLC are all C++17.
 - CMake ≥ 3.16.
 - GoogleTest, only when building the test suite (`BUILD_TESTS=ON`).
 
 There are **no other dependencies**: the JSON parser used by the
 external-library subsystem is vendored inside the project (`st2cpp::json`), and
-the generated-code runtime (`undoCore`) is header-only and shipped under
-`st2cpp_includes/`.
+undoPLC (with `undoCore` and the generated-code runtime as its own submodule) is
+shipped under `st2cpp_includes/`.
 
 ## CMake options
 
 | Option | Default | Meaning |
 |--------|---------|---------|
 | `BUILD_TESTS` | `OFF` | Build the GoogleTest suite (`st2cpp_tests`) |
-| `ST2CPP_USE_EXTERNAL_UNDOCORE` | `OFF` | Use a system-installed `undoCore` via `find_package` instead of the submodule |
-| `ST2CPP_BUNDLE_UNDOCORE` | `ON` | Bundle the undoCore headers at install time |
+| `ST2CPP_USE_EXTERNAL_UNDOPLC` | `OFF` | Use an installed undoPLC via `find_package` instead of the submodule |
+| `ST2CPP_BUNDLE_UNDOPLC` | `ON` | Bundle the undoPLC headers **and** `libundoPLC.a` at install time |
+| `ST2CPP_BUNDLE_BOOST` | `OFF` | Also bundle the vendored Boost headers (~190 MB, see below) |
 
-When `ON`, `ST2CPP_USE_EXTERNAL_UNDOCORE` requires `find_package(undoCore)` to
-succeed. Otherwise the build uses the headers under
-`st2cpp_includes/undoCore/include`; if the undoCore CMake project is present it
-is added as a subproject, otherwise the toolchain falls back to header-only
-mode with a warning.
+When `ON`, `ST2CPP_USE_EXTERNAL_UNDOPLC` requires `find_package(undoPLC)` to
+succeed. Otherwise the build uses `st2cpp_includes/undoPLC`, which must be
+initialised recursively:
+
+```bash
+git submodule update --init --recursive
+```
+
+undoPLC is **not** added with `add_subdirectory()`: its CMakeLists resolves its
+own paths through `CMAKE_SOURCE_DIR`, which is the st2cpp root when st2cpp is
+consumed as a subproject and would point at the wrong directories. st2cpp uses
+its headers directly and builds `libundoPLC.a` itself from
+`undoPLC/src/{undoSystem,undoLog,undoTasks}.cpp` (`undoCore` is header-only).
+Note that the installed archive is named `libundoPLC.a`, as undoPLC names it,
+not after the st2cpp target that builds it.
+
+### Boost
+
+`undoLog.hpp` includes `<boost/asio/...>` and `<boost/lockfree/spsc_queue.hpp>`,
+and undoPLC vendors the whole of Boost (~190 MB) for that reason. With
+`ST2CPP_BUNDLE_BOOST=OFF` the installation carries no Boost, so a PLC generated
+from it compiles only where the target system provides a compatible Boost; the
+configure step warns about this. Set `ST2CPP_BUNDLE_BOOST=ON` for a
+self-contained install. The Boost install must include `.ipp` fragments, which
+Boost.Asio `#include`s from its headers.
 
 ## Configure and build
 

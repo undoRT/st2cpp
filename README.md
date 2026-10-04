@@ -37,7 +37,7 @@ nmzip st2cpp-win-x64.zip && st2cpp.exe --help
 
 ### Build Requirements
 
-- C++17 compiler (gcc+ 11 + or clang 15 +)
+- C++17 compiler (GCC ≥ 7, Clang ≥ 5)
 - CMake 3.16 +
 
 - Google Test (for building tests)
@@ -183,6 +183,71 @@ See [`docs/15-library-descriptor-export.md`](docs/15-library-descriptor-export.m
 
 ---
 
+## PLC Tasks and the undoPLC Runtime
+
+`tasks.json` declares **what actually runs, and when**: which cyclic task calls
+which programs, at which cycle, priority and CPU core.
+
+```json
+{
+  "$schemaVersion": "1.0",
+  "tasks": [
+    { "name": "cycle",   "plc": "Line1", "cycle_ms": 10, "priority": 40, "programs": ["MAIN", "Report"] },
+    { "name": "aux",     "plc": "Line1", "cycle_ms": 20, "priority": 45, "programs": ["Control", "MAIN"] },
+    { "name": "watchdog","plc": "Line1", "cycle_ms": 100, "priority": 30 },
+    { "name": "logic",   "plc": "Line2", "cycle_ms": 20, "priority": 40, "programs": ["Control", "Report"] }
+  ]
+}
+```
+
+You pass it to **st2cpp**, not to the generated program:
+
+~~~bash
+st2cpp --workspace ./src --project-style --tasks tasks.json --output-dir generated
+~~~
+
+`--tasks` requires `--workspace` and `--project-style`, because the runtime it
+generates (`Runtime.cpp`) includes the modular project's `Programs.hpp`.
+
+st2cpp turns the configuration into C++ **at transpilation time**: one
+`UndoMasterTaskBase` per distinct `plc`, one `UndoWorkerTaskBase` per task, each
+calling `run()` on its own instances of the listed programs, in the declared
+order. Once compiled, the binary takes **no JSON at runtime** — the schedule is
+baked into the classes. The only runtime flag is `--log2console`, which mirrors
+the undoPLC logger to stdout.
+
+Deriving a Master from its tasks is not free choice — undoPLC drives every Worker
+from a single Master cycle, so the Master runs at the **finest** cycle its tasks
+asked for and one priority **above** all of them:
+
+A task may list **several** programs, and the same program may be listed by
+**several** tasks — it then runs once per task, each with its own instance:
+
+| Task | PLC | Cycle | Priority | Programs |
+| --- | --- | --- | --- | --- |
+| `cycle` | `Line1` | 10 ms | 40 | `MAIN`, `Report` |
+| `aux` | `Line1` | 20 ms | 45 | `Control`, `MAIN` |
+| `watchdog` | `Line1` | 100 ms | 30 | (none) |
+| `logic` | `Line2` | 20 ms | 40 | `Control`, `Report` |
+
+| PLC | Master cycle | Master priority |
+| --- | --- | --- |
+| `Line1` | **10 ms** (fastest of 10/20/100) | **46** (max prio 45 + 1) |
+| `Line2` | **20 ms** | **41** (max prio 40 + 1) |
+
+A task declaring a slower cycle is therefore **not** slowed down — it still runs
+every Master cycle. In the table above `aux` and `watchdog` both run at 10 ms,
+because they share `Line1`'s Master with `cycle`. Compile and link the result against `libundoPLC.a`; running
+it needs isolated CPUs (`isolcpus=`, one per Master plus one per task) and **root**,
+for two reasons: `SCHED_FIFO` thread priorities, and writing the cpufreq governor
+to pin the isolated cores to their nominal frequency. Both are checked at startup
+and both are fatal — a PLC that cannot pin its governor would appear to work while
+its jitter is no longer bounded. Runnable example:
+[`examples/tasks`](examples/tasks). Schema:
+[`docs/16-task-configuration-spec.md`](docs/16-task-configuration-spec.md).
+
+---
+
 ## Documentation
 
 In-repository technical documentation lives in [`docs/`](docs/README.md):
@@ -204,6 +269,7 @@ In-repository technical documentation lives in [`docs/`](docs/README.md):
 | [`13-project-configuration-spec.md`](docs/13-project-configuration-spec.md) | Project Configuration JSON v1.0 spec |
 | [`14-examples.md`](docs/14-examples.md) | Example walkthroughs |
 | [`15-library-descriptor-export.md`](docs/15-library-descriptor-export.md) | Descriptor import (optional bindings) and export (`LibraryDescriptorBuilder`, CLI `--export-descriptor`, ST → JSON) |
+| [`16-task-configuration-spec.md`](docs/16-task-configuration-spec.md) | Task Configuration JSON v1.0 spec, and the undoPLC Master/Worker runtime it generates |
 
 ---
 
@@ -219,6 +285,7 @@ In-repository technical documentation lives in [`docs/`](docs/README.md):
 | `--caseSensitive` | Preserve original case and resolve identifiers case-sensitively. Under `--strict`, a reference whose case differs from the declaration is undeclared, like in C++ (default: IEC 61131-3, case-insensitive) |
 | `--workspace <path>` | Process all .st files in workspace (recursive) |
 | `--ext-libs <file.json>` | Load external libraries listed in the given Project Configuration JSON (`project.json`) |
+| `--tasks <tasks.json>` | Load the Task Configuration JSON and emit the undoPLC runtime (`Runtime.cpp`). Requires `--workspace` and `--project-style` |
 | `--project-style` | Generate modular project structure (separate files for each FB) |
 | `--output-dir <dir>` | Output directory (default: generated) |
 | `--pi-auto` | Auto-detect Process Image sizes (default) |

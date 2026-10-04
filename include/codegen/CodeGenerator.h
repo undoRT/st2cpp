@@ -25,7 +25,9 @@
 #include "codegen/DeclEmitter.h"
 #include "codegen/EmissionContext.h"
 #include "codegen/ProjectEmitter.h"
+#include "codegen/RuntimeEmitter.h"
 #include "semantic/SemanticInfo.h"
+#include "task/TaskConfig.h"
 #include <string>
 #include <vector>
 
@@ -39,6 +41,7 @@ using st2cpp::codegen::GeneratedFile;
 using st2cpp::codegen::GenFileType;
 using st2cpp::codegen::ParameterInfo;
 using st2cpp::codegen::ProjectStyle;
+using st2cpp::codegen::RuntimeEmitter;
 using BuildStructDepType = st2cpp::codegen::BuildStructDepType;
 
 /**
@@ -88,11 +91,23 @@ public:
     */
    void setSemanticInfo(st2cpp::semantic::SemanticInfo* info) { m_ctx.setSemanticInfo(info); }
 
+    /**
+     * @brief Emit the undoPLC runtime translation unit for a task configuration.
+     * @details Consumes the programs declared in `tu` and the tasks of `config`
+     * to produce the Master/Worker classes and the entry point that run them.
+     * Reports a failure (rather than emitting code that will not compile) when a
+     * task names a program the translation unit does not declare. The result is
+     * meant to be emitted alongside a modular project, whose `Programs.hpp` it
+     * includes.
+     */
+    RuntimeEmitter::RuntimeResult generateRuntime(const TranslationUnit& tu, const st2cpp::task::TaskConfig& config);
+
 private:
-   // Declaration order matters: the emitters borrow the context, and each
-   // emitter borrows the ones before it.
-   st2cpp::codegen::EmissionContext m_ctx;
-   st2cpp::codegen::BodyEmitter m_body{m_ctx};
-   st2cpp::codegen::DeclEmitter m_decl{m_ctx, m_body};
-   st2cpp::codegen::ProjectEmitter m_project{m_ctx, m_body, m_decl};
+    // Declaration order matters: the emitters borrow the context, and each
+    // emitter borrows the ones before it.
+    st2cpp::codegen::EmissionContext m_ctx;
+    st2cpp::codegen::BodyEmitter m_body{m_ctx};
+    st2cpp::codegen::DeclEmitter m_decl{m_ctx, m_body};
+    st2cpp::codegen::ProjectEmitter m_project{m_ctx, m_body, m_decl};
+    st2cpp::codegen::RuntimeEmitter m_runtime{m_ctx};
 };

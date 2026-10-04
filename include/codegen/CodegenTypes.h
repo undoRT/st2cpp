@@ -38,7 +38,8 @@ struct CodegenResult
 enum class GenFileType {
    HEADER, // .hpp
    SOURCE, // .cpp
-   MASTER  // aggregator header
+   MASTER, // aggregator header
+   RUNTIME // .cpp, the undoPLC runtime with its entry point
 };
 
 /**

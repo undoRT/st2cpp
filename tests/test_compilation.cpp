@@ -44,13 +44,20 @@ protected:
 
    /**
     * @brief Find the path to the undoCore runtime headers
+    * @details undoCore is no longer a submodule of st2cpp: it reaches the
+    * generated code transitively, as the third-party dependency of the undoPLC
+    * submodule. Both layouts are probed so the tests work either way.
     */
    fs::path findRuntimePath() const
    {
-      std::vector<fs::path> candidates = {fs::current_path().parent_path() / "st2cpp_includes" / "undoCore" / "include",
-                                          fs::current_path() / ".." / ".." / "st2cpp_includes" / "undoCore" / "include",
-                                          fs::current_path() / ".." / "st2cpp_includes" / "undoCore" / "include",
-                                          fs::current_path() / "st2cpp_includes" / "undoCore" / "include"};
+      const fs::path base = fs::current_path();
+      std::vector<fs::path> candidates = {
+         base / "st2cpp_includes" / "undoPLC" / "third_party" / "undoCore" / "include",
+         base / ".." / "st2cpp_includes" / "undoPLC" / "third_party" / "undoCore" / "include",
+         base / ".." / ".." / "st2cpp_includes" / "undoPLC" / "third_party" / "undoCore" / "include",
+         base / "st2cpp_includes" / "undoCore" / "include",
+         base / ".." / "st2cpp_includes" / "undoCore" / "include",
+      };
 
       for (const auto& path : candidates) {
          if (fs::exists(path / "undoCore" / "types.hpp")) {
@@ -58,7 +65,7 @@ protected:
          }
       }
 
-      return fs::current_path().parent_path() / "st2cpp_includes" / "undoCore" / "include";
+      return base / "st2cpp_includes" / "undoPLC" / "third_party" / "undoCore" / "include";
    }
 
    /**

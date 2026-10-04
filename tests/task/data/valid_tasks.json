@@ -1,0 +1,31 @@
+{
+  "tasks": [
+    {
+      "name": "main_cycle",
+      "plc": "Line1",
+      "cycle_ms": 10,
+      "priority": 40,
+      "programs": ["MAIN", "Control"]
+    },
+    {
+      "name": "slow",
+      "plc": "Line1",
+      "cycle_ms": 50,
+      "priority": 50,
+      "cpu_affinity": 5,
+      "programs": ["Control"]
+    },
+    {
+      "name": "safety",
+      "plc": "Line1",
+      "cycle_ms": 10,
+      "priority": 30
+    },
+    {
+      "name": "aux",
+      "plc": "Line2",
+      "cycle_ms": 20,
+      "priority": 40
+    }
+  ]
+}

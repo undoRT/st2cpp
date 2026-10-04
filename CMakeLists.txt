@@ -1,8 +1,13 @@
-cmake_minimum_required(VERSION 3.10)
-project(st2cpp VERSION 0.4.5 LANGUAGES CXX)
+cmake_minimum_required(VERSION 3.16)
+project(st2cpp VERSION 0.5.0 LANGUAGES CXX)
 
 set(CPACK_PACKAGE_LICENSE "GPL-3.0-or-later")
 
+# C++17 across the transpiler, the tests and the generated PLC. undoPLC needed
+# C++20 only for std::latch, which v0.2.2 replaced with UndoLatch, so undoTasks.hpp
+# is C++17 now. The transpiler only ever writes that header name into the output,
+# but sharing one standard across the compiler and its output keeps a single rule
+# for every translation unit.
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -11,32 +16,37 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 #  Options
 # ============================================================================
 option(BUILD_TESTS "Build tests" OFF)
-option(ST2CPP_USE_EXTERNAL_UNDOCORE "Use system undoCore instead of submodule" OFF)
-option(ST2CPP_BUNDLE_UNDOCORE "Bundle undoCore headers in installation" ON)
+option(ST2CPP_USE_EXTERNAL_UNDOPLC "Use an installed undoPLC instead of the submodule" OFF)
+option(ST2CPP_BUNDLE_UNDOPLC "Bundle undoPLC/undoCore headers in the installation" ON)
+# undoPLC vendors all of Boost (~190 MB) because undoLog.hpp needs Boost.Asio.
+# St2cpp never compiles against it, so it is not installed unless asked for.
+option(ST2CPP_BUNDLE_BOOST "Also bundle the vendored Boost headers (large)" OFF)
 
 # ============================================================================
-#  Find or use submodule undoCore
+#  Locate undoPLC (submodule by default) and derive the runtime include path
+#
+#  St2cpp links undoPLC headers only. The undoPLC *library* belongs to the
+#  generated PLC application, which links it itself; the transpiler merely has
+#  to put the headers on the include path so its tests can compile the code it
+#  emits. undoPLC is deliberately not added with add_subdirectory(): its
+#  CMakeLists resolves its own paths through CMAKE_SOURCE_DIR, which is the
+#  st2cpp root when it is consumed as a subproject and would point at the wrong
+#  directories.
 # ============================================================================
-if(ST2CPP_USE_EXTERNAL_UNDOCORE)
-    find_package(undoCore REQUIRED)
-    set(UNDOCORE_INCLUDE_DIR ${undoCore_INCLUDE_DIRS})
-    set(UNDOCORE_FOUND TRUE)
+if(ST2CPP_USE_EXTERNAL_UNDOPLC)
+    find_package(undoPLC REQUIRED)
+    set(UNDOPLC_ROOT_DIR ${undoPLC_ROOT_DIR})
+    set(UNDOPLC_INCLUDE_DIR ${undoPLC_INCLUDE_DIRS})
+    set(UNDOPLC_FOUND TRUE)
 else()
-    # Use submodule
-    set(UNDOCORE_SUBMODULE_DIR ${CMAKE_SOURCE_DIR}/st2cpp_includes/undoCore)
-    
-    if(NOT EXISTS ${UNDOCORE_SUBMODULE_DIR}/CMakeLists.txt)
-        message(WARNING "undoCore submodule not found! Run: git submodule update --init")
-        message(WARNING "Falling back to header-only mode (no undoCore target)")
-        set(UNDOCORE_FOUND FALSE)
-        set(UNDOCORE_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/st2cpp_includes/undoCore/include)
+    set(UNDOPLC_ROOT_DIR ${CMAKE_SOURCE_DIR}/st2cpp_includes/undoPLC)
+    set(UNDOPLC_INCLUDE_DIR ${UNDOPLC_ROOT_DIR}/include)
+
+    if(NOT EXISTS ${UNDOPLC_INCLUDE_DIR}/undoTasks.hpp)
+        message(WARNING "undoPLC submodule not found! Run: git submodule update --init --recursive")
+        set(UNDOPLC_FOUND FALSE)
     else()
-        # Try to use undoCore as a CMake subproject
-        set(UNDOCORE_BUILD_TESTS OFF CACHE BOOL "" FORCE)
-        set(UNDOCORE_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
-        add_subdirectory(${UNDOCORE_SUBMODULE_DIR} ${CMAKE_BINARY_DIR}/undoCore)
-        set(UNDOCORE_FOUND TRUE)
-        set(UNDOCORE_INCLUDE_DIR ${UNDOCORE_SUBMODULE_DIR}/include)
+        set(UNDOPLC_FOUND TRUE)
     endif()
 endif()
 
@@ -44,6 +54,24 @@ endif()
 #  Include directories
 # ============================================================================
 set(ST2CPP_INCLUDE_DIR ${CMAKE_SOURCE_DIR}/include)
+
+# undoCore reaches the generated code transitively through undoPLC, which keeps
+# it as its own submodule, and undoPLC vendors Boost next to it. Both therefore
+# hang off the undoPLC root, whichever way that root was found.
+set(UNDOCORE_INCLUDE_DIR ${UNDOPLC_ROOT_DIR}/third_party/undoCore/include)
+set(UNDOPLC_BOOST_INCLUDE_DIR ${UNDOPLC_ROOT_DIR}/third_party/boost_1_91_0)
+
+# Every directory the emitted code may include from, in include-path order.
+set(ST2CPP_RUNTIME_INCLUDE_DIRS
+    ${ST2CPP_INCLUDE_DIR}
+    ${UNDOPLC_INCLUDE_DIR}
+)
+if(EXISTS ${UNDOCORE_INCLUDE_DIR}/undoCore)
+    list(APPEND ST2CPP_RUNTIME_INCLUDE_DIRS ${UNDOCORE_INCLUDE_DIR})
+endif()
+if(EXISTS ${UNDOPLC_BOOST_INCLUDE_DIR}/boost)
+    list(APPEND ST2CPP_RUNTIME_INCLUDE_DIRS ${UNDOPLC_BOOST_INCLUDE_DIR})
+endif()
 
 # ============================================================================
 #  Compiler flags (conditional for cross-platform support)
@@ -76,6 +104,7 @@ add_library(st2cpp_lib STATIC
     src/parser/ParserStmt.cpp
     src/codegen/CodeGenerator.cpp
     src/codegen/ProjectEmitter.cpp
+    src/codegen/RuntimeEmitter.cpp
     src/codegen/DeclEmitter.cpp
     src/codegen/BodyEmitter.cpp
     src/codegen/SemanticBridge.cpp
@@ -87,8 +116,7 @@ add_library(st2cpp_lib STATIC
 )
 
 target_include_directories(st2cpp_lib PUBLIC
-    ${ST2CPP_INCLUDE_DIR}
-    ${UNDOCORE_INCLUDE_DIR}
+    ${ST2CPP_RUNTIME_INCLUDE_DIRS}
 )
 
 target_compile_options(st2cpp_lib PRIVATE
@@ -107,27 +135,27 @@ add_subdirectory(include/library)
 # Project Configuration module library
 add_subdirectory(include/project)
 
-# If undoCore is available as a CMake target, link it
-if(TARGET undoCore)
-    target_link_libraries(st2cpp_lib PUBLIC undoCore)
-    message(STATUS "undoCore: Linked as CMake target")
-elseif(UNDOCORE_FOUND)
-    # Header-only mode
-    message(STATUS "undoCore: Header-only mode (no CMake target)")
-else()
-    message(WARNING "undoCore: Not found! Some features may not work.")
-endif()
+# Task Configuration module library
+add_subdirectory(include/task)
+
+# The runtime emitter groups tasks by PLC instance (task::groupByPlc), so the
+# transpiler depends on the task module and not only the driver.
+target_link_libraries(st2cpp_lib PUBLIC st2cpp_task)
+
+# undoPLC headers are all the generated runtime needs from this side; the
+# application links the undoPLC library. Threads are required because
+# undoTasks.hpp pulls in <thread> and pthread.h.
+find_package(Threads REQUIRED)
 
 # ============================================================================
 #  CLI executable (main compiler driver)
 # ============================================================================
 add_executable(st2cpp src/cli/main.cpp)
 
-target_link_libraries(st2cpp PRIVATE st2cpp_semantic st2cpp_lib st2cpp_project)
+target_link_libraries(st2cpp PRIVATE st2cpp_semantic st2cpp_lib st2cpp_project st2cpp_task)
 
 target_include_directories(st2cpp PRIVATE
-    ${ST2CPP_INCLUDE_DIR}
-    ${UNDOCORE_INCLUDE_DIR}
+    ${ST2CPP_RUNTIME_INCLUDE_DIRS}
 )
 
 target_compile_options(st2cpp PRIVATE
@@ -187,6 +215,8 @@ if(BUILD_TESTS)
         tests/library/test_cli_export.cpp
         tests/project/test_project_config_loader.cpp
         tests/project/test_project_loader.cpp
+        tests/task/test_task_config_loader.cpp
+        tests/codegen/test_codegen_runtime.cpp
         tests/semantic/test_semantic_library.cpp
         tests/codegen/test_codegen_external_library.cpp
     )
@@ -200,6 +230,9 @@ if(BUILD_TESTS)
     file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/tests/project/data/
      DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/tests/project/data/)
 
+    file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/tests/task/data/
+     DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/tests/task/data/)
+
     # Link libraries
     target_link_libraries(st2cpp_tests
         st2cpp_lib
@@ -207,18 +240,21 @@ if(BUILD_TESTS)
         st2cpp_library
         st2cpp_json
         st2cpp_project
+        st2cpp_task
         GTest::gtest_main
-        # pthread is required on Linux/Unix, included automatically via GTest on Windows
+        # The generated undoPLC runtime compiles in-process (test_compilation.cpp),
+        # so the tests need the same real-time headers and pthread the runtime
+        # application links against.
+        Threads::Threads
     )
 
     # Include directories for tests
     target_include_directories(st2cpp_tests PRIVATE
         ${CMAKE_SOURCE_DIR}
         ${CMAKE_SOURCE_DIR}/src
-        ${CMAKE_SOURCE_DIR}/include
+        ${ST2CPP_RUNTIME_INCLUDE_DIRS}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/helpers
-        ${UNDOCORE_INCLUDE_DIR}
     )
     
     # Compiler options for tests
@@ -289,6 +325,7 @@ if(BUILD_TESTS)
         ST_SAMPLES_DIR="${CMAKE_CURRENT_BINARY_DIR}/tests/st_samples"
         LIBRARY_SAMPLES_DIR="${CMAKE_CURRENT_BINARY_DIR}/tests/library/data"
         PROJECT_SAMPLES_DIR="${CMAKE_CURRENT_BINARY_DIR}/tests/project/data"
+        TASK_SAMPLES_DIR="${CMAKE_CURRENT_BINARY_DIR}/tests/task/data"
     )
     
     # Registra i test con CTest
@@ -310,19 +347,84 @@ install(DIRECTORY include/ DESTINATION include/st2cpp
     PATTERN "*.hpp"
 )
 
-# Install undoCore headers if bundling is enabled
-if(ST2CPP_BUNDLE_UNDOCORE)
-    install(DIRECTORY st2cpp_includes/undoCore/include/ 
-        DESTINATION include/undoCore
+# The generated PLC application includes <undoTasks.hpp> (which pulls in
+# undoCore) and needs Boost.Asio for the logger. Only undoPLC and undoCore are
+# bundled by default; the vendored Boost tree is ~190 MB, so it ships only on
+# request and otherwise the application is expected to provide its own.
+if(ST2CPP_BUNDLE_UNDOPLC)
+    install(DIRECTORY ${UNDOPLC_INCLUDE_DIR}/ DESTINATION include
         FILES_MATCHING
         PATTERN "*.h"
         PATTERN "*.hpp"
     )
-    message(STATUS "undoCore: Will be bundled in installation")
+    if(EXISTS ${UNDOCORE_INCLUDE_DIR}/undoCore)
+        install(DIRECTORY ${UNDOCORE_INCLUDE_DIR}/ DESTINATION include
+            FILES_MATCHING
+            PATTERN "*.h"
+            PATTERN "*.hpp"
+        )
+    endif()
+
+    # Headers alone do not link: the Master/Worker classes the generated
+    # Runtime.cpp derives from are implemented in libundoPLC.a. Build it from
+    # the same sources undoPLC's own CMakeLists uses so an installed st2cpp can
+    # produce a runnable PLC without a second checkout. undoCore is
+    # header-only, so nothing else is needed.
+    if(EXISTS ${UNDOPLC_ROOT_DIR}/src/undoTasks.cpp)
+        add_library(st2cpp_undoplc STATIC
+            ${UNDOPLC_ROOT_DIR}/src/undoSystem.cpp
+            ${UNDOPLC_ROOT_DIR}/src/undoLog.cpp
+            ${UNDOPLC_ROOT_DIR}/src/undoTasks.cpp
+        )
+        target_include_directories(st2cpp_undoplc PUBLIC
+            ${UNDOPLC_INCLUDE_DIR}
+            ${UNDOCORE_INCLUDE_DIR}
+            ${UNDOPLC_BOOST_INCLUDE_DIR}
+        )
+        target_compile_features(st2cpp_undoplc PUBLIC cxx_std_17)
+        set_target_properties(st2cpp_undoplc PROPERTIES
+            CXX_STANDARD 17
+            OUTPUT_NAME undoPLC
+            POSITION_INDEPENDENT_CODE ON
+        )
+        # undoPLC uses std::thread, sched_setaffinity and clock_nanosleep.
+        find_package(Threads REQUIRED)
+        target_link_libraries(st2cpp_undoplc PUBLIC Threads::Threads rt)
+
+        install(TARGETS st2cpp_undoplc
+            ARCHIVE DESTINATION lib
+            LIBRARY DESTINATION lib
+            RUNTIME DESTINATION bin
+        )
+        message(STATUS "undoPLC: static library will be bundled in installation")
+    else()
+        message(WARNING "undoPLC sources not found under ${UNDOPLC_ROOT_DIR}/src: "
+                        "the installation will ship headers only, and generated PLCs "
+                        "will need libundoPLC from elsewhere")
+    endif()
+    message(STATUS "undoPLC: Will be bundled in installation")
 endif()
 
-# Install runtime headers
-install(DIRECTORY st2cpp_includes/ DESTINATION include)
+if(ST2CPP_BUNDLE_BOOST)
+    # Boost.Asio #includes .ipp implementation fragments from its headers
+    # (BOOST_ASIO_SEPARATE_COMPILATION off), so the install has to carry those
+    # too or the generated PLC will not compile against it.
+    install(DIRECTORY ${UNDOPLC_BOOST_INCLUDE_DIR}/ DESTINATION include
+        FILES_MATCHING
+        PATTERN "*.hpp"
+        PATTERN "*.h"
+        PATTERN "*.ipp"
+        PATTERN "*.inc"
+    )
+    message(STATUS "Boost: Will be bundled in installation (large)")
+elseif(EXISTS ${UNDOPLC_BOOST_INCLUDE_DIR}/boost)
+    # undoLog.hpp reaches into Boost.Asio, so a PLC generated from an install
+    # that skips Boost only builds where the target system provides its own.
+    message(WARNING "Boost will NOT be bundled, but undoLog.hpp includes <boost/asio/...>. "
+                    "PLCs generated from this installation need a system-provided Boost "
+                    "(same major version, plus Boost.Lockfree). Re-run with "
+                    "-DST2CPP_BUNDLE_BOOST=ON to ship the vendored tree.")
+endif()
 
 # ============================================================================
 #  CPack - Package generation for distribution
@@ -384,15 +486,23 @@ message(STATUS "  C++ Standard:      C++${CMAKE_CXX_STANDARD}")
 message(STATUS "  Compiler:          ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION}")
 message(STATUS "  Build tests:       ${BUILD_TESTS}")
 message(STATUS "  Install prefix:    ${CMAKE_INSTALL_PREFIX}")
-message(STATUS "  undoCore:          ${UNDOCORE_FOUND}")
-if(UNDOCORE_FOUND AND TARGET undoCore)
-    message(STATUS "  undoCore mode:     CMake target")
-elseif(UNDOCORE_FOUND)
-    message(STATUS "  undoCore mode:     Header-only")
+if(UNDOPLC_FOUND)
+    message(STATUS "  undoPLC:           ${UNDOPLC_INCLUDE_DIR}")
+    if(EXISTS ${UNDOCORE_INCLUDE_DIR}/undoCore)
+        message(STATUS "  undoCore:          ${UNDOCORE_INCLUDE_DIR} (via undoPLC)")
+    else()
+        message(WARNING "  undoCore:          not found — run: git submodule update --init --recursive")
+    endif()
+    if(EXISTS ${UNDOPLC_BOOST_INCLUDE_DIR}/boost)
+        message(STATUS "  Boost:             ${UNDOPLC_BOOST_INCLUDE_DIR}")
+    else()
+        message(WARNING "  Boost:             not found — undoTasks.hpp needs Boost.Asio")
+    endif()
 else()
-    message(STATUS "  undoCore mode:     NOT FOUND")
+    message(WARNING "  undoPLC:           NOT FOUND! Run: git submodule update --init --recursive")
 endif()
-message(STATUS "  Bundle undoCore:   ${ST2CPP_BUNDLE_UNDOCORE}")
+message(STATUS "  Bundle undoPLC:    ${ST2CPP_BUNDLE_UNDOPLC}")
+message(STATUS "  Bundle Boost:      ${ST2CPP_BUNDLE_BOOST}")
 if(DOXYGEN_FOUND)
     message(STATUS "  Documentation:     Enabled")
 else()

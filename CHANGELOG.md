@@ -1,5 +1,68 @@
 # Changelog
 
+## [0.5.0] - 2026-10-04
+
+### Added
+- **Task Configuration** (`tasks.json`, schema v1.0): a new JSON document that
+  declares which cyclic task runs which programs, at which cycle, priority and
+  CPU core. Loaded by `TaskConfigLoader` (`st2cpp_task`, namespace
+  `st2cpp::task`) and selected on the command line with `--tasks`. It is a
+  sibling of the Project Configuration, not a replacement: the Project
+  Configuration says which libraries a project uses, the Task Configuration says
+  what runs when. `$schemaVersion` is optional and defaults to `1.0`, and every
+  violation is collected before the load fails, so one run reports the whole set.
+- **undoPLC runtime generation.** `--tasks` together with `--workspace
+  --project-style` emits an extra `Runtime.cpp`: one `UndoMasterTaskBase` per
+  distinct `plc` value and one `UndoWorkerTaskBase` per task, each calling the
+  `run()` of the programs it lists in the declared order, with its own instance
+  of each of them, the way TwinCAT instantiates a PROGRAM once per calling task.
+  The Master runs at the finest cycle of its tasks and one priority above all of
+  them, so a task that overruns cannot delay the cycle supervising it. `main()`
+  resolves automatic CPU assignment, refuses to start when the machine has fewer
+  isolated CPUs than the configuration needs, and shuts the PLC down gracefully
+  on `SIGINT`/`SIGTERM`. The generated binary accepts `--log2console`.
+- New emitter `RuntimeEmitter` (`src/codegen/RuntimeEmitter.cpp`), reached
+  through the new `CodeGenerator::generateRuntime`, plus `GenFileType::RUNTIME`.
+- Documentation `docs/16-task-configuration-spec.md` (normative schema and the
+  Master/Worker mapping), and updates to `02-architecture.md`,
+  `03-build-and-test.md`, `04-command-line.md`, `07-code-generation.md` and
+  `docs/README.md`.
+- Tests: `tests/task/test_task_config_loader.cpp` (26 cases over 11 fixtures)
+  and `tests/codegen/test_codegen_runtime.cpp` (20 cases).
+- Runnable example `examples/tasks`: one task calling three programs, kept to one
+  Master plus one Worker so it needs only two isolated CPUs and therefore starts
+  on an ordinary development machine. `build.sh` prints the call order and the
+  per-task instances, and a demo-only `trace.cpp` prints the measured invocation
+  rates so the mapping can be checked rather than assumed.
+
+### Changed
+- **undoCore submodule replaced by undoPLC.** `st2cpp_includes/undoCore` is
+  gone; `st2cpp_includes/undoPLC` is the submodule now, and it carries
+  `third_party/undoCore` as its own nested submodule. A single
+  `git submodule update --init --recursive` is enough to get everything.
+  Pinned to undoPLC v0.2.2.
+- **C++17 everywhere** (st2cpp, the tests, the generated code, undoPLC). st2cpp
+  was raised to C++20 only because undoPLC 0.2.1 needed `std::latch`; undoPLC
+  0.2.2 replaces it with `UndoLatch` and drops back to C++17, so nothing here
+  needs C++20 any more. `undoCore` still declares `cxx_std_20` through CMake,
+  which raises consumers even though its headers are C++17 clean.
+- Build options `ST2CPP_USE_EXTERNAL_UNDOPLC`, `ST2CPP_BUNDLE_UNDOPLC` and
+  `ST2CPP_BUNDLE_BOOST` replace the undoCore equivalents. undoPLC is used
+  headers-first rather than through `add_subdirectory()`, because its CMakeLists
+  resolves its own paths through `CMAKE_SOURCE_DIR`, which is the st2cpp root
+  when st2cpp is consumed as a subproject.
+- The installation now bundles `libundoPLC.a` as well as the undoPLC and
+  undoCore headers. Headers alone do not link: the Master and Worker base
+  classes the generated `Runtime.cpp` derives from are implemented in the
+  library, so an install without it could produce code that would not build.
+
+### Fixed
+- The Boost installation filter dropped the `.ipp` implementation fragments
+  that Boost.Asio `#include`s from its headers, so an install with
+  `ST2CPP_BUNDLE_BOOST=ON` still could not compile a generated PLC. Configuring
+  without Boost bundled now warns, instead of shipping an installation whose
+  PLCs only build where the target system happens to provide Boost.
+
 ## [0.4.5] - 2026-09-29
 
 ### Changed

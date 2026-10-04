@@ -1,0 +1,6 @@
+{
+  "tasks": [
+    { "name": "cycle", "plc": "Line1", "cycle_ms": 10, "priority": 40 },
+    { "name": "CYCLE", "plc": "Line1", "cycle_ms": 20, "priority": 40 }
+  ]
+}

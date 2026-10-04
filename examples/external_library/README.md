@@ -37,7 +37,7 @@ cmake -S ../.. -B ../../build
 cmake --build ../../build --target st2cpp
 rm -rf generated
 ../../build/st2cpp --workspace . --output-dir generated --ext-libs project.json
-g++ -std=c++17 -fsyntax-only generated/main.cpp -I generated -I mock -I ../../st2cpp_includes/undoCore/include
+g++ -std=c++20 -fsyntax-only generated/main.cpp -I generated -I mock -I ../../st2cpp_includes/undoPLC/third_party/undoCore/include
 ```
 
 Nota: nessun `main.cpp`/`CMakeLists.txt` nell'esempio — il C++ non viene scritto

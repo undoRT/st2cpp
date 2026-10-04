@@ -21,6 +21,7 @@
 #include "library/LibrarySerializer.h"
 #include "project/ProjectConfigLoader.h"
 #include "project/ProjectLoader.h"
+#include "task/TaskConfigLoader.h"
 #include "version.hpp"
 #include <iostream>
 #include <fstream>
@@ -30,6 +31,7 @@
 #include <cctype>
 #include <set>
 #include <map>
+#include <optional>
 
 namespace fs = std::filesystem;
 
@@ -228,7 +230,7 @@ static void writeGeneratedFiles(const std::vector<GeneratedFile>& files, const s
          }
       }
 
-      std::string extension = (file.type == GenFileType::SOURCE) ? ".cpp" : ".hpp";
+      std::string extension = (file.type == GenFileType::SOURCE || file.type == GenFileType::RUNTIME) ? ".cpp" : ".hpp";
       fullPath += "/" + file.name + extension;
 
       std::ofstream out(fullPath);
@@ -273,6 +275,10 @@ static void printUsage(const char* prog)
                 "                       (default: IEC 61131-3, case-insensitive)\n"
                 "  --workspace <path>   Process all .st files in workspace (recursive)\n"
                 "  --ext-libs <file>    Project JSON listing the external libraries to load\n"
+                "  --tasks <tasks.json> Task configuration: which cyclic task runs which programs.\n"
+                "                       Emits an undoPLC runtime (one Master per PLC instance,\n"
+                "                       one Worker per task) with the modular project. Requires\n"
+                "                       --workspace and --project-style\n"
                 "  --project-style      Generate modular project structure (separate files for each FB)\n"
                 "  --output-dir <dir>   Output directory (default: generated)\n"
                 "  --pi-auto            Auto-detect Process Image sizes (default)\n"
@@ -297,6 +303,8 @@ static void printUsage(const char* prog)
                 "  Single file:     st2cpp counter.st -o counter.cpp\n"
                 "  Workspace:       st2cpp --workspace ./my_plc_project\n"
                 "  Project style:   st2cpp --workspace ./my_plc_project --project-style --output-dir build\n"
+                "  PLC runtime:     st2cpp --workspace ./my_plc_project --project-style \\\n"
+                "                        --tasks tasks.json --output-dir build\n"
                 "  Export library:  st2cpp lib.st --export-descriptor lib.json --lib-id timerlib\n"
                 "                          --lib-name TimerLib --lib-version 1.0.0\n";
 }
@@ -684,6 +692,7 @@ int main(int argc, char* argv[])
    size_t piOutputBytes = 1024;
    size_t piMarkerBytes = 1024;
    std::string extLibsConfig;
+   std::string tasksConfigPath;
    std::string exportDescriptorPath;
    std::string libId, libName, libVersion, libDescription;
    std::vector<std::string> dependencyFlags;
@@ -721,6 +730,8 @@ int main(int argc, char* argv[])
          workspacePath = argv[++i];
       } else if (std::strcmp(argv[i], "--ext-libs") == 0 && i + 1 < argc) {
          extLibsConfig = argv[++i];
+      } else if (std::strcmp(argv[i], "--tasks") == 0 && i + 1 < argc) {
+         tasksConfigPath = argv[++i];
       } else if (std::strcmp(argv[i], "--project-style") == 0) {
          projectStyle = true;
       } else if (std::strcmp(argv[i], "--output-dir") == 0 && i + 1 < argc) {
@@ -786,6 +797,44 @@ int main(int argc, char* argv[])
          std::cout << "External libraries loaded from " << extLibsConfig << ":\n";
          for (const auto& id : libraryRegistry.ids()) {
             std::cout << "  - " << id << "\n";
+         }
+      }
+   }
+
+   // ========================================================================
+   // TASK CONFIGURATION (--tasks <tasks.json>)
+   // Declares which cyclic task runs which programs. The tasks are turned into
+   // an undoPLC runtime (one Master per PLC instance, one Worker per task),
+   // which is emitted together with the modular project it includes.
+   // ========================================================================
+   std::optional<st2cpp::task::TaskConfig> taskConfig;
+   if (!tasksConfigPath.empty()) {
+      if (!workspaceMode || !projectStyle) {
+         std::cerr << "Error: --tasks requires --workspace <path> --project-style: the runtime it generates\n"
+                   << "       includes the modular Programs.hpp, which only a modular project emits.\n";
+         printUsage(argv[0]);
+         return 1;
+      }
+      auto taskRes = st2cpp::task::TaskConfigLoader::fromFile(tasksConfigPath);
+      if (!taskRes.ok()) {
+         std::cerr << "Error: invalid task configuration: " << tasksConfigPath << "\n";
+         for (const auto& err : taskRes.errors) {
+            std::cerr << "  - " << err.toString() << "\n";
+         }
+         return 1;
+      }
+      taskConfig = std::move(*taskRes.config);
+      if (taskConfig->tasks.empty()) {
+         std::cerr << "Warning: " << tasksConfigPath << " declares no task; no runtime will be generated.\n";
+      } else if (verbose) {
+         std::cout << "Task configuration loaded from " << tasksConfigPath << ":\n";
+         for (const auto& group : st2cpp::task::groupByPlc(*taskConfig)) {
+            std::cout << "  PLC '" << group.plc << "': cycle " << group.cycleMs << " ms, master priority " << group.masterPriority << "\n";
+            for (size_t index : group.tasks) {
+               const auto& entry = taskConfig->tasks[index];
+               std::cout << "    - " << entry.name << " (priority " << entry.priority << ", cpu " << entry.cpuAffinity << ", " << entry.programs.size()
+                         << " program(s))\n";
+            }
          }
       }
    }
@@ -1007,6 +1056,21 @@ int main(int argc, char* argv[])
          gen.setProcessImageConfig(piConfig);
          gen.setSemanticInfo(&semanticInfo);
          auto files = gen.generateModularProject(mergedTu, outputDir);
+
+         // The runtime is emitted alongside the modular project: it includes the
+         // Programs.hpp that project just produced.
+         if (taskConfig.has_value() && !taskConfig->tasks.empty()) {
+            auto runtime = gen.generateRuntime(mergedTu, *taskConfig);
+            if (!runtime.ok()) {
+               std::cerr << "Error: cannot generate the PLC runtime from " << tasksConfigPath << "\n";
+               for (const auto& err : runtime.errors) {
+                  std::cerr << "  - " << err << "\n";
+               }
+               return 1;
+            }
+            files.push_back({"Runtime", runtime.content, GenFileType::RUNTIME, ""});
+         }
+
          writeGeneratedFiles(files, outputDir);
 
          std::cout << "\nProject generation complete!\n";
@@ -1017,6 +1081,9 @@ int main(int argc, char* argv[])
          std::cout << "  - FunctionBlocks.hpp (master include)\n";
          std::cout << "  - FunctionBlocks/*.hpp / *.cpp\n";
          std::cout << "  - Programs.hpp / Programs.cpp\n";
+         if (taskConfig.has_value() && !taskConfig->tasks.empty()) {
+            std::cout << "  - Runtime.cpp (undoPLC Master/Worker tasks + main)\n";
+         }
 
       } catch (const std::exception& e) {
          std::cerr << "Generation error: " << e.what() << "\n";
@@ -1207,7 +1274,7 @@ int main(int argc, char* argv[])
       std::cout << "Generated: " << outputHpp << "\n";
       std::cout << "Generated: " << outputCpp << "\n";
       std::cout << "\nTo compile the output:\n";
-      std::cout << "  g++ -std=c++17 -I<path-to-runtime/include> " << outputCpp << " -o your_program\n";
+      std::cout << "  g++ -std=c++20 -I<path-to-runtime/include> " << outputCpp << " -o your_program\n";
 
    } catch (const ParseError& e) {
       printParseError(e);

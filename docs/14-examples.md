@@ -29,8 +29,8 @@ external_library/
 cmake -S <repo> -B <repo>/build -DBUILD_TESTS=OFF
 cmake --build <repo>/build --target st2cpp -j
 <repo>/build/st2cpp --workspace . --output-dir generated --ext-libs project.json -v
-g++ -std=c++17 -fsyntax-only generated/main.cpp -I generated -I mock \
-    -I <repo>/st2cpp_includes/undoCore/include
+g++ -std=c++20 -fsyntax-only generated/main.cpp -I generated -I mock \
+    -I <repo>/st2cpp_includes/undoPLC/third_party/undoCore/include
 ```
 
 Expected successful run:
@@ -58,7 +58,38 @@ Notable generated-code facts (see the example README for the full listing):
   `AVG.get_AVG()` methods on the FB-binding instance;
 - `N := MAX_AI_CHANNELS` → const binding `k_max_ai_channels`.
 
-## 2. Per-feature demos (exploration/legacy)
+## 2. `examples/tasks`
+
+Demonstrates the **PLC runtime** generated from a Task Configuration: one
+undoPLC Master per PLC instance and one Worker per cyclic task, each calling the
+`run()` of the programs `tasks.json` lists. Fully scripted via `build.sh`.
+
+```
+tasks/
+  src/counters.st     # VAR_GLOBAL counters the PROGRAM bodies increment
+  src/motor.st        # FB_Motor
+  src/valve.st        # FB_Valve
+  src/report.st       # FB_Report
+  src/main.st         # PROGRAM MAIN, PROGRAM Control, PROGRAM Report
+  tasks.json          # 1 PLC instance, 1 task calling all three programs
+  trace.cpp           # demo-only observer: prints the counters once a second
+  build.sh            # transpile, compile, link against libundoPLC.a, try to start
+```
+
+The `programs` list holds **several** programs, and `build.sh` prints what the
+Worker calls in declared order and which instances it owns. With one 10 ms task
+calling three programs, all three run at 100/s, which the demo-only `trace.cpp`
+prints once a second so the numbers can be checked rather than assumed.
+
+Kept to one Master and one Worker on purpose: that is two isolated CPUs, the
+minimum that can actually be started, so the example runs on an ordinary
+development machine instead of only on a real-time box. Starting it needs
+isolated CPUs (`isolcpus=`, any two idle cores) and **root**, for `SCHED_FIFO`
+and for pinning the cpufreq governor; the runtime checks both at startup, reports
+exactly what is missing, and refuses to start otherwise.
+See `16-task-configuration-spec.md`.
+
+## 3. Per-feature demos (exploration/legacy)
 
 The remaining folders under `examples/` are per-feature demos produced while
 the pipeline matured; they are not wired into the CMake build and several still
@@ -78,10 +109,11 @@ and build artifacts — git-ignored in part).
 These are kept as documentation-by-example of each feature area. For a
 maintained, reproducible flow prefer:
 
-1. `examples/external_library` (fully scripted via `build.sh`), or
+1. `examples/external_library` and `examples/tasks` (both fully scripted via
+   `build.sh`), or
 2. the GoogleTest integration suites in `tests/`.
 
-## 3. Using the examples as integration tests
+## 4. Using the examples as integration tests
 
 Because example runs compile the generated C++, they act as the project's
 integration proof:

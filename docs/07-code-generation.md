@@ -4,6 +4,17 @@
 `SemanticInfo` into C++17. The public surface is in
 `include/codegen/CodeGenerator.h`.
 
+`CodeGenerator` is a thin facade: it owns the shared `EmissionContext` and the
+emitters, and forwards to them. Each emitter borrows the context (and the
+emitters before it), so their member order in the class is load-bearing.
+
+| Emitter | Source | Produces |
+|---------|--------|----------|
+| `BodyEmitter` | `src/codegen/BodyEmitter.cpp` | expression/statement text |
+| `DeclEmitter` | `src/codegen/DeclEmitter.cpp` | declarations, members, bodies |
+| `ProjectEmitter` | `src/codegen/ProjectEmitter.cpp` | the single-file and modular project layouts |
+| `RuntimeEmitter` | `src/codegen/RuntimeEmitter.cpp` | the undoPLC runtime: Master/Worker classes and `main()` |
+
 ## API
 
 ```cpp
@@ -29,10 +40,27 @@ CodegenResult generateModularProject(const std::vector<TranslationUnit>& units,
                                      const std::string& nsName = "undoCore",
                                      bool upperCaseIdentifiers = true,
                                      const std::string& runtimeHeader = "undoCore/undoCore.hpp");
+
+struct RuntimeResult {
+  bool ok = false;
+  std::string content;         // the whole Runtime.cpp, empty on failure
+  std::vector<std::string> errors;
+};
+
+RuntimeResult generateRuntime(const TranslationUnit& tu,
+                              const st2cpp::task::TaskConfig& config);
 ```
 
-The CLI wraps these two entry points. `generate` is single-file;
-`generateModularProject` is project-style (see below).
+The CLI wraps these entry points. `generate` is single-file;
+`generateModularProject` is project-style; `generateRuntime` is the task-driven
+PLC runtime (see below).
+
+`generateRuntime` returns the runtime as one string rather than
+`GeneratedFile`s because it is a single translation unit by construction: it
+defines `main()`. It is meant to be emitted next to a modular project, whose
+`Programs.hpp` it includes, and it refuses to emit anything when a task names a
+program the translation unit does not declare as a `PROGRAM` POU — reporting
+every offending reference, not just the first.
 
 ## Output shape
 
@@ -90,6 +118,29 @@ The project-style path deep-merges the per-file units, drops duplicate
 declarations, topologically orders FBs (`sem.fbTopoOrder` / base-class and
 interface maps) so that derived classes are declared after their bases, and
 distributes each POU over its own files with a master include per area.
+
+### PLC runtime (`generateRuntime`)
+
+Given a [Task Configuration](16-task-configuration-spec.md) and a translation
+unit with `PROGRAM` POUs, emits `Runtime.cpp`:
+
+```
+st2cpp_generated::Line1_cycle : public UndoWorkerTaskBase   // run() calls its programs
+st2cpp_generated::Line1       : public UndoMasterTaskBase   // owns the cycle
+main()                                                       // starts them, services the logger
+```
+
+- One Worker class per task (`<Plc>_<Task>`), one Master class per distinct
+  `plc`, both in `st2cpp_generated` so they cannot collide with the namespace the
+  ST types are generated into.
+- Each Worker owns its **own** instance of every program it lists, so a program
+  bound to two tasks has independent state in each, as it does in TwinCAT.
+- The Master runs at the finest cycle of its tasks, one priority above all of
+  them.
+- `main()` resolves automatic CPU assignment (undoPLC's Worker constructor
+  takes a core and has no "auto" mode), refuses to start when the machine has
+  fewer isolated CPUs than needed, and installs an `asio::signal_set` for
+  graceful `SIGINT`/`SIGTERM` shutdown on the single non-real-time thread.
 
 ## What the codegen does NOT do
 

@@ -1,0 +1,13 @@
+{
+  "$schemaVersion": "1.0",
+  "tasks": [
+    {
+      "name": "single",
+      "plc": "OnlyPlc",
+      "cycle_ms": 25,
+      "priority": 45,
+      "cpu_affinity": 0,
+      "programs": ["MAIN"]
+    }
+  ]
+}

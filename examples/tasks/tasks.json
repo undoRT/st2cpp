@@ -1,0 +1,13 @@
+{
+  "schema_version": "1.0",
+  "plc_name": "Demo",
+  "tasks": [
+    {
+      "name": "cycle",
+      "plc": "Line1",
+      "cycle_ms": 10,
+      "priority": 40,
+      "programs": ["MAIN", "Control", "Report"]
+    }
+  ]
+}

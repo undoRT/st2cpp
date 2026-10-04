@@ -1,0 +1,5 @@
+{
+  "tasks": [
+    { "name": "cycle", "cycle_ms": 10, "priority": 40 }
+  ]
+}

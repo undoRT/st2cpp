@@ -2,9 +2,9 @@
  * @file CodeGenerator.cpp
  * @brief Facade implementation of the code generator
  * @details `CodeGenerator` is a thin facade: it owns the shared
- * `EmissionContext` and the three emitters, and forwards the public entry
- * points to them. The emission logic lives in `BodyEmitter`, `DeclEmitter` and
- * `ProjectEmitter`.
+ * `EmissionContext` and the emitters, and forwards the public entry
+ * points to them. The emission logic lives in `BodyEmitter`, `DeclEmitter`,
+ * `ProjectEmitter` and `RuntimeEmitter`.
  * @author Salvatore Bamundo
  * @date 2026
  * SPDX-License-Identifier: GPL-3.0-or-later
@@ -25,4 +25,9 @@ CodegenResult CodeGenerator::generate(const TranslationUnit& tu,
 std::vector<GeneratedFile> CodeGenerator::generateModularProject(const TranslationUnit& tu, const std::string& outputDir)
 {
    return m_project.generateModularProject(tu, outputDir);
+}
+
+RuntimeEmitter::RuntimeResult CodeGenerator::generateRuntime(const TranslationUnit& tu, const st2cpp::task::TaskConfig& config)
+{
+   return m_runtime.generate(tu, config);
 }

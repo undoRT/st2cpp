@@ -14,9 +14,9 @@ set(SOURCES_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 # Find dependencies
 # ============================================================================
 
-# Find the undoCore library
+# Find the undoCore headers (carried by the undoPLC submodule)
 set(ST2CPP_INCLUDES_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../st2cpp_includes CACHE PATH "Path to st2cpp_includes")
-set(UNDOCORE_INCLUDE_DIR ${ST2CPP_INCLUDES_DIR}/undoCore/include)
+set(UNDOCORE_INCLUDE_DIR ${ST2CPP_INCLUDES_DIR}/undoPLC/third_party/undoCore/include)
 
 if(EXISTS ${UNDOCORE_INCLUDE_DIR})
     message(STATUS "Found undoCore headers at: ${UNDOCORE_INCLUDE_DIR}")

@@ -12,8 +12,10 @@ pipeline.
 | `st2cpp_json` | `st2cpp::json` | `src/json/JsonValue.cpp` | Minimal self-contained JSON DOM/parser/serializer |
 | `st2cpp_library` | `st2cpp::library` | `src/library/*` | Library Descriptor model, loader, serializer, registry |
 | `st2cpp_project` | `st2cpp::project` | `src/project/*` | Project JSON config loader + library loading |
+| `st2cpp_task` | `st2cpp::task` | `src/task/*` | Task Configuration model + loader, and `groupByPlc()` |
 | `st2cpp_semantic` | `st2cpp::semantic` | `src/semantic/*` | Semantic analysis, symbol table, diagnostics, external-symbol importer |
 | `st2cpp` | — | `src/cli/main.cpp` | The command-line executable |
+| `st2cpp_undoplc` | — | `undoPLC/src/*.cpp` | `libundoPLC.a`, the real-time library the generated PLC links (only with `ST2CPP_BUNDLE_UNDOPLC=ON`) |
 | `st2cpp_tests` | — | `tests/*` | GoogleTest suite (only with `BUILD_TESTS=ON`) |
 
 Target interdependencies (CMake, `PUBLIC` links):
@@ -21,6 +23,7 @@ Target interdependencies (CMake, `PUBLIC` links):
 ```
 st2cpp_json  ◀── st2cpp_library
 st2cpp_library ◀── st2cpp_project
+st2cpp_json  ◀── st2cpp_task ◀── st2cpp_lib   (RuntimeEmitter::generate groups tasks by plc)
 st2cpp_lib + st2cpp_library ◀── st2cpp_semantic
 st2cpp_semantic + st2cpp_lib + st2cpp_project ◀── st2cpp (CLI)
 ```
@@ -38,12 +41,24 @@ include/
   lexer/Token.h  Lexer.h
   parser/Parser.h
   codegen/CodeGenerator.h      # CodegenResult, GeneratedFile, ProcessImageConfig
+            RuntimeEmitter.h    # RuntimeResult (the undoPLC runtime)
+            EmissionContext.h BodyEmitter.h DeclEmitter.h ProjectEmitter.h
+            CodegenTypes.h
   semantic/ SemanticAnalyzer.h SemanticInfo.h SymbolTable.h TypeSystem.h
             DeclVisitor.h BodyVisitor.h Diagnostics.h LibrarySymbolImporter.h
   json/ JsonValue.h
   library/ LibraryDescriptor.h LibraryLoader.h LibraryRegistry.h LibrarySerializer.h
   project/ ProjectConfig.h ProjectConfigLoader.h ProjectLoader.h
+  task/ TaskConfig.h          # TaskEntry, TaskConfig, PlcGroup, groupByPlc()
+        TaskConfigLoader.h    # TaskConfigLoadResult, fromFile/fromString/fromJson
 ```
+
+`include/task` is a self-contained module built by its own
+`add_subdirectory(include/task)` (target `st2cpp_task`), like `include/json`,
+`include/library` and `include/project`. It depends on `st2cpp_json` only: the
+Task Configuration is orthogonal to libraries, projects and the semantic
+analyzer, which is what lets the runtime emitter consume it without dragging the
+rest of the front end in.
 
 ## The AST (`include/ast/AST.h`)
 

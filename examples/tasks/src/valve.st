@@ -1,0 +1,10 @@
+FUNCTION_BLOCK FB_Valve
+VAR_INPUT
+   bOpen : BOOL;
+END_VAR
+VAR_OUTPUT
+   bIsOpen : BOOL;
+END_VAR
+
+bIsOpen := bOpen;
+END_FUNCTION_BLOCK

@@ -87,7 +87,7 @@ Stages:
 ├── src/                      # implementations + CLI (src/cli/main.cpp)
 ├── tests/                    # GoogleTest suite + helpers + fixtures
 ├── examples/                 # runnable examples
-├── st2cpp_includes/undoCore/ # header-only runtime
+├── st2cpp_includes/undoPLC/  # real-time runtime (undoCore is its submodule)
 └── docs/                     # this documentation
 ```
 

@@ -23,7 +23,7 @@ rm -rf generated
 
 echo
 echo "== syntax-check of the generated C++ (mock/ headers + undoCore runtime) =="
-g++ -std=c++17 -fsyntax-only generated/main.cpp \
+g++ -std=c++20 -fsyntax-only generated/main.cpp \
     -I generated -I mock \
-    -I "$REPO/st2cpp_includes/undoCore/include"
+    -I "$REPO/st2cpp_includes/undoPLC/third_party/undoCore/include"
 echo "OK: generated code compiles against mock/ and the undoCore runtime"
