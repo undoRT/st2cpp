@@ -40,12 +40,14 @@
   gone; `st2cpp_includes/undoPLC` is the submodule now, and it carries
   `third_party/undoCore` as its own nested submodule. A single
   `git submodule update --init --recursive` is enough to get everything.
-  Pinned to undoPLC v0.2.2.
-- **C++17 everywhere** (st2cpp, the tests, the generated code, undoPLC). st2cpp
-  was raised to C++20 only because undoPLC 0.2.1 needed `std::latch`; undoPLC
-  0.2.2 replaces it with `UndoLatch` and drops back to C++17, so nothing here
-  needs C++20 any more. `undoCore` still declares `cxx_std_20` through CMake,
-  which raises consumers even though its headers are C++17 clean.
+  Pinned to undoPLC v0.2.3, which carries undoCore v0.2.4.
+- **C++17 everywhere** (st2cpp, the tests, the generated code, undoPLC,
+  undoCore). st2cpp was raised to C++20 only because undoPLC 0.2.1 needed
+  `std::latch`; undoPLC 0.2.2 replaces it with `UndoLatch` and drops back to
+  C++17, so nothing here needs C++20 any more. undoCore never had a C++20
+  construct either, but as an INTERFACE compile feature it still forced
+  consumers up, so undoCore 0.2.4 lowers it to `cxx_std_17` and undoPLC 0.2.3
+  carries it. Verified end to end: `undoTasks.cpp` compiles at `-std=c++17`.
 - Build options `ST2CPP_USE_EXTERNAL_UNDOPLC`, `ST2CPP_BUNDLE_UNDOPLC` and
   `ST2CPP_BUNDLE_BOOST` replace the undoCore equivalents. undoPLC is used
   headers-first rather than through `add_subdirectory()`, because its CMakeLists

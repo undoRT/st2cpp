@@ -2,8 +2,8 @@
 
 ## Requirements
 
-- Compiler with C++17: GCC ≥ 7, Clang ≥ 5 (or equivalent). undoPLC, the tests
-  and the generated PLC are all C++17.
+- Compiler with C++17: GCC ≥ 7, Clang ≥ 5 (or equivalent). undoPLC, undoCore,
+  the tests and the generated PLC are all C++17.
 - CMake ≥ 3.16.
 - GoogleTest, only when building the test suite (`BUILD_TESTS=ON`).
 
