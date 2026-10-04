@@ -118,6 +118,13 @@ none. For the same reason the `[Main] Termination signal ...` line on Ctrl+C
 cannot use the logger: it runs on the `io_context` thread, which never registers
 with it.
 
+One more thing that looks wrong and is not: the `UndoSys: CPU ... locked`
+lines can appear *after* `startup on core ...`, despite carrying earlier
+timestamps. `logRT` writes to a per-thread lock-free queue and the drain order
+is not the timestamp order, so lines from different threads may interleave
+either way. Each thread's own lines stay in order, and the timestamps are the
+authoritative sequence.
+
 Two things in the log are worth checking, because they are the real-time setup
 proving itself: the Master and the Worker land on **different** cores, and no
 watchdog trip or cycle overrun is reported.
