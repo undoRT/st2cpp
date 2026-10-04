@@ -74,14 +74,14 @@ if [ -f /usr/local/lib/libundoPLC.a ]; then
 else
     rm -rf build_undoplc && mkdir -p build_undoplc
     for src in undoSystem undoLog undoTasks; do
-        g++ -std=c++20 -c "${UNC}/src/${src}.cpp" -o "build_undoplc/${src}.o" "${INC[@]}" -pthread
+        g++ -std=c++17 -c "${UNC}/src/${src}.cpp" -o "build_undoplc/${src}.o" "${INC[@]}" -pthread
     done
     ar rcs build_undoplc/libundoPLC.a build_undoplc/*.o
     LIB="$PWD/build_undoplc"
 fi
 
 # trace.cpp is this example's observer, not generated code.
-g++ -std=c++20 -Wall -Wextra $(find generated -name '*.cpp') trace.cpp \
+g++ -std=c++17 -Wall -Wextra -Wpedantic $(find generated -name '*.cpp') trace.cpp \
     "${INC[@]}" -L"$LIB" -lundoPLC -lpthread -lrt -o plc
 echo "OK: plc built"
 
