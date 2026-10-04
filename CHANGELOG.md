@@ -35,6 +35,23 @@
   per-task instances, and a demo-only `trace.cpp` prints the measured invocation
   rates so the mapping can be checked rather than assumed.
 
+- Startup and shutdown reporting moved onto plain stdout/stderr. `logRT` only
+  enqueues into a lock-free queue drained from inside `ioc.run()`, so messages
+  logged before that point were not shown until later and were lost entirely if
+  the program exited first. The PLC summary is the concrete case: it was logged
+  immediately before the isolated-CPU and governor checks, so on a machine that
+  failed either of them you got the error with no context of what was starting.
+
+### Fixed
+- The Ctrl+C path lost its message. `async_wait` runs on the `io_context`
+  thread, which never calls `registerThread()`, and `UndoLog::logRT` returns
+  silently for an unregistered thread, so "Termination signal received" was
+  discarded without a trace even on a clean shutdown. `closeRegistration()` runs
+  before the handler is installed, so that thread cannot be registered either;
+  it now prints to stdout like the rest of `main()`.
+- The decorative startup banner is gone; the `[Main] PLC ...` line already
+  carries the cycle and master priority.
+
 ### Changed
 - **undoCore submodule replaced by undoPLC.** `st2cpp_includes/undoCore` is
   gone; `st2cpp_includes/undoPLC` is the submodule now, and it carries

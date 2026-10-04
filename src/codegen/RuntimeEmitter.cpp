@@ -165,8 +165,7 @@ RuntimeEmitter::RuntimeResult RuntimeEmitter::generate(const TranslationUnit& tu
 
          out << "/**\n"
              << " * @brief Task \"" << entry.name << "\" of PLC \"" << group.plc << "\".\n"
-             << " * @details Cycle is inherited from the Master ("
-             << group.cycleMs << " ms); priority " << entry.priority << ".\n"
+             << " * @details Cycle is inherited from the Master (" << group.cycleMs << " ms); priority " << entry.priority << ".\n"
              << " */\n"
              << "class " << taskClass << " : public UndoWorkerTaskBase\n"
              << "{\n"
@@ -242,10 +241,8 @@ RuntimeEmitter::RuntimeResult RuntimeEmitter::generate(const TranslationUnit& tu
       out << "/**\n"
           << " * @brief PLC instance \"" << group.plc << "\": owns the cycle its tasks share.\n"
           << " * @details undoPLC drives every worker from a single master cycle, so the\n"
-          << " * master runs at the finest cycle any task asked for ("
-          << group.cycleMs << " ms) and strictly\n"
-          << " * above every worker (priority " << group.masterPriority
-          << "), so a task that overruns\n"
+          << " * master runs at the finest cycle any task asked for (" << group.cycleMs << " ms) and strictly\n"
+          << " * above every worker (priority " << group.masterPriority << "), so a task that overruns\n"
           << " * cannot delay the cycle supervising it.\n"
           << " */\n"
           << "class " << plcClass << " : public UndoMasterTaskBase\n"
@@ -358,19 +355,16 @@ RuntimeEmitter::RuntimeResult RuntimeEmitter::generate(const TranslationUnit& tu
        << "   UndoLog& logger = UndoLog::getInstance();\n"
        << "   logger.registerThread();\n"
        << "   logger.init(ioc, logToConsole);\n\n"
-       << "   UndoSys& sys = UndoSys::getInstance();\n\n"
-       << "   std::cout << \"====================================================\" << std::endl;\n"
-       << "   std::cout << \"             st2cpp PLC runtime (undoPLC)          \" << std::endl;\n"
-       << "   std::cout << \"====================================================\" << std::endl;\n\n";
+        << "   // Everything below reports on plain streams, not through UndoLog. logRT only\n"
+        << "   // enqueues into a lock-free queue that processLogs() drains from ioc.run(), so\n"
+        << "   // anything logged before ioc.run() starts is not shown until later, and is lost\n"
+        << "   // entirely if we return from here first. A startup diagnostic that disappears\n"
+        << "   // when the very next check fails is worse than no diagnostic at all.\n"
+        << "   UndoSys& sys = UndoSys::getInstance();\n\n";
 
    for (const task::PlcGroup& group : groups) {
-      out << "   logger.logRT(LogDomain::PLC,\n"
-          << "                LOG_INFO,\n"
-          << "                \"PLC '%s': %zu task(s), cycle %lld ms, master priority %d\",\n"
-          << "                \"" << group.plc << "\",\n"
-          << "                static_cast<size_t>(" << group.tasks.size() << "u),\n"
-          << "                " << group.cycleMs << "LL,\n"
-          << "                " << group.masterPriority << ");\n";
+      out << "   std::cout << \"[Main] PLC '" << group.plc << "': " << group.tasks.size()
+          << " task(s), cycle " << group.cycleMs << " ms, master priority " << group.masterPriority << "\" << std::endl;\n";
    }
    out << "\n";
 
@@ -382,17 +376,17 @@ RuntimeEmitter::RuntimeResult RuntimeEmitter::generate(const TranslationUnit& tu
        << "                << \" are available. Check your GRUB isolcpus= configuration.\" << std::endl;\n"
        << "      return 1;\n"
        << "   }\n\n"
-        << "   // Pinning the governor is what makes the cycle deterministic, so a failure here is\n"
-        << "   // fatal rather than a warning: a PLC running with an unpinned governor would still\n"
-        << "   // appear to work while its jitter is no longer bounded. Root is required to write\n"
-        << "   // cpufreq, which is also why SCHED_FIFO is worth having here.\n"
-        << "   if (sys.setCpuNominalFrequency(isolated) == -1) {\n"
-        << "      std::cerr << \"[ERROR] Cannot pin the isolated CPUs to their nominal frequency.\"\n"
-        << "                << \"\\n          Root is needed to write cpufreq, and without it the cycle\"\n"
-        << "                << \"\\n          jitter is not bounded, so the PLC is not started.\"\n"
-        << "                << std::endl;\n"
-        << "      return 1;\n"
-        << "   }\n\n";
+       << "   // Pinning the governor is what makes the cycle deterministic, so a failure here is\n"
+       << "   // fatal rather than a warning: a PLC running with an unpinned governor would still\n"
+       << "   // appear to work while its jitter is no longer bounded. Root is required to write\n"
+       << "   // cpufreq, which is also why SCHED_FIFO is worth having here.\n"
+       << "   if (sys.setCpuNominalFrequency(isolated) == -1) {\n"
+       << "      std::cerr << \"[ERROR] Cannot pin the isolated CPUs to their nominal frequency.\"\n"
+       << "                << \"\\n          Root is needed to write cpufreq, and without it the cycle\"\n"
+       << "                << \"\\n          jitter is not bounded, so the PLC is not started.\"\n"
+       << "                << std::endl;\n"
+       << "      return 1;\n"
+       << "   }\n\n";
 
    for (const task::PlcGroup& group : groups) {
       const std::string plcClass = sanitize(group.plc);
@@ -419,20 +413,27 @@ RuntimeEmitter::RuntimeResult RuntimeEmitter::generate(const TranslationUnit& tu
        << "   boost::asio::signal_set signals(ioc, SIGINT, SIGTERM);\n"
        << "   signals.async_wait([&](const boost::system::error_code& ec, int signalNumber) {\n"
        << "      if (!ec) {\n"
-       << "         logger.logRT(LogDomain::PLC, LOG_WARNING, \"Termination signal (%d) received. Stopping RT threads...\", signalNumber);\n";
+       << "         // Plain output, not logRT: this handler runs on the io_context thread,\n"
+       << "         // which never called registerThread(). UndoLog::logRT returns silently for\n"
+       << "         // an unregistered thread, so a logRT call here would be discarded without\n"
+       << "         // a trace. closeRegistration() above rules out registering it now.\n"
+       << "         std::cout << \"[Main] Termination signal (\" << signalNumber << \") received. Stopping RT threads...\"\n"
+       << "                   << std::endl;\n";
    for (const task::PlcGroup& group : groups) {
       out << "         plc_" << sanitize(group.plc) << ".stop();\n";
    }
-    out << "         // Undoing the pinning is best effort: reporting it as an error would be\n"
-        << "         // noise on a path that already ran to completion.\n"
-        << "         if (!sys.resetCpuFrequency(isolated)) {\n"
-        << "            std::cerr << \"-> WARNING: Failed to restore the isolated CPUs to powersave.\" << std::endl;\n"
-        << "         }\n"
-        << "         ioc.stop();\n"
+   out << "         // Undoing the pinning is best effort: reporting it as an error would be\n"
+       << "         // noise on a path that already ran to completion. Plain stderr because\n"
+       << "         // this handler is on the unregistered io_context thread.\n"
+       << "         if (!sys.resetCpuFrequency(isolated)) {\n"
+       << "            std::cerr << \"[WARNING] Failed to restore the isolated CPUs to powersave.\" << std::endl;\n"
+       << "         }\n"
+       << "         ioc.stop();\n"
        << "      }\n"
        << "   });\n\n"
        << "   std::cout << \"[Main] Real-time threads running. Press Ctrl+C to stop.\" << std::endl;\n\n"
-       << "   // Blocks here servicing the logger with no polling.\n"
+       << "   // Blocks here servicing the logger with no polling. Nothing logged by an RT\n"
+       << "   // thread is visible until this starts.\n"
        << "   ioc.run();\n\n"
        << "   std::cout << \"[Main] PLC stopped cleanly.\" << std::endl;\n"
        << "   return 0;\n"
@@ -454,7 +455,8 @@ RuntimeEmitter::RuntimeResult RuntimeEmitter::generate(const TranslationUnit& tu
                }
             }
             if (!found) {
-               result.errors.push_back("tasks[" + std::to_string(index) + "].programs: '" + program + "' is not a PROGRAM of this workspace");
+               result.errors.push_back("tasks[" + std::to_string(index) + "].programs: '" + program
+                                       + "' is not a PROGRAM of this workspace");
             }
          }
       }

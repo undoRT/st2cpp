@@ -499,3 +499,42 @@ TEST(CodegenRuntime, TooFewIsolatedCpusIsStillFatal)
    EXPECT_TRUE(has(code, "[ERROR] This PLC needs 2 isolated CPUs but only "));
    EXPECT_TRUE(has(code, "Check your GRUB isolcpus= configuration."));
 }
+
+/**
+ * @brief The startup path reports on plain streams, because logRT would drop it
+ *
+ * @details UndoLog::logRT only enqueues into a lock-free queue that
+ * processLogs() drains from inside ioc.run(). A message logged before
+ * ioc.run() starts is not displayed until later, and is lost for good if
+ * main() returns first, since ~UndoLog() does not drain. A startup diagnostic
+ * that disappears exactly when the next check fails is worse than none.
+ */
+TEST(CodegenRuntime, StartupDiagnosticsDoNotGoThroughTheLogger)
+{
+   const std::string code = generate(makeConfig({task("cycle", "Line1", 10, 40)}));
+
+   // The PLC summary is the message most likely to be swallowed, because the
+   // isolated-CPU and governor checks come right after it and can bail out.
+   EXPECT_TRUE(has(code, "std::cout << \"[Main] PLC 'Line1': 1 task(s), cycle 10 ms, master priority 41\""));
+   EXPECT_FALSE(has(code, "logger.logRT(LogDomain::PLC,\n                LOG_INFO,"));
+}
+
+/**
+ * @brief The shutdown path cannot use logRT either: it runs on a thread that
+ *        was never registered
+ *
+ * @details The async_wait handler executes on the io_context thread, which never
+ * calls registerThread(), and logRT returns silently for an unregistered thread.
+ * closeRegistration() happens before the handler is installed, so registering it
+ * at that point is not possible either. A logRT call there vanishes with no
+ * trace, which is what happened before this was fixed.
+ */
+TEST(CodegenRuntime, ShutdownPathDoesNotUseLogRtOnTheUnregisteredIoThread)
+{
+   const std::string code = generate(makeConfig({task("cycle", "Line1", 10, 40)}));
+
+   EXPECT_TRUE(has(code, "[Main] Termination signal ("));
+   EXPECT_FALSE(has(code, "Termination signal (%d) received"));
+   // The reason is recorded in the generated source so nobody "fixes" it back.
+   EXPECT_TRUE(has(code, "logRT returns silently for"));
+}

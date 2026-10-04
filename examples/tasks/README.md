@@ -108,15 +108,15 @@ number that is *missing* or *halved* — that would mean the `programs` list did
 translate the way you expected, which is the whole point of measuring instead of
 assuming.
 
-Two things in the log look wrong and are not:
-
-- **Timestamps out of order.** `[Main]` lines go to `std::cout` while the rest
-  come from undoPLC's logger, so the two streams interleave freely. The
-  timestamps are the authoritative order, and there they read
-  `createTasks` → governor pinned → Worker start → Master start, which is the
-  correct sequence.
-- **`[Main] Real-time threads running` appearing before the startup lines.** Same
-  cause.
+Startup and shutdown lines are prefixed `[Main]` and go straight to stdout; the
+`undoPLC:` / `undoPRG:` lines come from undoPLC's deferred logger. That split is
+deliberate. `logRT` only enqueues into a lock-free queue that gets drained from
+inside `ioc.run()`, so anything logged before `ioc.run()` starts is not shown
+until later and is **lost for good** if the program exits first — a startup
+diagnostic that vanishes exactly when the next check fails would be worse than
+none. For the same reason the `[Main] Termination signal ...` line on Ctrl+C
+cannot use the logger: it runs on the `io_context` thread, which never registers
+with it.
 
 Two things in the log are worth checking, because they are the real-time setup
 proving itself: the Master and the Worker land on **different** cores, and no
