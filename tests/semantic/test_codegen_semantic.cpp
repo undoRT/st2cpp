@@ -833,7 +833,7 @@ TEST_F(CodegenSemanticTest, ModularExhaustiveSemanticVsLegacyByteIdentical)
    pi.markerBytes = 1024;
    pi.autoDetect = true;
    legacyGen.setProcessImageConfig(pi);
-   auto legacyFiles = legacyGen.generateModularProject(tu, "/tmp/st2cpp_modular_exhaustive_legacy");
+   auto legacyFiles = legacyGen.generateModularProject(tu, "/tmp/st2cpp_modular_exhaustive_legacy", nullptr, true);
 
    // Semantic-driven generateModularProject
    st2cpp::semantic::SemanticAnalyzer analyzer;
@@ -845,16 +845,31 @@ TEST_F(CodegenSemanticTest, ModularExhaustiveSemanticVsLegacyByteIdentical)
    semanticGen.setCaseSensitive(false);
    semanticGen.setProcessImageConfig(pi);
    semanticGen.setSemanticInfo(&info);
-   auto semanticFiles = semanticGen.generateModularProject(tu, "/tmp/st2cpp_modular_exhaustive_semantic");
+   auto semanticFiles = semanticGen.generateModularProject(tu, "/tmp/st2cpp_modular_exhaustive_semantic", nullptr, true);
 
    auto keyOf = [](const GeneratedFile& f) {
       return f.subdir + "::" + f.name + "::" + std::to_string(static_cast<int>(f.type));
    };
 
+   // DiagVars is the one part of the output that is semantic by construction:
+   // there is no symbol table to walk in the legacy run, so it answers with an
+   // empty table while the semantic run reflects the actual variables. It is
+   // asserted separately below and excluded from the byte-equality comparison,
+   // which keeps guarding everything else against semantic/stdout divergence.
+   auto isDiag = [](const GeneratedFile& f) { return f.name == "DiagVars"; };
+
    std::map<std::string, std::string> legacyByKey;
-   for (const auto& f : legacyFiles) legacyByKey[keyOf(f)] = f.content;
+   for (const auto& f : legacyFiles) {
+      if (!isDiag(f)) {
+         legacyByKey[keyOf(f)] = f.content;
+      }
+   }
    std::map<std::string, std::string> semanticByKey;
-   for (const auto& f : semanticFiles) semanticByKey[keyOf(f)] = f.content;
+   for (const auto& f : semanticFiles) {
+      if (!isDiag(f)) {
+         semanticByKey[keyOf(f)] = f.content;
+      }
+   }
 
    ASSERT_EQ(legacyByKey.size(), semanticByKey.size())
        << "legacy file set: " << legacyByKey.size() << ", semantic file set: " << semanticByKey.size();
@@ -867,6 +882,26 @@ TEST_F(CodegenSemanticTest, ModularExhaustiveSemanticVsLegacyByteIdentical)
    for (const auto& [key, semanticContent] : semanticByKey) {
       ASSERT_TRUE(legacyByKey.count(key)) << "semantic run produced extra file: " << key;
    }
+
+   // The diagnostic table needs the semantic analysis: with none attached it is
+   // empty, with one it reflects the declared variables. Each table row carries
+   // exactly one "(uint8_t)undoDiag::NodeKind" marker, so counting markers in
+   // the source file is counting rows.
+   auto countDiagRows = [&](const std::vector<GeneratedFile>& files) {
+      size_t rows = 0;
+      for (const auto& f : files) {
+         if (!isDiag(f) || f.type != GenFileType::SOURCE) {
+            continue;
+         }
+         std::string needle = "(uint8_t)undoDiag::NodeKind";
+         for (size_t at = f.content.find(needle); at != std::string::npos; at = f.content.find(needle, at + needle.size())) {
+            ++rows;
+         }
+      }
+      return rows;
+   };
+   EXPECT_EQ(countDiagRows(legacyFiles), 0u) << "without semantics there is nothing to reflect";
+   EXPECT_GT(countDiagRows(semanticFiles), 0u) << "with semantics the table must list the variables";
 
    // The master FB include order must place the base before every derived FB.
    const int masterT = static_cast<int>(GenFileType::MASTER);

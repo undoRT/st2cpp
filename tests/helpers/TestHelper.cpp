@@ -336,9 +336,13 @@ int TestHelper::compileSource(const std::string& sourcePath, const std::string& 
  * 
  * @param sourceFiles List of source files to compile
  * @param includePath filepath for the headers
+ * @param extraIncludePaths further include directories, appended after includePath
  * @return the result
  */
-int TestHelper::compileSources(const std::vector<std::string>& sourceFiles, const std::string& includePath, bool isCpp20)
+int TestHelper::compileSources(const std::vector<std::string>& sourceFiles,
+                               const std::string& includePath,
+                               bool isCpp20,
+                               const std::vector<std::string>& extraIncludePaths)
 {
    std::string output;
    int result = 0;
@@ -350,6 +354,13 @@ int TestHelper::compileSources(const std::vector<std::string>& sourceFiles, cons
    // Build the command
    std::string cmd;
 
+   auto appendIncludes = [&](const std::string& flag) {
+      cmd += " " + flag + "\"" + includePath + "\"";
+      for (const std::string& extra : extraIncludePaths) {
+         cmd += " " + flag + "\"" + extra + "\"";
+      }
+   };
+
 #ifdef _WIN32
    std::string compiler = findMSVCCompiler();
    if (compiler.empty()) {
@@ -359,11 +370,13 @@ int TestHelper::compileSources(const std::vector<std::string>& sourceFiles, cons
       for (const auto& src : sourceFiles) {
          cmd += " \"" + src + "\"";
       }
-      cmd += " -I\"" + includePath + "\" 2>&1";
+      appendIncludes("-I");
+      cmd += " 2>&1";
       output = runCommand(cmd);
    } else {
       std::string stdFlag = isCpp20 ? "/std:c++20" : "/std:c++17";
-      cmd = "\"" + compiler + "\" /EHsc " + stdFlag + " /I\"" + includePath + "\"";
+      cmd = "\"" + compiler + "\" /EHsc " + stdFlag;
+      appendIncludes("/I");
       for (const auto& src : sourceFiles) {
          cmd += " \"" + src + "\"";
       }
@@ -376,7 +389,8 @@ int TestHelper::compileSources(const std::vector<std::string>& sourceFiles, cons
    for (const auto& src : sourceFiles) {
       cmd += " \"" + src + "\"";
    }
-   cmd += " -I\"" + includePath + "\" 2>&1";
+   appendIncludes("-I");
+   cmd += " 2>&1";
    output = runCommand(cmd);
 #endif
 

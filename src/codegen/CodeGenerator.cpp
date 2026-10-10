@@ -22,12 +22,20 @@ CodegenResult CodeGenerator::generate(const TranslationUnit& tu,
    return m_project.generate(tu, headerName, namespaceName, runtimeHeader, caseSensitive);
 }
 
-std::vector<GeneratedFile> CodeGenerator::generateModularProject(const TranslationUnit& tu, const std::string& outputDir)
+std::vector<GeneratedFile> CodeGenerator::generateModularProject(const TranslationUnit& tu,
+                                                                 const std::string& outputDir,
+                                                                 const st2cpp::task::TaskConfig* config,
+                                                                 bool emitDiagVars)
 {
-   return m_project.generateModularProject(tu, outputDir);
+   return m_project.generateModularProject(tu, outputDir, config, emitDiagVars);
 }
 
 RuntimeEmitter::RuntimeResult CodeGenerator::generateRuntime(const TranslationUnit& tu, const st2cpp::task::TaskConfig& config)
 {
    return m_runtime.generate(tu, config);
+}
+
+st2cpp::codegen::DiagEmitter::DiagFiles CodeGenerator::generateDiag(const st2cpp::task::TaskConfig* config)
+{
+   return m_diag.generate(config);
 }

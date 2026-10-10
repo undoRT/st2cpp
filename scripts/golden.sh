@@ -52,7 +52,10 @@ for src in "${samples[@]}"; do
       modular)
         mkdir -p "$dest/ws"
         cp "$src" "$dest/ws/"
-        args=(--workspace "$dest/ws" --project-style modular --output-dir "$dest/ws/out")
+        # --diag-vars opts the reflection table back in: it is opt-in (DiagVars.cpp
+        # needs undoDiag.hpp and Boost), and without the flag the modular manifest
+        # would silently stop covering it.
+        args=(--workspace "$dest/ws" --project-style --diag-vars --output-dir "$dest/ws/out")
         out="$dest/modular.manifest"
         ;;
     esac

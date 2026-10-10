@@ -8,6 +8,7 @@
  */
 
 #include "codegen/ProjectEmitter.h"
+#include "codegen/DiagEmitter.h"
 #include "semantic/IecTime.h"
 #include <algorithm>
 #include <queue>
@@ -406,10 +407,15 @@ CodegenResult ProjectEmitter::generate(const TranslationUnit& tu,
    return {m_ctx.m_hdr.str(), m_ctx.m_src.str()};
 }
 
-std::vector<GeneratedFile> ProjectEmitter::generateModularProject(const TranslationUnit& tu, const std::string& outputDir)
+std::vector<GeneratedFile> ProjectEmitter::generateModularProject(const TranslationUnit& tu,
+                                                                  const std::string& outputDir,
+                                                                  const st2cpp::task::TaskConfig* config,
+                                                                  bool emitDiagVars)
 {
    m_ctx.m_projectStyle = ProjectStyle::MODULAR;
    m_ctx.m_outputDir = outputDir;
+   m_taskConfig = config;
+   m_emitDiagVars = emitDiagVars;
 
    // Clear internal streams (they won't be used in modular mode)
    m_ctx.m_hdr.str("");
@@ -743,6 +749,22 @@ std::vector<GeneratedFile> ProjectEmitter::generateModular(const TranslationUnit
    // 8. Programs.hpp master
    if (!programNames.empty()) {
       files.push_back({"Programs", generateProgramsMaster(programNames), GenFileType::MASTER, ""});
+   }
+
+   // 9. Diagnostic table: the undoDiag::Node rows plus their JSON manifest. The
+   // emitter walks the semantic symbol table, so without an attached analysis
+   // the result is an empty table - the deterministic answer to "what is there
+   // to reflect?". Emission is opt-in: DiagVars.cpp includes undoDiag.hpp (and
+   // with it Boost), which a project bound for a fieldbus without undoPLC must
+   // not require to build. A task configuration implies diagnostics, because
+   // the generated Runtime.cpp includes DiagVars.hpp and would not compile
+   // without it.
+   if (m_taskConfig != nullptr || m_emitDiagVars) {
+      DiagEmitter diag(m_ctx);
+      const DiagEmitter::DiagFiles diagFiles = diag.generate(m_taskConfig);
+      files.push_back({"DiagVars", diagFiles.header, GenFileType::HEADER, ""});
+      files.push_back({"DiagVars", diagFiles.source, GenFileType::SOURCE, ""});
+      files.push_back({"DiagVars", diagFiles.manifest, GenFileType::JSON, ""});
    }
 
    // Pop global scope

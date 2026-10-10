@@ -36,10 +36,11 @@ struct CodegenResult
  * @brief Type of generated file
  */
 enum class GenFileType {
-   HEADER, // .hpp
-   SOURCE, // .cpp
-   MASTER, // aggregator header
-   RUNTIME // .cpp, the undoPLC runtime with its entry point
+   HEADER,  // .hpp
+   SOURCE,  // .cpp
+   MASTER,  // aggregator header
+   RUNTIME, // .cpp, the undoPLC runtime with its entry point
+   JSON     // .json, the diagnostic table manifest for tooling
 };
 
 /**

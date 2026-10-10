@@ -23,6 +23,7 @@
 #include "codegen/BodyEmitter.h"
 #include "codegen/CodegenTypes.h"
 #include "codegen/DeclEmitter.h"
+#include "codegen/DiagEmitter.h"
 #include "codegen/EmissionContext.h"
 #include "codegen/ProjectEmitter.h"
 #include "codegen/RuntimeEmitter.h"
@@ -67,7 +68,10 @@ public:
                           const std::string& runtimeHeader = "undoCore/types.hpp",
                           bool caseSensitive = false);
 
-   std::vector<GeneratedFile> generateModularProject(const TranslationUnit& tu, const std::string& outputDir);
+   std::vector<GeneratedFile> generateModularProject(const TranslationUnit& tu,
+                                                     const std::string& outputDir,
+                                                     const st2cpp::task::TaskConfig* config = nullptr,
+                                                     bool emitDiagVars = false);
    void setNamespace(const std::string& ns) { m_ctx.setNamespace(ns); }
    void setRuntimeHeader(const std::string& rt) { m_ctx.setRuntimeHeader(rt); }
    /**
@@ -91,7 +95,7 @@ public:
     */
    void setSemanticInfo(st2cpp::semantic::SemanticInfo* info) { m_ctx.setSemanticInfo(info); }
 
-    /**
+   /**
      * @brief Emit the undoPLC runtime translation unit for a task configuration.
      * @details Consumes the programs declared in `tu` and the tasks of `config`
      * to produce the Master/Worker classes and the entry point that run them.
@@ -100,14 +104,26 @@ public:
      * meant to be emitted alongside a modular project, whose `Programs.hpp` it
      * includes.
      */
-    RuntimeEmitter::RuntimeResult generateRuntime(const TranslationUnit& tu, const st2cpp::task::TaskConfig& config);
+   RuntimeEmitter::RuntimeResult generateRuntime(const TranslationUnit& tu, const st2cpp::task::TaskConfig& config);
+
+   /**
+     * @brief Emit the diagnostic node table and manifest for the attached analysis.
+     * @details Walks the semantic symbol table and returns the three texts the
+     * undoDiag runtime and its tooling consume (DiagVars.hpp/.cpp/.json). The
+     * same result is included in the modular project output; this entry point
+     * exists for callers that want the tables without the rest of the project.
+     */
+   st2cpp::codegen::DiagEmitter::DiagFiles generateDiag(const st2cpp::task::TaskConfig* config = nullptr);
 
 private:
-    // Declaration order matters: the emitters borrow the context, and each
-    // emitter borrows the ones before it.
-    st2cpp::codegen::EmissionContext m_ctx;
-    st2cpp::codegen::BodyEmitter m_body{m_ctx};
-    st2cpp::codegen::DeclEmitter m_decl{m_ctx, m_body};
-    st2cpp::codegen::ProjectEmitter m_project{m_ctx, m_body, m_decl};
-    st2cpp::codegen::RuntimeEmitter m_runtime{m_ctx};
+   // Declaration order matters: the emitters borrow the context, and each
+   // emitter borrows the ones before it.
+   st2cpp::codegen::EmissionContext m_ctx;
+   st2cpp::codegen::BodyEmitter m_body{m_ctx};
+   st2cpp::codegen::DeclEmitter m_decl{m_ctx, m_body};
+   st2cpp::codegen::ProjectEmitter m_project{m_ctx, m_body, m_decl};
+   st2cpp::codegen::RuntimeEmitter m_runtime{m_ctx};
+   // A second emitter is fine: the diag tables read the context and write no
+   // state of their own, so they share the run without disturbing the others.
+   st2cpp::codegen::DiagEmitter m_diag{m_ctx};
 };

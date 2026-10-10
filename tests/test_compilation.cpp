@@ -427,6 +427,44 @@ protected:
       fs::create_directories(runtimeDir);
       fs::path runtimeHpp = runtimeDir / "types.hpp";
       TestHelper::writeFile(runtimeHpp.string(), runtimeStub);
+
+      // Minimal undoDiag shape so generated DiagVars.cpp (the reflection table)
+      // compiles against the same stub world as the rest of the generated code.
+      // The real undoDiag.hpp is exercised by test_codegen_diag.cpp instead.
+      const std::string diagStub = R"(
+            #pragma once
+            #include <cstdint>
+            namespace undoDiag {
+            constexpr uint32_t MAX_DIMS = 4;
+            constexpr uint32_t NO_PARENT = 0xFFFFFFFFu;
+            enum class NodeFlags : uint8_t {
+                None = 0, Readable = 1, Writable = 2, Forceable = 4,
+            };
+            enum class NodeKind : uint8_t {
+                Scalar, Array, Struct, Root,
+            };
+            inline constexpr NodeFlags operator|(NodeFlags a, NodeFlags b) {
+                return static_cast<NodeFlags>(static_cast<uint8_t>(a) | static_cast<uint8_t>(b));
+            }
+            struct Node {
+                const char* name;
+                const char* path;
+                uint32_t parent;
+                uint32_t firstChild;
+                uint16_t childCount;
+                uint8_t kind;
+                uint8_t flags;
+                uint8_t dimCount;
+                uint8_t reserved;
+                uint32_t offset;
+                uint32_t size;
+                uint32_t elemSize;
+                int32_t low[MAX_DIMS];
+                int32_t high[MAX_DIMS];
+            };
+            }
+        )";
+      TestHelper::writeFile((m_tempDir / "undoDiag.hpp").string(), diagStub);
    }
 
    /**
@@ -585,7 +623,8 @@ TEST_F(CompilationTest, CompileModularProject)
          dir /= file.subdir;
       }
       fs::create_directories(dir);
-      fs::path fullPath = dir / (file.name + (file.type == GenFileType::SOURCE ? ".cpp" : ".hpp"));
+      const char* ext = file.type == GenFileType::SOURCE ? ".cpp" : (file.type == GenFileType::JSON ? ".json" : ".hpp");
+      fs::path fullPath = dir / (file.name + ext);
       TestHelper::writeFile(fullPath.string(), file.content);
       std::cout << "Generated: " << fullPath.string() << " (type: " << static_cast<int>(file.type) << ")\n";
    }

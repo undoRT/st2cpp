@@ -113,6 +113,7 @@ add_library(st2cpp_lib STATIC
     src/codegen/TypeMapper.cpp
     src/codegen/ProcessImage.cpp
     src/codegen/ScopeManager.cpp
+    src/codegen/DiagEmitter.cpp
 )
 
 target_include_directories(st2cpp_lib PUBLIC
@@ -219,6 +220,7 @@ if(BUILD_TESTS)
         tests/codegen/test_codegen_runtime.cpp
         tests/semantic/test_semantic_library.cpp
         tests/codegen/test_codegen_external_library.cpp
+        tests/codegen/test_codegen_diag.cpp
     )
 
     file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/tests/st_samples/ 
@@ -265,6 +267,10 @@ if(BUILD_TESTS)
     # Path of the CLI binary injected into the CLI integration tests
     target_compile_definitions(st2cpp_tests PRIVATE
         ST2CPP_CLI_PATH="${CMAKE_CURRENT_BINARY_DIR}/st2cpp"
+        # Repo root, so a test that compiles generated code can point the
+        # generated-code compiler at the real undoDiag.hpp and Boost instead of a
+        # hand-written stub (see TestHelper::compileSources).
+        ST2CPP_REPO_ROOT="${CMAKE_CURRENT_SOURCE_DIR}"
     )
     
     # Copy ST sample files to build directory for golden tests.

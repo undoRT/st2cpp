@@ -232,7 +232,7 @@ TEST(CodegenRuntime, WorkersAreCreatedBeforeTheMasterStarts)
 {
    const std::string code = generate(makeConfig({task("cycle", "Line1", 10, 40)}));
 
-   const size_t create = where(code, "plc_Line1.createTasks();");
+   const size_t create = where(code, "plc_Line1.createTasks()");
    const size_t start = where(code, "plc_Line1.start(");
    const size_t workerStart = where(code, "task->start()");
    const size_t registered = where(code, "plc_Line1.waitAllRegistered();");

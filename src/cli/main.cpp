@@ -230,7 +230,12 @@ static void writeGeneratedFiles(const std::vector<GeneratedFile>& files, const s
          }
       }
 
-      std::string extension = (file.type == GenFileType::SOURCE || file.type == GenFileType::RUNTIME) ? ".cpp" : ".hpp";
+      std::string extension = ".hpp";
+      if (file.type == GenFileType::SOURCE || file.type == GenFileType::RUNTIME) {
+         extension = ".cpp";
+      } else if (file.type == GenFileType::JSON) {
+         extension = ".json";
+      }
       fullPath += "/" + file.name + extension;
 
       std::ofstream out(fullPath);
@@ -279,6 +284,10 @@ static void printUsage(const char* prog)
                 "                       Emits an undoPLC runtime (one Master per PLC instance,\n"
                 "                       one Worker per task) with the modular project. Requires\n"
                 "                       --workspace and --project-style\n"
+                "  --diag-vars          Also emit the diagnostics reflection table (DiagVars.hpp,\n"
+                "                       DiagVars.cpp, DiagVars.json) without a task configuration.\n"
+                "                       DiagVars.cpp needs undoDiag.hpp (and Boost), so it is\n"
+                "                       opt-in; --tasks implies it\n"
                 "  --project-style      Generate modular project structure (separate files for each FB)\n"
                 "  --output-dir <dir>   Output directory (default: generated)\n"
                 "  --pi-auto            Auto-detect Process Image sizes (default)\n"
@@ -688,6 +697,7 @@ int main(int argc, char* argv[])
    std::string workspacePath;
    std::string outputDir = "generated";
    bool autoDetectPI = true;
+   bool emitDiagVars = false;
    size_t piInputBytes = 1024;
    size_t piOutputBytes = 1024;
    size_t piMarkerBytes = 1024;
@@ -732,6 +742,8 @@ int main(int argc, char* argv[])
          extLibsConfig = argv[++i];
       } else if (std::strcmp(argv[i], "--tasks") == 0 && i + 1 < argc) {
          tasksConfigPath = argv[++i];
+      } else if (std::strcmp(argv[i], "--diag-vars") == 0) {
+         emitDiagVars = true;
       } else if (std::strcmp(argv[i], "--project-style") == 0) {
          projectStyle = true;
       } else if (std::strcmp(argv[i], "--output-dir") == 0 && i + 1 < argc) {
@@ -1055,7 +1067,7 @@ int main(int argc, char* argv[])
          gen.setCaseSensitive(caseSensitive);
          gen.setProcessImageConfig(piConfig);
          gen.setSemanticInfo(&semanticInfo);
-         auto files = gen.generateModularProject(mergedTu, outputDir);
+         auto files = gen.generateModularProject(mergedTu, outputDir, taskConfig.has_value() ? &*taskConfig : nullptr, emitDiagVars);
 
          // The runtime is emitted alongside the modular project: it includes the
          // Programs.hpp that project just produced.
